@@ -31,8 +31,8 @@
     "component": {
       "bom-ref": "147bd79e3b579842",
       "type": "file",
-      "name": "ailexsi-resonance-studio-v5",
-      "version": "5.0.0"
+      "name": "ailexsi-resonance-studio-v5-5",
+      "version": "5.5.0"
     },
     "properties": [
       {
@@ -193,9 +193,9 @@
     {
       "bom-ref": "6b56aba1e0084168",
       "type": "library",
-      "name": "ailexsi-resonance-studio-v5",
-      "version": "5.0.0",
-      "cpe": "cpe:2.3:a:ailexsi-resonance-studio-v5_project:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*",
+      "name": "ailexsi-resonance-studio-v5-5",
+      "version": "5.5.0",
+      "cpe": "cpe:2.3:a:ailexsi-resonance-studio-v5-5_project:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*",
       "properties": [
         {
           "name": "syft:package:foundBy",
@@ -215,63 +215,63 @@
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance-studio-v5_project:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance-studio-v5-5_project:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance-studio-v5:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance-studio-v5-5:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance-studio-v5:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance-studio-v5-5:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi_resonance_studio_v5:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi_resonance_studio_v5_5:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi_resonance_studio_v5:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi_resonance_studio_v5_5:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance-studio:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance-studio:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance-studio:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance-studio:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi_resonance_studio:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi_resonance_studio:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi_resonance_studio:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi_resonance_studio:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi-resonance:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi-resonance:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi_resonance:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi_resonance:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi_resonance:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi_resonance:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi:ailexsi-resonance-studio-v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi:ailexsi-resonance-studio-v5-5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:cpe23",
-          "value": "cpe:2.3:a:ailexsi:ailexsi_resonance_studio_v5:5.0.0:*:*:*:*:rust:*:*"
+          "value": "cpe:2.3:a:ailexsi:ailexsi_resonance_studio_v5_5:5.5.0:*:*:*:*:rust:*:*"
         },
         {
           "name": "syft:location:0:path",

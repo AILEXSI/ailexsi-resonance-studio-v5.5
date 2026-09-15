@@ -60,7 +60,7 @@ Direct **runtime** (`package.json` `dependencies`), resolved by `npm ci`:
 
 Direct **dev**: `@tauri-apps/cli` 2.11.0 (Apache-2.0 OR MIT), `@types/react` 19.2.18 (MIT), `@types/react-dom` 19.2.5 (MIT), `@vitejs/plugin-react` 5.2.0 (MIT), `jsdom` 26.1.0 (MIT), `typescript` 5.9.3 (Apache-2.0), `vite` 7.3.6 (MIT), `vitest` 3.2.7 (MIT).
 
-cyclonedx-npm reported **147** components, **0** missing license fields. Unusual declared IDs: **MPL-2.0** (mediabunny), **CC-BY-4.0** (caniuse-lite). Remainder GREEN (MIT / ISC / Apache-2.0 / BSD / MIT-0 / Apache-2.0 OR MIT).
+cyclonedx-npm reported **144** components, **0** missing license fields. Unusual declared IDs: **CC-BY-4.0** (caniuse-lite). Remainder GREEN (MIT / ISC / Apache-2.0 / BSD / MIT-0 / Apache-2.0 OR MIT). **mediabunny is absent.** This product does **not** claim MPL FREE.
 
 ## Cargo summary
 
@@ -83,7 +83,7 @@ No RED items verified.
 ## UNKNOWN license metadata
 
 - **Application crate / npm package itself:** no product `LICENSE` file; Cargo workspace `license` field empty. Out of scope for this engineering pass (do not draft the AILEXSI license here).
-- **Secondary-license compatibility of mediabunny:** standard MPL-2.0 text includes an Exhibit B template; this pass did **not** find an attached “Incompatible With Secondary Licenses” notice on installed mediabunny sources. Still not a legal determination.
+- **mediabunny:** removed in V5.5. Historical V5 only. Not a current runtime dependency.
 - **Which dual-license alternative applies** for every OR crate/package: UNKNOWN (not chosen).
 - **Exact Windows link-in of each MPL crate:** tree says they are on the Windows target graph; object-code inclusion is not fully proven without a Windows link map.
 
