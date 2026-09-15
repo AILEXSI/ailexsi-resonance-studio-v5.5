@@ -228,16 +228,26 @@ export class AfeScheduler {
       };
     };
 
-    const pumpThrough = (target: number) => {
-      while (this.nextDecode <= target) {
-        const sample = this.movie.samples[this.nextDecode];
-        if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${this.nextDecode}`);
-        this.decoder.submitEncoded(sample, signal);
-        this.nextDecode += 1;
+    const pumpThrough = async (target: number, requested: number, budgetEnd?: number) => {
+      const phase = this.decoder.currentStallPhase ?? "PUMP_LOOKAHEAD";
+      this.decoder.beginSubmitPhase(phase, this.nextDecode);
+      try {
+        while (this.nextDecode <= target) {
+          if (this.decoder.isStreamReady(requested)) return;
+          const canSubmit = await this.decoder.waitForDecodeCapacity(signal, { budgetEnd, requested });
+          if (this.decoder.isStreamReady(requested)) return;
+          if (!canSubmit) return;
+          const sample = this.movie.samples[this.nextDecode];
+          if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${this.nextDecode}`);
+          this.decoder.submitEncoded(sample, signal);
+          this.nextDecode += 1;
+        }
+      } finally {
+        this.decoder.endSubmitPhase();
       }
     };
 
-    const pump = (requested: number) => {
+    const pump = async (requested: number, budgetEnd?: number) => {
       this.decoder.setStallPhase("PUMP_LOOKAHEAD");
       const target = pumpSubmitEnd({
         requested,
@@ -248,10 +258,10 @@ export class AfeScheduler {
         maxReorderSamples: this.movie.maxReorderSamples,
         pendingOutputCount: this.decoder.pendingOutputCount,
       });
-      pumpThrough(Math.min(target, lastRequired));
+      await pumpThrough(Math.min(target, lastRequired), requested, budgetEnd);
     };
 
-    const pumpMore = (requested: number) => {
+    const pumpMore = async (requested: number, budgetEnd?: number) => {
       this.decoder.setStallPhase("PUMP_LOOKAHEAD");
       const nextRef = nextKeyframeAfter(this.movie, requested);
       const target = pumpMoreSubmitEnd({
@@ -263,7 +273,7 @@ export class AfeScheduler {
         nextRefOrGop: nextRef,
         lastRequested,
       });
-      pumpThrough(Math.min(target, lastRequired));
+      await pumpThrough(Math.min(target, lastRequired), requested, budgetEnd);
     };
 
     const recoverGop = async (requested: number) => {
@@ -284,9 +294,9 @@ export class AfeScheduler {
       this.decoder.bindOrigin(stallExtra(requested));
       this.decoder.restoreOpenedIdentity(requested, this.decoder.chunkTimestampUs(this.movie.samples[requested]!));
       this.decoder.protectSample(requested);
-      pump(requested);
-      pumpMore(requested);
-      if (this.nextDecode <= requested) pumpThrough(requested);
+      await pump(requested);
+      await pumpMore(requested);
+      if (this.nextDecode <= requested) await pumpThrough(requested, requested);
       this.decoder.confirmPtsRegistered(requested, this.decoder.chunkTimestampUs(this.movie.samples[requested]!));
       this.decoder.assertOpenedOwnership(stallExtra(requested));
     };
@@ -320,7 +330,7 @@ export class AfeScheduler {
       const sliceSamples = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
 
       try {
-        pump(idx);
+        await pump(idx, budgetEnd);
       } catch (e) {
         if (!isAfeError(e) || !/key frame/i.test(e.message)) throw e;
         await recoverGop(idx);
@@ -339,7 +349,7 @@ export class AfeScheduler {
       frame = await waitExact(idx, budgetEnd);
       if (!frame) {
         this.decoder.markRecoveryRebuilding([idx]);
-        pumpMore(idx);
+        await pumpMore(idx, budgetEnd);
         this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
         this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
@@ -367,7 +377,7 @@ export class AfeScheduler {
         });
         this.decoder.setStallPhase("PUMP_LOOKAHEAD");
         this.decoder.setPumpSlice(sliceStart, sliceEnd);
-        pumpThrough(sliceEnd);
+        await pumpThrough(sliceEnd, idx, budgetEnd);
         this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
         this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));

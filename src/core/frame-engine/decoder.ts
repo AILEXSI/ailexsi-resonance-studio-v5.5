@@ -7,12 +7,14 @@ import {
   AFE_FLUSH_WATCHDOG_MS,
   AFE_SETTLE_DRAIN_MS,
   classifySampleRole,
+  decodeQueueHighWater,
   emptyStallSnapshot,
   formatStallMessage,
   isTransactionComplete,
   lastRequiredDecodeSample,
   requestedEncodedInvariantHolds,
   mayFinalFlush,
+  maySubmitEncoded,
   nowMs,
   originFromStall,
   requestOwnershipHolds,
@@ -23,6 +25,7 @@ import {
   type AfeStallSnapshot,
   type RequestOwnershipState,
   type SampleRole,
+  type SubmitPhaseTrace,
 } from "./stall";
 import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
 import type { AfeMovie, AfeSample } from "./types";
@@ -96,6 +99,17 @@ export class AfeVideoDecoder {
   private pumpSliceEnd: number | null = null;
   private finalFlushAttempted = false;
   private finalFlushArmed = false;
+  private decodeQueuePeak = 0;
+  private submitsWithoutOutputProgress = 0;
+  private lastOutputProgressTimestamp: number | null = null;
+  private lastDecodedAtSubmit: number | null = null;
+  private backpressureWaitCount = 0;
+  private backpressureBlocked = false;
+  private noMoreSubmission = false;
+  private submitPhaseTraces: SubmitPhaseTrace[] = [];
+  private openSubmitPhase: SubmitPhaseTrace | null = null;
+  private readonly capacityOutputWaiters = new Set<() => void>();
+  private readonly capacityExactWaiters = new Set<() => void>();
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -118,6 +132,15 @@ export class AfeVideoDecoder {
 
   get decodeQueueSize(): number {
     return this.decoder?.decodeQueueSize ?? 0;
+  }
+
+  /** Derived HIGH_WATER — maxReorder + lookahead + B-frame need, never near 125. */
+  get decodeQueueHighWater(): number {
+    return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint);
+  }
+
+  isStreamReady(index: number): boolean {
+    return this.streamReady.has(index);
   }
 
   get currentTransactionId(): number {
@@ -248,6 +271,167 @@ export class AfeVideoDecoder {
   setPumpSlice(start: number, end: number): void {
     this.pumpSliceStart = start;
     this.pumpSliceEnd = end;
+  }
+
+  beginSubmitPhase(phase: AfeStallPhase, submittedFrom: number | null): void {
+    this.openSubmitPhase = {
+      phase,
+      submittedFrom,
+      submittedTo: submittedFrom,
+      decodeQueueStart: this.decodeQueueSize,
+      decodeQueueEnd: this.decodeQueueSize,
+      lastDecodedStart: this.lastVideoFrameTimestamp,
+      lastDecodedEnd: this.lastVideoFrameTimestamp,
+      pausedForCapacity: false,
+      outputProgressed: false,
+    };
+  }
+
+  endSubmitPhase(): void {
+    const open = this.openSubmitPhase;
+    if (!open) return;
+    open.submittedTo = this.lastSubmittedSample;
+    open.decodeQueueEnd = this.decodeQueueSize;
+    open.lastDecodedEnd = this.lastVideoFrameTimestamp;
+    open.outputProgressed = open.lastDecodedEnd !== open.lastDecodedStart;
+    this.submitPhaseTraces.push(open);
+    if (this.submitPhaseTraces.length > 16) this.submitPhaseTraces.shift();
+    this.openSubmitPhase = null;
+  }
+
+  /**
+   * Pause when decodeQueueSize >= HIGH_WATER and there is no output progress.
+   * Resumes on dequeue, VideoFrame output, or exact-PTS resolve.
+   * No busy loop. No arbitrary sleep. No mid-run flush.
+   *
+   * Returns false when the caller must not submit more. Before the first
+   * recreate, that is a stop-for-STEP-C signal (do not 3s-stall). After
+   * recreate, a still-stuck HIGH_WATER queue is a typed AFE_DECODE_STALL.
+   */
+  async waitForDecodeCapacity(
+    signal?: AbortSignal,
+    opts?: { budgetEnd?: number; requested?: number },
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    const high = this.decodeQueueHighWater;
+    this.noteQueuePeak();
+    const requested = opts?.requested;
+    if (requested != null && this.streamReady.has(requested)) return true;
+    const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
+    if (
+      maySubmitEncoded({
+        decodeQueueSize: this.decodeQueueSize,
+        highWater: high,
+        outputProgressed,
+      })
+    ) {
+      this.noMoreSubmission = false;
+      this.backpressureBlocked = false;
+      return true;
+    }
+    this.noMoreSubmission = true;
+    this.backpressureWaitCount += 1;
+    this.backpressureBlocked = true;
+    if (this.openSubmitPhase) this.openSubmitPhase.pausedForCapacity = true;
+    if (this.recreateCount === 0) return false;
+    const tsAtPause = this.lastVideoFrameTimestamp;
+    const deadline = opts?.budgetEnd ?? nowMs() + AFE_DECODE_STALL_MS;
+    const dec = this.decoder;
+    while (this.decodeQueueSize >= high) {
+      throwIfAborted(signal);
+      if (requested != null && this.streamReady.has(requested)) {
+        this.backpressureBlocked = false;
+        this.noMoreSubmission = false;
+        return true;
+      }
+      if (this.lastError) throw this.lastError;
+      const remain = deadline - nowMs();
+      if (remain <= 0) {
+        if (this.lastVideoFrameTimestamp === tsAtPause && this.decodeQueueSize >= high) {
+          this.noMoreSubmission = true;
+          const dump = this.snapshot({
+            sourceSampleRequested: requested ?? this.origin.sourceSampleRequested ?? null,
+            stalledMs: AFE_DECODE_STALL_MS,
+          });
+          const err = new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
+          this.lastError = err;
+          throw err;
+        }
+        this.backpressureBlocked = false;
+        return this.decodeQueueSize < high;
+      }
+      const reason = await this.waitCapacitySignal(dec, signal, remain);
+      if (reason === "exact" || (requested != null && this.streamReady.has(requested))) {
+        this.backpressureBlocked = false;
+        this.noMoreSubmission = false;
+        return true;
+      }
+      if (this.lastVideoFrameTimestamp !== tsAtPause || this.decodeQueueSize < high) {
+        this.noMoreSubmission = false;
+        this.backpressureBlocked = this.decodeQueueSize >= high;
+        if (this.decodeQueueSize < high) return true;
+      }
+    }
+    this.backpressureBlocked = false;
+    this.noMoreSubmission = false;
+    return true;
+  }
+
+  private waitCapacitySignal(
+    dec: VideoDecoder | null,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<"dequeue" | "output" | "exact" | "timeout"> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (reason: "dequeue" | "output" | "exact" | "timeout") => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        dec?.removeEventListener("dequeue", onDequeue);
+        this.capacityOutputWaiters.delete(onOutput);
+        this.capacityExactWaiters.delete(onExact);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(reason);
+      };
+      const onDequeue = () => finish("dequeue");
+      const onOutput = () => finish("output");
+      const onExact = () => finish("exact");
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        dec?.removeEventListener("dequeue", onDequeue);
+        this.capacityOutputWaiters.delete(onOutput);
+        this.capacityExactWaiters.delete(onExact);
+        signal?.removeEventListener("abort", onAbort);
+        reject(abortedError(signal));
+      };
+      const timer = setTimeout(() => finish("timeout"), Math.max(0, timeoutMs));
+      this.capacityOutputWaiters.add(onOutput);
+      this.capacityExactWaiters.add(onExact);
+      dec?.addEventListener("dequeue", onDequeue);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  private noteQueuePeak(): void {
+    const q = this.decodeQueueSize;
+    if (q > this.decodeQueuePeak) this.decodeQueuePeak = q;
+  }
+
+  private notifyCapacityOutput(): void {
+    if (this.capacityOutputWaiters.size === 0) return;
+    const waiters = [...this.capacityOutputWaiters];
+    this.capacityOutputWaiters.clear();
+    for (const fn of waiters) fn();
+  }
+
+  private notifyCapacityExact(): void {
+    if (this.capacityExactWaiters.size === 0) return;
+    const waiters = [...this.capacityExactWaiters];
+    this.capacityExactWaiters.clear();
+    for (const fn of waiters) fn();
   }
 
   markRecoveryRebuilding(indexes?: Iterable<number>): void {
@@ -499,6 +683,16 @@ export class AfeVideoDecoder {
       finalFlushAttempted: extra?.finalFlushAttempted ?? this.finalFlushAttempted,
       finalFlushArmed: extra?.finalFlushArmed ?? this.finalFlushArmed,
       usefulInputExhausted: extra?.usefulInputExhausted ?? usefulExhausted,
+      decodeQueueHighWater: extra?.decodeQueueHighWater ?? this.decodeQueueHighWater,
+      decodeQueuePeak: extra?.decodeQueuePeak ?? this.decodeQueuePeak,
+      submitsWithoutOutputProgress:
+        extra?.submitsWithoutOutputProgress ?? this.submitsWithoutOutputProgress,
+      backpressureWaitCount: extra?.backpressureWaitCount ?? this.backpressureWaitCount,
+      backpressureBlocked: extra?.backpressureBlocked ?? this.backpressureBlocked,
+      noMoreSubmission: extra?.noMoreSubmission ?? this.noMoreSubmission,
+      lastOutputProgressTimestamp:
+        extra?.lastOutputProgressTimestamp ?? this.lastOutputProgressTimestamp,
+      submitPhaseTraces: extra?.submitPhaseTraces ?? [...this.submitPhaseTraces],
     });
   }
 
@@ -587,6 +781,11 @@ export class AfeVideoDecoder {
     this.needsKeyframe = true;
     this.configured = false;
     this.lastSubmittedSample = null;
+    this.lastVideoFrameTimestamp = null;
+    this.lastDecodedAtSubmit = null;
+    this.submitsWithoutOutputProgress = 0;
+    this.backpressureBlocked = false;
+    this.noMoreSubmission = false;
     if (this.decoder) {
       try {
         this.decoder.close();
@@ -639,6 +838,15 @@ export class AfeVideoDecoder {
     this.cancelledSpeculativeSamples = 0;
     this.decodeQueueBeforeCancel = null;
     this.decoderResetForTransactionEnd = false;
+    this.decodeQueuePeak = 0;
+    this.submitsWithoutOutputProgress = 0;
+    this.backpressureWaitCount = 0;
+    this.backpressureBlocked = false;
+    this.noMoreSubmission = false;
+    this.lastOutputProgressTimestamp = null;
+    this.lastDecodedAtSubmit = null;
+    this.submitPhaseTraces = [];
+    this.openSubmitPhase = null;
     if (bounds) {
       this.lastRequestedSample = bounds.lastRequested;
       this.lastRequiredSample = bounds.lastRequiredDecodeSample;
@@ -923,12 +1131,19 @@ export class AfeVideoDecoder {
     if (role === "REQUESTED") this.protectSample(sample.index);
     this.streamPts.push(timestamp, sample.index);
     this.lastSubmittedSample = sample.index;
+    if (this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit) {
+      this.submitsWithoutOutputProgress += 1;
+    } else {
+      this.submitsWithoutOutputProgress = 0;
+      this.lastDecodedAtSubmit = this.lastVideoFrameTimestamp;
+    }
     if (this.openedRequested.has(sample.index) && !this.isResolvedRequested(sample.index)) {
       this.confirmPtsRegistered(sample.index, timestamp);
     }
     try {
       this.decoder.decode(chunk);
       if (sample.isKeyframe) this.needsKeyframe = false;
+      this.noteQueuePeak();
     } catch (e) {
       this.streamPts.deleteIndex(sample.index);
       this.streamPts.mark(sample.index, "ERROR");
@@ -1171,6 +1386,7 @@ export class AfeVideoDecoder {
       this.lastSampleResolved = index;
       const w = this.streamWaiter;
       this.streamWaiter = null;
+      this.notifyCapacityExact();
       w.resolve(frame);
       return true;
     }
@@ -1261,6 +1477,8 @@ export class AfeVideoDecoder {
       return;
     }
     this.lastVideoFrameTimestamp = frame.timestamp;
+    this.lastOutputProgressTimestamp = frame.timestamp;
+    this.notifyCapacityOutput();
     if (this.streamMode) {
       const idx = this.matchStreamIndex(frame.timestamp);
       if (idx != null) {
