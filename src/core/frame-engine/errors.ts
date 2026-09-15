@@ -9,7 +9,7 @@ export class AfeError extends Error {
     super(`${code}: ${message}`);
     this.name = "AfeError";
     this.code = code;
-    this.fallbackSafe = fallbackSafe && code !== "AFE_ABORTED";
+    this.fallbackSafe = fallbackSafe && code !== "AFE_ABORTED" && code !== "AFE_DECODE_STALL";
   }
 }
 

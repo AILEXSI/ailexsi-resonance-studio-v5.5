@@ -30,6 +30,16 @@ export {
   addTimescale,
 } from "./frame-match";
 export {
+  AFE_DECODE_STALL_MS,
+  emptyStallSnapshot,
+  formatStallMessage,
+  legacyPumpSubmitEnd,
+  nowMs,
+  pumpSubmitEnd,
+  streamLookaheadSamples,
+} from "./stall";
+export type { AfeStallSnapshot, PumpSubmitArgs, SampleFate } from "./stall";
+export {
   samplePtsToChunkTimestampUs,
   sampleDurationToChunkDurationUs,
   chunkTimestampUsToTicks,

@@ -122,6 +122,16 @@
           const rrows = await paintRandom(url, rand, file.width ?? 160, file.height ?? 90, file.fps);
           all.push(...rrows.map((r) => ({ ...r, file: file.id, pattern: "random" })));
         }
+        const mid = files.find((f) => f.id.includes("bframe") && (f.gop ?? 0) >= 15);
+        if (mid) {
+          show("mid-GOP Source In " + mid.id);
+          const url = new URL("/" + mid.path, location.origin).href;
+          const start = Math.min(5, (mid.frames ?? 8) - 3);
+          const times = [];
+          for (let i = start; i < start + 8 && i < mid.frames; i++) times.push((i + 0.5) / mid.fps);
+          const rows = await paintBatch(url, times, mid.width ?? 160, mid.height ?? 90, mid.fps, mid.frames);
+          all.push(...rows.map((r) => ({ ...r, file: mid.id, pattern: "source-in-midgop" })));
+        }
         if (wide && typeof VideoDecoder !== "undefined") {
           show("720p B-frame sequential");
           const url = new URL("/" + wide.path, location.origin).href;

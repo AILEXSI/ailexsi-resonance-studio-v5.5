@@ -37,4 +37,17 @@ describe("AFE-04 pixel identity hard gate", () => {
     expect(ev.pixels?.exact).toBe(ev.pixels?.compared);
     expect(ev.pixels?.compared).toBeGreaterThan(0);
   });
+
+  it("AFE-05 evidence stamp if present stays EXACT and not human-proven", () => {
+    const path = "docs/compliance/afe-05-evidence-summary.json";
+    if (!existsSync(path)) return;
+    const ev = JSON.parse(readFileSync(path, "utf8")) as {
+      humanProven?: boolean;
+      pixels?: { compared?: number; exact?: number; wrong?: number; within1?: number };
+    };
+    expect(ev.humanProven).not.toBe(true);
+    expect(ev.pixels?.wrong ?? 0).toBe(0);
+    expect(ev.pixels?.within1 ?? 0).toBe(0);
+    expect(ev.pixels?.exact).toBe(ev.pixels?.compared);
+  });
 });

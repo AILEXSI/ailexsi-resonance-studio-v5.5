@@ -1,6 +1,13 @@
 import { encodeAac, mixJobAudio, probeAac, withTimeout, type AacProbe } from "./audio";
-import { clearFrameSources, getDecoder, sourceTimeSec } from "./frame-source";
-import { AfeError, isAfeError } from "../frame-engine";
+import { clearFrameSources, getDecoder, sourceTimeSec, type DrawableFrame } from "./frame-source";
+import {
+  AfeError,
+  emptyStallSnapshot,
+  formatStallMessage,
+  isAfeError,
+  nowMs,
+} from "../frame-engine";
+import { AFE_DECODE_STALL_MS } from "../frame-engine/stall";
 import { afePerfAdd, afePerfEnabled, afePerfTimeAsync } from "../frame-engine/perf";
 import { validateMp4Ftyp } from "./ftyp";
 import { videoClipAt } from "./job";
@@ -385,11 +392,54 @@ export async function exportWithWebCodecs(
         throw new AfeError("AFE_DECODE_FAILED", `timed out opening ${clip.label}`);
       }
       let k = 0;
+      let lastProgressAt = nowMs();
       try {
-        for await (const sample of decoded.samplesAtTimestamps(timestamps, hooks.signal)) {
+        const frames = decoded.samplesAtTimestamps(timestamps, hooks.signal);
+        const iter = frames[Symbol.asyncIterator]();
+        const exportStallMs = AFE_DECODE_STALL_MS + 2000;
+        while (true) {
+          if (hooks.signal?.aborted) throw new Error("Export aborted");
+          if (encoderError) throw encoderError;
+          const next = iter.next();
+          const step = await new Promise<IteratorResult<DrawableFrame | null>>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              const dump =
+                decoded.stallSnapshot({
+                  exportFrameIndex: run.startIndex + k,
+                  exportTimestampSec: (run.startIndex + k) / job.fps,
+                  sourceClipId: clip.id,
+                  encoderEncodeQueueSize: encoder.encodeQueueSize,
+                  lastProgressUpdateMs: lastProgressAt,
+                  stalledMs: exportStallMs,
+                }) ??
+                emptyStallSnapshot({
+                  exportFrameIndex: run.startIndex + k,
+                  exportTimestampSec: (run.startIndex + k) / job.fps,
+                  sourceClipId: clip.id,
+                  encoderEncodeQueueSize: encoder.encodeQueueSize,
+                  lastProgressUpdateMs: lastProgressAt,
+                  stalledMs: exportStallMs,
+                });
+              console.error("[AFE-05] DECODE STALL", dump);
+              reject(new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false));
+            }, exportStallMs);
+            next.then(
+              (v) => {
+                clearTimeout(timer);
+                resolve(v);
+              },
+              (e) => {
+                clearTimeout(timer);
+                reject(e);
+              },
+            );
+          });
+          if (step.done) break;
+          const sample = step.value;
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           if (encoderError) throw encoderError;
           const i = run.startIndex + k;
+          lastProgressAt = nowMs();
           hooks.onProgress?.({
             percent: Math.round((i / frameCount) * 80) + 8,
             stage: "Encoding H.264",
@@ -413,7 +463,7 @@ export async function exportWithWebCodecs(
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (/abort/i.test(msg) || (isAfeError(e) && e.code === "AFE_ABORTED")) throw e;
+        if (/abort/i.test(msg) || (isAfeError(e) && (e.code === "AFE_ABORTED" || e.code === "AFE_DECODE_STALL"))) throw e;
         if (isAfeError(e)) throw e;
         throw new AfeError("AFE_DECODE_FAILED", msg);
       }

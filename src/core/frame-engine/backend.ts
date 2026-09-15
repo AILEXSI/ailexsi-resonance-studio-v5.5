@@ -93,6 +93,10 @@ class AilexsiOpened implements OpenedFrameSource {
   memoryStats() {
     return this.scheduler.memoryStats();
   }
+
+  stallSnapshot(extra?: Parameters<AfeScheduler["stallSnapshot"]>[0]) {
+    return this.scheduler.stallSnapshot(extra);
+  }
 }
 
 /** Preview / test helper only. Export never opens this path. */

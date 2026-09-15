@@ -86,12 +86,13 @@ describe("AFE typed unsupported / decode errors", () => {
       "AFE_UNSUPPORTED_SAMPLE_TABLE",
       "AFE_DECODE_CONFIG_FAILED",
       "AFE_DECODE_FAILED",
+      "AFE_DECODE_STALL",
       "AFE_ABORTED",
     ];
     for (const code of codes) {
       const err = new AfeError(code as "AFE_ABORTED", "x");
       expect(err.message.startsWith(code)).toBe(true);
-      expect(err.fallbackSafe).toBe(code !== "AFE_ABORTED");
+      expect(err.fallbackSafe).toBe(code !== "AFE_ABORTED" && code !== "AFE_DECODE_STALL");
     }
   });
 });

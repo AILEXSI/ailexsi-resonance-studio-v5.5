@@ -4,6 +4,7 @@ import { AfeError, isAfeError, throwIfAborted } from "./errors";
 import { keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMax } from "./perf";
 import { isMonotonicRun, isPresentationRun, maxDecodeIndex, planDecodeSpan, planSampleIndexes, shouldSplitPresentationRun } from "./plan";
+import { pumpSubmitEnd, streamLookaheadSamples, type AfeStallSnapshot } from "./stall";
 import type { AfeMemoryStats, AfeMovie, AfeSample, DrawableFrame } from "./types";
 
 /** Encoded samples submitted ahead of the next yield so encode can overlap decode.
@@ -94,6 +95,14 @@ export class AfeScheduler {
     return this.cache.stats();
   }
 
+  stallSnapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
+    return this.decoder.snapshot({
+      decodeStartSample: extra?.decodeStartSample ?? null,
+      gopKeyframeStart: extra?.gopKeyframeStart ?? null,
+      ...extra,
+    });
+  }
+
   close(): void {
     this.closed = true;
     this.warm = false;
@@ -165,12 +174,23 @@ export class AfeScheduler {
     afePerfMax("prefetchWindow", PREFETCH);
     await this.ensureForward(indexes[start]!, signal);
     await this.decoder.ensure(signal);
+    this.decoder.setPrefetchHint(PREFETCH);
     this.decoder.beginStream(span.needed, span.decodeStart);
 
+    const lookahead = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
+    afePerfMax("prefetchWindow", lookahead);
+
     const pump = (requested: number) => {
-      const target = Math.min(last, requested + PREFETCH);
+      const target = pumpSubmitEnd({
+        requested,
+        last,
+        nextDecode: this.nextDecode,
+        sampleCount: this.movie.sampleCount,
+        prefetch: PREFETCH,
+        maxReorderSamples: this.movie.maxReorderSamples,
+        pendingOutputCount: this.decoder.pendingOutputCount,
+      });
       while (this.nextDecode <= target) {
-        if (this.nextDecode > requested && this.decoder.pendingOutputCount >= PREFETCH) break;
         const sample = this.movie.samples[this.nextDecode];
         if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${this.nextDecode}`);
         this.decoder.submitEncoded(sample, signal);
@@ -202,27 +222,28 @@ export class AfeScheduler {
           this.decoder.beginStream(span.needed, span.decodeStart);
           pump(idx);
         }
-        // WebCodecs may hold the last submitted sample until another decode()
-        // or flush(). Mid-GOP starts (hard cut / Source In) used to submit
-        // exactly through the first needed index and then wait forever.
-        if (this.nextDecode === idx + 1 && this.nextDecode <= last) {
-          const extra = this.movie.samples[this.nextDecode];
-          if (extra) {
-            this.decoder.submitEncoded(extra, signal);
-            this.nextDecode += 1;
-          }
-        }
         let frame = this.decoder.takeReady(idx);
         if (frame) {
           afePerfCount("readyImmediate");
         } else {
           afePerfCount("framePromiseWaits");
           const t0 = afePerfEnabled() ? performance.now() : 0;
-          if (idx === last || this.decoder.pendingOutputCount === 0) {
+          const inputExhausted =
+            this.nextDecode >= this.movie.sampleCount ||
+            (idx === last && this.nextDecode > last + lookahead);
+          if (idx === last || inputExhausted || this.decoder.pendingOutputCount === 0) {
             await this.decoder.releaseHeld(signal);
             frame = this.decoder.takeReady(idx);
           }
-          if (!frame) frame = await this.decoder.waitReady(idx, signal);
+          if (!frame) {
+            const sample = this.movie.samples[idx]!;
+            frame = await this.decoder.waitReady(idx, signal, {
+              sourceSampleRequested: idx,
+              requestedPtsUs: this.decoder.chunkTimestampUs(sample),
+              gopKeyframeStart: keyframeAtOrBefore(this.movie, idx),
+              decodeStartSample: span.decodeStart,
+            });
+          }
           if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
         }
         if (idx === last && this.decoder.pendingOutputCount > 0) {

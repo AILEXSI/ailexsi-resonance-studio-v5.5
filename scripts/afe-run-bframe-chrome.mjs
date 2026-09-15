@@ -12,6 +12,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.AFE_VITE_PORT || 1424);
 const RECEIVE = Number(process.env.AFE_RECEIVE_PORT || 18768);
 const OUT = process.env.AFE_EVIDENCE || join(root, "docs", "compliance", "afe-04-evidence-summary.json");
+const OUT05 = process.env.AFE_EVIDENCE_05 || join(root, "docs", "compliance", "afe-05-evidence-summary.json");
 const TIMEOUT_MS = Number(process.env.AFE_TIMEOUT_MS || 300000);
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -119,7 +120,9 @@ chrome.stderr.on("data", (d) => {
 try {
   const result = await pending;
   writeFileSync(OUT, JSON.stringify(result, null, 2) + "\n");
+  writeFileSync(OUT05, JSON.stringify({ ...result, afe05: true, humanProven: false }, null, 2) + "\n");
   console.log("wrote", OUT);
+  console.log("wrote", OUT05);
   if (result.error) {
     console.error("harness error", result.error);
     process.exitCode = 1;

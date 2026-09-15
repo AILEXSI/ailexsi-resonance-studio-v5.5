@@ -53,6 +53,33 @@ describe("AFE PTS-keyed frame match (no FIFO identity, no nearest)", () => {
     expect(AFE_MAX_REORDER_READY).toBe(64);
   });
 
+  it("every submitted sample is RESOLVED, DISCARDED_NOT_NEEDED, ERROR, or ABORTED", () => {
+    const map = new PtsIndexMap();
+    map.push(0, 0);
+    map.push(1000, 2);
+    map.push(2000, 1);
+    map.push(2000, 3);
+    expect(map.takeExact(0)).toBe(0);
+    map.mark(0, "RESOLVED");
+    expect(map.takeExact(1000)).toBe(2);
+    map.mark(2, "DISCARDED_NOT_NEEDED");
+    expect(map.fateOf(1)).toBe("PENDING");
+    expect(map.unresolved()).toEqual([1, 3]);
+    expect(map.allTerminal()).toBe(false);
+    const failed = map.failPending("ERROR");
+    expect(failed).toEqual([1, 3]);
+    expect(map.fateOf(0)).toBe("RESOLVED");
+    expect(map.fateOf(2)).toBe("DISCARDED_NOT_NEEDED");
+    expect(map.fateOf(1)).toBe("ERROR");
+    expect(map.fateOf(3)).toBe("ERROR");
+    expect(map.allTerminal()).toBe(true);
+    expect(map.pendingCount()).toBe(0);
+    map.push(3000, 4);
+    map.failPending("ABORTED");
+    expect(map.fateOf(4)).toBe("ABORTED");
+    expect(map.allTerminal()).toBe(true);
+  });
+
   it("pendingCount tracks push/take/delete/clear", () => {
     const map = new PtsIndexMap();
     map.push(1, 0);
