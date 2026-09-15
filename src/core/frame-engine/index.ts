@@ -48,6 +48,7 @@ export {
   hostSafeSourceName,
   isExportTransactionComplete,
   isTransactionComplete,
+  requestedEncodedInvariantHolds,
   isTrueTransactionTail,
   lastRequiredDecodeSample,
   legacyPumpSubmitEnd,

@@ -315,7 +315,7 @@ export class AfeScheduler {
     const exactVideoFrame = async (idx: number): Promise<VideoFrame> => {
       const extra = stallExtra(idx);
       this.decoder.bindOrigin(extra);
-      this.decoder.protectSample(idx);
+      this.decoder.openRequested(idx);
       const budgetEnd = nowMs() + AFE_DECODE_STALL_MS;
       let recovered = false;
 
@@ -380,8 +380,10 @@ export class AfeScheduler {
           continue;
         }
         this.decoder.clearOrigin();
+        this.decoder.openRequested(idx);
         if (idx < this.nextDecode && !this.decoder.knowsSample(idx)) {
           const cached = this.cache.takeClone(idx) ?? (await this.decodeTo(idx, signal));
+          this.decoder.markResolvedRequested(idx);
           afePerfCount("streamPathFrames");
           yield this.wrap(cached, this.movie.samples[idx]!);
           continue;

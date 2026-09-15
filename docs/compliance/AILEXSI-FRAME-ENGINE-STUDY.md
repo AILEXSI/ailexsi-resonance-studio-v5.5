@@ -840,3 +840,21 @@ Cause: requested VIDEO was already terminal. Pump/STEP B treated a missing next 
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner G1–G4 on the production project.  
 **HUMAN-PROVEN: NO**
 
+# AFE-09 — unresolved vs encoded counter contradiction at TRANSACTION_END (V5.5)
+
+Windows AFE-08 EXE: `videoReq/Dec/Enc` 46/46/46, `unresolvedRequested` 10, `decoderResetForTransactionEnd` false, `transactionComplete` false, origin sample 38 PTS 1625000, `lastDecodedTs` 458333, `decodeQueue` 29, `speculativeSubmitted` 0, `lastRequested` 81. AFE-08 COMPLETE (Req==Enc, no waiter) did not fire.
+
+## Cause
+
+Two ledgers. Exporter `videoReq/Dec/Enc` counted completed presentation yields (increment after `iter.next()`). Decoder `unresolvedRequested` counted every planned `requestedIndexes` still PENDING/READY — including lookahead-submitted future samples and GOP-resubmitted already-resolved samples. `lastRequested` is a sample **index** (span.decodeEnd); `videoReq` is a frame **count**. Sample 38 could stay open while Enc already equalled the completed-yield count.
+
+## Fix
+
+One source of truth: opened VIDEO presentation samples (export actually asked). `unresolvedRequested` = opened and not resolved. Increment `videoReq` when the export opens a request, not after yield. GOP resubmit keeps resolved. Enc==Req with leftover `decodeQueue` → COMPLETE + cancel, `decoderResetForTransactionEnd` true, no stall. Open unmatched exact PTS → `unresolved>0` AND Enc < Req; recover or typed stall with origin. `unresolved>0` with Enc==Req is impossible (invariant fails closed). Dump labels `videoReq` as frame-count and `lastRequestedSample` as sample-index.
+
+AFE-07/08 preserved: exact PTS, no null VIDEO yield, no mid-run flush as first recovery, `FINAL_FLUSH` only for unresolved requested at true tail.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest same project (sample 38 / ~70s V1 pocket).  
+**HUMAN-PROVEN: NO**
+

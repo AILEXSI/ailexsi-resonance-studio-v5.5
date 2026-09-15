@@ -517,6 +517,7 @@ export async function exportWithWebCodecs(
         while (true) {
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           if (encoderError) throw encoderError;
+          videoFramesRequested += 1;
           const stallFields = {
             ...stallExtraFromClip(clip, run.startIndex + k),
             videoFramesRequested,
@@ -565,8 +566,10 @@ export async function exportWithWebCodecs(
               },
             );
           });
-          if (step.done) break;
-          videoFramesRequested += 1;
+          if (step.done) {
+            videoFramesRequested -= 1;
+            break;
+          }
           const sample = step.value;
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           if (encoderError) throw encoderError;
