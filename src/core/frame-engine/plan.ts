@@ -1,4 +1,4 @@
-import { keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
+import { decodeOrigin, keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
 import type { AfeMovie } from "./types";
 
 /** One lookup per timestamp. Used by sequential getFramesAt so the hot loop does not search. */
@@ -38,7 +38,7 @@ export function planDecodeSpan(
     if (idx > hi) hi = idx;
   }
   if (hi < 0 || lo === Infinity) return null;
-  const decodeStart = keyframeAtOrBefore(movie, lo);
+  const decodeStart = decodeOrigin(movie, lo);
   const needed = new Uint8Array(hi - decodeStart + 1);
   for (let i = start; i < end; i++) {
     const idx = indexes[i];

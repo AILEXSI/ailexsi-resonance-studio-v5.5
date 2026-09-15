@@ -1,5 +1,7 @@
 /** AILEXSI Frame Engine — export-only frame source types. */
 
+import type { AfeStallSnapshot } from "./stall";
+
 export type FrameSourceBackendId = "ailexsi" | "htmlvideo";
 
 export type AfeErrorCode =
@@ -8,6 +10,7 @@ export type AfeErrorCode =
   | "AFE_UNSUPPORTED_SAMPLE_TABLE"
   | "AFE_DECODE_CONFIG_FAILED"
   | "AFE_DECODE_FAILED"
+  | "AFE_DECODE_STALL"
   | "AFE_ABORTED";
 
 export interface DrawableFrame {
@@ -26,6 +29,7 @@ export interface OpenedFrameSource {
   getFramesAt(timesSec: readonly number[], signal?: AbortSignal): AsyncIterable<DrawableFrame | null>;
   close(): void;
   memoryStats(): AfeMemoryStats;
+  stallSnapshot?(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot;
 }
 
 export interface FrameSourceBackend {

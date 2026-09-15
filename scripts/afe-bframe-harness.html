@@ -107,22 +107,50 @@
 
       try {
         show("loading manifest");
+        await report("/afe-progress", { stage: "start" });
         const manifest = await (await fetch("/tests/fixtures/afe/manifest.json")).json();
-        const files = manifest.files.filter((f) => (f.width ?? 160) <= 160 && (f.id.includes("bframe") || f.id === "afe-cfr-30-g30-2s"));
+        const subset = new URLSearchParams(location.search).get("subset");
+        const hardIds = [
+          "afe-cfr-30-g30-2s",
+          "afe-bframe-30-g30-2s",
+          "afe-bframe-30-g120-4s",
+          "afe-bframe-30-g16-2s-bf4",
+          "afe-bframe-30-g30-2s-bpyramid",
+          "afe-bframe-30-g30-2s-opengop",
+          "afe-bframe-30-g30-2s-closedgop",
+        ];
+        const files = manifest.files.filter((f) => {
+          if ((f.width ?? 160) > 160) return false;
+          if (subset === "afe05") return hardIds.includes(f.id);
+          return f.id.includes("bframe") || f.id === "afe-cfr-30-g30-2s";
+        });
         const wide = manifest.files.find((f) => f.id === "afe-bframe-30-g30-720p-2s");
         const all = [];
         for (const file of files) {
           show("sequential " + file.id);
+          await report("/afe-progress", { stage: "sequential", file: file.id });
           const url = new URL("/" + file.path, location.origin).href;
           const seq = sequentialTimes(file);
           const rows = await paintBatch(url, seq, file.width ?? 160, file.height ?? 90, file.fps, file.frames);
           all.push(...rows.map((r) => ({ ...r, file: file.id, pattern: "sequential" })));
           show("random " + file.id);
-          const rand = randomTimes(file, 40, 0xafe04);
+          await report("/afe-progress", { stage: "random", file: file.id });
+          const rand = randomTimes(file, subset === "afe05" ? 8 : 40, 0xafe04);
           const rrows = await paintRandom(url, rand, file.width ?? 160, file.height ?? 90, file.fps);
           all.push(...rrows.map((r) => ({ ...r, file: file.id, pattern: "random" })));
         }
-        if (wide && typeof VideoDecoder !== "undefined") {
+        const mid = files.find((f) => f.id.includes("bframe") && (f.gop ?? 0) >= 15);
+        if (mid) {
+          show("mid-GOP Source In " + mid.id);
+          await report("/afe-progress", { stage: "source-in-midgop", file: mid.id });
+          const url = new URL("/" + mid.path, location.origin).href;
+          const start = Math.min(5, (mid.frames ?? 8) - 3);
+          const times = [];
+          for (let i = start; i < start + 8 && i < mid.frames; i++) times.push((i + 0.5) / mid.fps);
+          const rows = await paintBatch(url, times, mid.width ?? 160, mid.height ?? 90, mid.fps, mid.frames);
+          all.push(...rows.map((r) => ({ ...r, file: mid.id, pattern: "source-in-midgop" })));
+        }
+        if (wide && typeof VideoDecoder !== "undefined" && subset !== "afe05") {
           show("720p B-frame sequential");
           const url = new URL("/" + wide.path, location.origin).href;
           const seq = sequentialTimes(wide);

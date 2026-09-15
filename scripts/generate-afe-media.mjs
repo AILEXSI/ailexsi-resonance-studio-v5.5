@@ -2,7 +2,7 @@
  * Generate deterministic frame-identity H.264 MP4s for AFE-01.
  * Test-only. Not copied into dist / public / Tauri.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -28,6 +28,11 @@ const SPECS = [
   { id: "afe-bframe-30-g60-4s", fps: 30, seconds: 4, gop: 60, bf: 2, profile: "main" },
   { id: "afe-bframe-30-g15-2s", fps: 30, seconds: 2, gop: 15, bf: 3, profile: "high" },
   { id: "afe-bframe-30-g30-720p-2s", fps: 30, seconds: 2, gop: 30, bf: 2, profile: "main", width: 1280, height: 720 },
+  { id: "afe-bframe-30-g120-4s", fps: 30, seconds: 4, gop: 120, bf: 3, profile: "high" },
+  { id: "afe-bframe-30-g16-2s-bf4", fps: 30, seconds: 2, gop: 16, bf: 4, profile: "high" },
+  { id: "afe-bframe-30-g30-2s-bpyramid", fps: 30, seconds: 2, gop: 30, bf: 3, profile: "high", pyramid: true },
+  { id: "afe-bframe-30-g30-2s-opengop", fps: 30, seconds: 2, gop: 30, bf: 2, profile: "main", openGop: true },
+  { id: "afe-bframe-30-g30-2s-closedgop", fps: 30, seconds: 2, gop: 30, bf: 2, profile: "main", openGop: false },
 ];
 
 function runFfmpeg(args, stdin) {
@@ -63,10 +68,14 @@ async function encodeSpec(spec) {
   const file = join(outDir, `${spec.id}.mp4`);
   const bf = spec.bf ?? 0;
   const profile = spec.profile ?? (bf > 0 ? "main" : "baseline");
-  const x264 =
-    bf > 0
-      ? `keyint=${spec.gop}:min-keyint=${spec.gop}:scenecut=0:bframes=${bf}:b-adapt=0:b-pyramid=0`
-      : `keyint=${spec.gop}:min-keyint=${spec.gop}:scenecut=0`;
+  const x264Parts = [`keyint=${spec.gop}`, `min-keyint=${spec.gop}`, `scenecut=0`];
+  if (bf > 0) {
+    x264Parts.push(`bframes=${bf}`, `b-adapt=0`);
+    x264Parts.push(spec.pyramid ? "b-pyramid=strict" : "b-pyramid=0");
+    if (spec.openGop === true) x264Parts.push("open-gop=1");
+    if (spec.openGop === false) x264Parts.push("open-gop=0");
+  }
+  const x264 = x264Parts.join(":");
   await runFfmpeg(
     [
       "-y",
@@ -238,8 +247,19 @@ function probeKeyframes(file) {
 }
 
 async function main() {
+  const only = new Set(
+    (process.env.AFE_ONLY || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
   const files = [];
+  if (only.size > 0 && existsSync(join(outDir, "manifest.json"))) {
+    const prev = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8"));
+    files.push(...(prev.files || []).filter((f) => !only.has(f.id)));
+  }
   for (const spec of SPECS) {
+    if (only.size > 0 && !only.has(spec.id)) continue;
     const encoded = await encodeSpec(spec);
     const abs = join(outDir, `${spec.id}.mp4`);
     const keyframes = await probeKeyframes(abs);
@@ -263,6 +283,8 @@ async function main() {
       cttsVersion: ctts?.version ?? null,
       cttsUniqueOffsets: ctts?.uniqueOffsets ?? 0,
       nobControl: (encoded.bf ?? 0) === 0,
+      pyramid: Boolean(spec.pyramid),
+      openGop: spec.openGop ?? null,
     });
     console.log(
       "wrote",

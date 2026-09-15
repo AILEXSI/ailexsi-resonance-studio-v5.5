@@ -9,6 +9,7 @@ import {
   AfeError,
   createFrameSourceBackend,
   isAfeError,
+  type AfeStallSnapshot,
   type DrawableFrame,
   type FrameSourceBackendId,
   type OpenedFrameSource,
@@ -26,6 +27,7 @@ export type OpenedDecoder = {
     signal?: AbortSignal,
   ): AsyncIterable<DrawableFrame | null>;
   close(): void;
+  stallSnapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot | null;
 };
 
 let frameSourceBackend: FrameSourceBackendId = "ailexsi";
@@ -70,6 +72,9 @@ function wrapOpened(source: OpenedFrameSource): OpenedDecoder {
     },
     close() {
       source.close();
+    },
+    stallSnapshot(extra?: Partial<AfeStallSnapshot>) {
+      return source.stallSnapshot?.(extra) ?? null;
     },
   };
 }

@@ -1,4 +1,5 @@
 import { AfeError } from "./errors";
+import type { SampleFate } from "./stall";
 
 /**
  * PTS-keyed sample identity for decoded VideoFrames.
@@ -13,6 +14,7 @@ export const AFE_MAX_REORDER_READY = 64;
 
 export class PtsIndexMap {
   private readonly queues = new Map<number, number[]>();
+  private readonly fates = new Map<number, SampleFate>();
   private pending = 0;
 
   push(timestampUs: number, sampleIndex: number): void {
@@ -23,6 +25,7 @@ export class PtsIndexMap {
     }
     q.push(sampleIndex);
     this.pending += 1;
+    this.fates.set(sampleIndex, "PENDING");
   }
 
   /** Exact PTS match only. Undefined = fail closed (do not guess). */
@@ -33,6 +36,55 @@ export class PtsIndexMap {
     this.pending -= 1;
     if (q.length === 0) this.queues.delete(timestampUs);
     return index;
+  }
+
+  mark(sampleIndex: number, fate: Exclude<SampleFate, "PENDING">): void {
+    this.fates.set(sampleIndex, fate);
+  }
+
+  fateOf(sampleIndex: number): SampleFate | undefined {
+    return this.fates.get(sampleIndex);
+  }
+
+  failPending(fate: "ERROR" | "ABORTED"): number[] {
+    const hit: number[] = [];
+    for (const [index, state] of this.fates) {
+      if (state !== "PENDING") continue;
+      this.fates.set(index, fate);
+      hit.push(index);
+    }
+    this.queues.clear();
+    this.pending = 0;
+    return hit;
+  }
+
+  pendingTimestamps(): number[] {
+    return [...this.queues.keys()].sort((a, b) => a - b);
+  }
+
+  pendingIndexes(): number[] {
+    const out: number[] = [];
+    for (const q of this.queues.values()) out.push(...q);
+    return out.sort((a, b) => a - b);
+  }
+
+  unresolved(): number[] {
+    const out: number[] = [];
+    for (const [index, fate] of this.fates) {
+      if (fate === "PENDING") out.push(index);
+    }
+    return out.sort((a, b) => a - b);
+  }
+
+  allTerminal(): boolean {
+    for (const fate of this.fates.values()) {
+      if (fate === "PENDING") return false;
+    }
+    return true;
+  }
+
+  submittedCount(): number {
+    return this.fates.size;
   }
 
   hasIndex(sampleIndex: number): boolean {
@@ -60,6 +112,7 @@ export class PtsIndexMap {
 
   clear(): void {
     this.queues.clear();
+    this.fates.clear();
     this.pending = 0;
   }
 }

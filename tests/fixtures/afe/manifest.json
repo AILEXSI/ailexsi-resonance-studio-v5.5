@@ -482,6 +482,142 @@
       "cttsVersion": 0,
       "cttsUniqueOffsets": 4,
       "nobControl": false
+    },
+    {
+      "id": "afe-bframe-30-g120-4s",
+      "fps": 30,
+      "seconds": 4,
+      "gop": 120,
+      "width": 160,
+      "height": 90,
+      "frames": 120,
+      "path": "tests/fixtures/afe/afe-bframe-30-g120-4s.mp4",
+      "keyframeSec": [
+        0
+      ],
+      "bf": 3,
+      "profile": "high",
+      "bframes": 89,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false,
+      "pyramid": false,
+      "openGop": null
+    },
+    {
+      "id": "afe-bframe-30-g16-2s-bf4",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 16,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g16-2s-bf4.mp4",
+      "keyframeSec": [
+        0,
+        0.533333,
+        1.066667,
+        1.6
+      ],
+      "bf": 4,
+      "profile": "high",
+      "bframes": 44,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 3,
+      "nobControl": false,
+      "pyramid": false,
+      "openGop": null
+    },
+    {
+      "id": "afe-bframe-30-g30-2s-bpyramid",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g30-2s-bpyramid.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ],
+      "bf": 3,
+      "profile": "high",
+      "bframes": 42,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false,
+      "pyramid": true,
+      "openGop": null
+    },
+    {
+      "id": "afe-bframe-30-g30-2s-opengop",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g30-2s-opengop.mp4",
+      "keyframeSec": [
+        1,
+        0
+      ],
+      "bf": 2,
+      "profile": "main",
+      "bframes": 39,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false,
+      "pyramid": false,
+      "openGop": true
+    },
+    {
+      "id": "afe-bframe-30-g30-2s-closedgop",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g30-2s-closedgop.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ],
+      "bf": 2,
+      "profile": "main",
+      "bframes": 38,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false,
+      "pyramid": false,
+      "openGop": false
     }
   ]
 }
