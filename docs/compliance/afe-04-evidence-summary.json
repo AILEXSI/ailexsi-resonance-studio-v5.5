@@ -1,0 +1,29 @@
+{
+  "classification": "AFE-04-PIXEL-EXACT",
+  "humanProven": false,
+  "pixels": {
+    "compared": 620,
+    "exact": 620,
+    "within1": 0,
+    "wrong": 0,
+    "snap": 0,
+    "substitution": 0,
+    "counts": {
+      "EXACT": 620,
+      "WITHIN 1 FRAME": 0,
+      ">1 FRAME ERROR": 0,
+      "UNKNOWN": 0
+    }
+  },
+  "files": [
+    "afe-cfr-30-g30-2s",
+    "afe-bframe-30-g30-2s",
+    "afe-bframe-30-g30-2s-ctts-v1",
+    "afe-bframe-30-g60-4s",
+    "afe-bframe-30-g15-2s"
+  ],
+  "environment": {
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+    "webCodecs": true
+  }
+}

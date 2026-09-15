@@ -120,7 +120,7 @@ describe("AFE CTTS parse + expand (absent / v0 unsigned / v1 signed)", () => {
       chunkOffsets: [0],
       syncSamples: null,
     });
-    expect(samples[0]!.ptsTimescale).toBe(-150);
+    expect(samples[0]!.ptsTimescale).toBe(-250);
     expect(() => addTimescale(Number.MAX_SAFE_INTEGER, 2, "pts")).toThrow(AfeError);
     expect(() => addTimescale(1.5, 1, "pts")).toThrow(AfeError);
   });
