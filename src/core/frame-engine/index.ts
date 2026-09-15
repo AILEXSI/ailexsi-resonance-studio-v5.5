@@ -4,6 +4,7 @@ export {
   parseCtts,
   sampleIndexAtTime,
   keyframeAtOrBefore,
+  nextKeyframeAfter,
   decodeOrigin,
   isOpenGopAtKey,
   nearestKeyframeIndex,
@@ -35,19 +36,26 @@ export {
 } from "./frame-match";
 export {
   AFE_DECODE_STALL_MS,
+  AFE_FLUSH_WATCHDOG_MS,
   AFE_SETTLE_DRAIN_MS,
   AFE_STALL_NUDGE_MS,
   AFE_STALL_NUDGE_WAIT_MS,
+  AFE_WAIT_EXACT_PTS_MS,
   emptyStallSnapshot,
   formatStallMessage,
   hostSafeSourceName,
+  isTrueTransactionTail,
   legacyPumpSubmitEnd,
   nowMs,
+  originFromStall,
+  pumpMoreSubmitEnd,
   pumpSubmitEnd,
   requestedPtsIsPending,
+  requestedVideoFateLegal,
+  REQUESTED_VIDEO_FATES,
   streamLookaheadSamples,
 } from "./stall";
-export type { AfeDumpPictureKind, AfeStallSnapshot, PumpSubmitArgs, SampleFate } from "./stall";
+export type { AfeDumpPictureKind, AfeStallPhase, AfeStallSnapshot, PumpMoreArgs, PumpSubmitArgs, SampleFate } from "./stall";
 export {
   samplePtsToChunkTimestampUs,
   sampleDurationToChunkDurationUs,

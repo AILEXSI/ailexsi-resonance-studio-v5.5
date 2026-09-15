@@ -4,14 +4,15 @@ import { AFE_MAX_REORDER_READY, PtsIndexMap } from "./frame-match";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMarkDecoded, afePerfMax, afePerfProbeInstalled } from "./perf";
 import {
   AFE_DECODE_STALL_MS,
+  AFE_FLUSH_WATCHDOG_MS,
   AFE_SETTLE_DRAIN_MS,
-  AFE_STALL_NUDGE_MS,
-  AFE_STALL_NUDGE_WAIT_MS,
   emptyStallSnapshot,
   formatStallMessage,
   nowMs,
+  originFromStall,
   requestedPtsIsPending,
   streamLookaheadSamples,
+  type AfeStallPhase,
   type AfeStallSnapshot,
 } from "./stall";
 import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
@@ -21,10 +22,11 @@ import { sampleBytes } from "./mp4-reader";
 type FrameWaiter = { resolve: (frame: VideoFrame) => void; reject: (e: Error) => void };
 
 export type AwaitReadyHooks = {
-  /** After the one nudge flush, resubmit from the keyframe if WebCodecs demands it. */
-  onNeedsKeyframe?: () => void | Promise<void>;
-  /** Yield null when later presentation indexes are already ready (Shape R hole). */
+  /** Yield null when later presentation indexes are already ready (test-only hole). */
   allowSkip?: boolean;
+  /** Return null instead of throwing when the wait budget expires. */
+  throwOnTimeout?: boolean;
+  timeoutMs?: number;
 };
 
 export class AfeVideoDecoder {
@@ -32,6 +34,7 @@ export class AfeVideoDecoder {
   /** PTS(us) → waiter queue (duplicate timestamps stay FIFO within that PTS). */
   private waiters = new Map<number, FrameWaiter[]>();
   private generation = 0;
+  private transactionId = 0;
   private closed = false;
   private lastError: Error | null = null;
   private configured = false;
@@ -51,7 +54,12 @@ export class AfeVideoDecoder {
   private lastSampleResolved: number | null = null;
   private flushCount = 0;
   private resetCount = 0;
+  private recreateCount = 0;
+  private recoveryAttempts = 0;
   private prefetchHint = 4;
+  private stallPhase: AfeStallPhase | null = null;
+  private origin: Partial<AfeStallSnapshot> = {};
+  private protectedIndexes = new Set<number>();
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -76,8 +84,24 @@ export class AfeVideoDecoder {
     return this.decoder?.decodeQueueSize ?? 0;
   }
 
+  get currentTransactionId(): number {
+    return this.transactionId;
+  }
+
+  get currentStallPhase(): AfeStallPhase | null {
+    return this.stallPhase;
+  }
+
   setPrefetchHint(n: number): void {
     this.prefetchHint = Math.max(1, n | 0);
+  }
+
+  setStallPhase(phase: AfeStallPhase | null): void {
+    this.stallPhase = phase;
+  }
+
+  noteRecoveryAttempt(): void {
+    this.recoveryAttempts += 1;
   }
 
   fateOf(index: number) {
@@ -103,7 +127,30 @@ export class AfeVideoDecoder {
     return false;
   }
 
+  protectSample(index: number): void {
+    this.protectedIndexes.add(index);
+  }
+
+  /**
+   * Bind originating request identity. Same sample keeps the first snapshot
+   * across PUMP / GOP_RECOVERY / FINAL_FLUSH / RESET.
+   */
+  bindOrigin(fields: Partial<AfeStallSnapshot>): void {
+    const next = originFromStall(fields);
+    const sample = next.originRequestedSample ?? null;
+    if (this.origin.originRequestedSample != null && this.origin.originRequestedSample === sample) {
+      return;
+    }
+    this.origin = next;
+    if (sample != null) this.protectedIndexes.add(sample);
+  }
+
+  clearOrigin(): void {
+    this.origin = {};
+  }
+
   snapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
+    const origin = originFromStall({ ...this.origin, ...extra });
     return emptyStallSnapshot({
       decodeStartSample: this.streamMode ? this.streamDecodeStart : null,
       lastSubmittedSample: this.lastSubmittedSample,
@@ -116,12 +163,20 @@ export class AfeVideoDecoder {
       lastSampleResolved: this.lastSampleResolved,
       decoderFlushCount: this.flushCount,
       decoderResetCount: this.resetCount,
+      decoderRecreateCount: this.recreateCount,
+      recoveryAttempts: this.recoveryAttempts,
       pendingPts: this.streamPts.pendingTimestamps(),
       readyIndexes: [...this.streamReady.keys()].sort((a, b) => a - b),
       lastDecodedTimestamp: this.lastVideoFrameTimestamp,
       lookahead: streamLookaheadSamples(this.movie.maxReorderSamples, this.prefetchHint),
       maxReorderSamples: this.movie.maxReorderSamples,
+      stallPhase: this.stallPhase,
+      transactionId: this.transactionId,
+      ...origin,
+      sourceSampleRequested: extra?.sourceSampleRequested ?? origin.sourceSampleRequested ?? null,
+      requestedPtsUs: extra?.requestedPtsUs ?? origin.requestedPtsUs ?? null,
       ...extra,
+      ...origin,
     });
   }
 
@@ -132,9 +187,11 @@ export class AfeVideoDecoder {
     if (typeof VideoDecoder === "undefined") {
       throw new AfeError("AFE_DECODE_CONFIG_FAILED", "VideoDecoder unavailable");
     }
+    this.transactionId += 1;
+    const bornTxn = this.transactionId;
     this.decoder = new VideoDecoder({
-      output: (frame) => this.onOutput(frame),
-      error: (e) => this.onError(e),
+      output: (frame) => this.onOutput(frame, bornTxn),
+      error: (e) => this.onError(e, bornTxn),
     });
     if (!afePerfProbeInstalled()) afePerfCount("decoderCreates");
     try {
@@ -158,6 +215,8 @@ export class AfeVideoDecoder {
 
   async reset(signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
+    this.stallPhase = "RESET";
+    this.generation += 1;
     this.streamMode = false;
     this.streamNeeded = null;
     this.rejectWaiters(new AfeError("AFE_DECODE_FAILED", "decoder reset", false));
@@ -179,6 +238,39 @@ export class AfeVideoDecoder {
   }
 
   /**
+   * Close + new VideoDecoder. Invalidates the previous transaction so in-flight
+   * WebView2 outputs cannot poison streamPts (Windows: decodeQueue=4, streamPts=0).
+   * Origin identity is preserved.
+   */
+  async recreate(signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    this.stallPhase = "RESET";
+    this.transactionId += 1;
+    this.generation += 1;
+    this.recreateCount += 1;
+    this.resetCount += 1;
+    this.lastError = null;
+    this.streamWaiter = null;
+    this.closeStreamFrames();
+    this.streamPts.failPending("ABORTED");
+    this.streamPts.clear();
+    this.streamMode = false;
+    this.streamNeeded = null;
+    this.needsKeyframe = true;
+    this.configured = false;
+    if (this.decoder) {
+      try {
+        this.decoder.close();
+      } catch {
+        /* */
+      }
+      this.decoder = null;
+    }
+    if (!afePerfProbeInstalled()) afePerfCount("decoderResets");
+    await this.ensure(signal);
+  }
+
+  /**
    * EncodedVideoChunk.timestamp := sample PTS in microseconds.
    * VideoFrame.timestamp is specified to copy that integer (not DTS, not FIFO index).
    */
@@ -195,10 +287,15 @@ export class AfeVideoDecoder {
   }
 
   endStream(): void {
+    this.stallPhase = "TRANSACTION_END";
     this.streamMode = false;
     this.streamNeeded = null;
     this.closeStreamFrames();
     for (const index of this.streamPts.unresolved()) {
+      if (this.protectedIndexes.has(index)) {
+        this.streamPts.mark(index, "ERROR");
+        continue;
+      }
       this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
     }
     this.streamPts.failPending("ERROR");
@@ -207,6 +304,8 @@ export class AfeVideoDecoder {
       this.streamWaiter = null;
       w.reject(new AfeError("AFE_DECODE_FAILED", "stream ended", false));
     }
+    this.protectedIndexes.clear();
+    this.clearOrigin();
   }
 
   drainStream(put: (index: number, frame: VideoFrame) => void): void {
@@ -225,11 +324,13 @@ export class AfeVideoDecoder {
     const frame = this.streamReady.get(index);
     if (!frame) return null;
     this.streamReady.delete(index);
+    this.streamPts.mark(index, "RESOLVED");
+    this.lastSampleResolved = index;
     return frame;
   }
 
   waitReady(index: number, signal?: AbortSignal, extra?: Partial<AfeStallSnapshot>): Promise<VideoFrame> {
-    return this.awaitReady(index, signal, extra, { allowSkip: false }).then((frame) => {
+    return this.awaitReady(index, signal, extra, { allowSkip: false, throwOnTimeout: true }).then((frame) => {
       if (frame) return frame;
       const dump = this.snapshot({
         sourceSampleRequested: index,
@@ -241,10 +342,9 @@ export class AfeVideoDecoder {
   }
 
   /**
-   * Wait for exact PTS of `index`. After ~200ms with no progress and the
-   * requested PTS still pending, releaseHeld() once (flush if still waiting).
-   * Shape Q and Shape R both nudge — decodeQueue==0 is not a skip reason.
-   * If later indexes are already ready, allowSkip yields null instead of aborting.
+   * Wait for exact PTS of `index`. No mid-run flush. Production video:
+   * allowSkip=false — null only when the wait budget expires and throwOnTimeout
+   * is false (scheduler then pumps / recovers / tail-flushes).
    */
   awaitReady(
     index: number,
@@ -252,30 +352,30 @@ export class AfeVideoDecoder {
     extra?: Partial<AfeStallSnapshot>,
     hooks?: AwaitReadyHooks,
   ): Promise<VideoFrame | null> {
+    this.bindOrigin({ sourceSampleRequested: index, ...extra });
+    this.protectSample(index);
+    if (!this.stallPhase) this.stallPhase = "WAIT_EXACT_PTS";
     const hit = this.takeReady(index);
     if (hit) return Promise.resolve(hit);
     throwIfAborted(signal);
     if (this.lastError) return Promise.reject(this.lastError);
     if (this.closed) return Promise.reject(new AfeError("AFE_DECODE_FAILED", "decoder closed", false));
+    const timeoutMs = Math.max(0, hooks?.timeoutMs ?? AFE_DECODE_STALL_MS);
+    const throwOnTimeout = hooks?.throwOnTimeout !== false;
     return new Promise<VideoFrame | null>((resolve, reject) => {
       const started = nowMs();
       let settled = false;
-      let nudged = false;
-      let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
-      let afterNudgeTimer: ReturnType<typeof setTimeout> | undefined;
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
         clearTimeout(stallTimer);
-        if (nudgeTimer) clearTimeout(nudgeTimer);
-        if (afterNudgeTimer) clearTimeout(afterNudgeTimer);
         signal?.removeEventListener("abort", onAbort);
         fn();
       };
       const dumpStall = () =>
         this.snapshot({
           sourceSampleRequested: index,
-          stalledMs: Math.max(AFE_DECODE_STALL_MS, nowMs() - started),
+          stalledMs: Math.max(timeoutMs, nowMs() - started),
           ...extra,
         });
       const throwStall = () => {
@@ -287,6 +387,7 @@ export class AfeVideoDecoder {
       };
       const trySkip = (): boolean => {
         if (!hooks?.allowSkip) return false;
+        if (this.protectedIndexes.has(index)) return false;
         if (this.streamReady.has(index)) return false;
         if (!this.hasLaterReady(index)) return false;
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
@@ -297,11 +398,7 @@ export class AfeVideoDecoder {
         finish(() => resolve(null));
         return true;
       };
-      const requestedInPending = (): boolean => {
-        if (extra?.requestedPtsUs != null) return this.hasPendingPts(extra.requestedPtsUs);
-        return this.streamPts.hasIndex(index);
-      };
-      const afterNudge = () => {
+      const onTimeout = () => {
         if (settled) return;
         const got = this.takeReady(index);
         if (got) {
@@ -309,51 +406,14 @@ export class AfeVideoDecoder {
           return;
         }
         if (trySkip()) return;
+        if (throwOnTimeout) {
+          throwStall();
+          return;
+        }
+        if (this.streamWaiter?.index === index) this.streamWaiter = null;
+        finish(() => resolve(null));
       };
-      const runNudge = async () => {
-        if (settled || nudged) return;
-        if (!requestedInPending()) return;
-        nudged = true;
-        try {
-          await this.releaseHeld(signal);
-        } catch (e) {
-          if (settled) return;
-          if (signal?.aborted) {
-            finish(() => reject(abortedError(signal)));
-            return;
-          }
-          finish(() => reject(e instanceof Error ? e : new AfeError("AFE_DECODE_FAILED", String(e))));
-          return;
-        }
-        if (settled) return;
-        const flushed = this.takeReady(index);
-        if (flushed) {
-          finish(() => resolve(flushed));
-          return;
-        }
-        if (this.needsKeyframe && hooks?.onNeedsKeyframe) {
-          try {
-            await hooks.onNeedsKeyframe();
-          } catch (e) {
-            if (settled) return;
-            if (!(isAfeError(e) && /key frame/i.test(e.message))) {
-              finish(() => reject(e instanceof Error ? e : new AfeError("AFE_DECODE_FAILED", String(e))));
-              return;
-            }
-          }
-        }
-        if (settled) return;
-        const afterKey = this.takeReady(index);
-        if (afterKey) {
-          finish(() => resolve(afterKey));
-          return;
-        }
-        afterNudgeTimer = setTimeout(afterNudge, AFE_STALL_NUDGE_WAIT_MS);
-      };
-      const stallTimer = setTimeout(throwStall, AFE_DECODE_STALL_MS);
-      nudgeTimer = setTimeout(() => {
-        void runNudge();
-      }, AFE_STALL_NUDGE_MS);
+      const stallTimer = setTimeout(onTimeout, timeoutMs);
       const onAbort = () => {
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
         this.rejectWaiters(abortedError(signal));
@@ -446,6 +506,12 @@ export class AfeVideoDecoder {
   }
 
   async releaseHeld(signal?: AbortSignal): Promise<void> {
+    await this.flushTail(signal);
+  }
+
+  /** Tail / transaction-end flush only. Watchdog → AFE_DECODE_STALL. */
+  async flushTail(signal?: AbortSignal): Promise<void> {
+    this.stallPhase = "FINAL_FLUSH";
     await this.settleOutputs(signal, false);
   }
 
@@ -486,13 +552,14 @@ export class AfeVideoDecoder {
 
   /**
    * Wait for VideoDecoder outputs without flush() when possible.
-   * flush() forces the next chunk to be a keyframe and makes the scheduler
-   * restart the GOP — measured AFE-02 baseline: 102 chunks for 60 frames.
+   * flush() is the transaction-tail drain only — never an ordinary stall nudge.
    */
   private async settleOutputs(signal?: AbortSignal, persist = false): Promise<void> {
     const dec = this.decoder;
     if (!dec) return;
     if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
+
+    this.stallPhase = this.stallPhase === "FINAL_FLUSH" ? "FINAL_FLUSH" : "DECODER_DRAIN";
 
     const waitDequeue = () =>
       new Promise<void>((resolve) => {
@@ -529,6 +596,7 @@ export class AfeVideoDecoder {
     }
 
     if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
+    this.stallPhase = "FINAL_FLUSH";
     try {
       let flushTimer: ReturnType<typeof setTimeout> | undefined;
       this.flushCount += 1;
@@ -538,9 +606,9 @@ export class AfeVideoDecoder {
           dec.flush(),
           new Promise<never>((_, reject) => {
             flushTimer = setTimeout(() => {
-              const dump = this.snapshot({ stalledMs: AFE_DECODE_STALL_MS });
+              const dump = this.snapshot({ stalledMs: AFE_FLUSH_WATCHDOG_MS });
               reject(new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false));
-            }, AFE_DECODE_STALL_MS);
+            }, AFE_FLUSH_WATCHDOG_MS);
           }),
         ]);
       } finally {
@@ -557,11 +625,13 @@ export class AfeVideoDecoder {
   close(): void {
     this.closed = true;
     this.generation += 1;
+    this.transactionId += 1;
     this.rejectWaiters(new AfeError("AFE_ABORTED", "decoder closed", false));
     this.teardown();
   }
 
   private isNeeded(index: number): boolean {
+    if (this.protectedIndexes.has(index)) return true;
     if (!this.streamNeeded) return true;
     const i = index - this.streamDecodeStart;
     return i >= 0 && i < this.streamNeeded.length && this.streamNeeded[i] === 1;
@@ -590,9 +660,9 @@ export class AfeVideoDecoder {
   }
 
   private resolveStream(index: number, frame: VideoFrame): boolean {
-    this.streamPts.mark(index, "RESOLVED");
-    this.lastSampleResolved = index;
     if (this.streamWaiter?.index === index) {
+      this.streamPts.mark(index, "RESOLVED");
+      this.lastSampleResolved = index;
       const w = this.streamWaiter;
       this.streamWaiter = null;
       w.resolve(frame);
@@ -622,6 +692,7 @@ export class AfeVideoDecoder {
       this.rejectWaiters(err);
       return true;
     }
+    this.streamPts.mark(index, "READY");
     this.streamReady.set(index, frame);
     afePerfMax("inFlightPeak", this.pendingOutputCount);
     return true;
@@ -663,10 +734,14 @@ export class AfeVideoDecoder {
     }
   }
 
-  private onOutput(frame: VideoFrame): void {
+  private onOutput(frame: VideoFrame, txn: number): void {
     afePerfCount("framesDecoded");
-    if (this.closed) {
-      frame.close();
+    if (this.closed || txn !== this.transactionId) {
+      try {
+        frame.close();
+      } catch {
+        /* */
+      }
       return;
     }
     this.lastVideoFrameTimestamp = frame.timestamp;
@@ -675,7 +750,7 @@ export class AfeVideoDecoder {
       if (idx != null) {
         if (!this.isNeeded(idx)) {
           frame.close();
-          this.streamPts.mark(idx, "DISCARDED_NOT_NEEDED");
+          this.streamPts.mark(idx, this.protectedIndexes.has(idx) ? "ERROR" : "DISCARDED_NOT_NEEDED");
           return;
         }
         this.resolveStream(idx, frame);
@@ -692,7 +767,8 @@ export class AfeVideoDecoder {
     this.failUnmatched(frame, frame.timestamp);
   }
 
-  private onError(e: DOMException): void {
+  private onError(e: DOMException, txn: number): void {
+    if (txn !== this.transactionId) return;
     const err = new AfeError("AFE_DECODE_FAILED", e.message || "VideoDecoder error");
     this.lastError = err;
     this.rejectWaiters(err);
@@ -716,6 +792,7 @@ export class AfeVideoDecoder {
 
   private dropDecoderAfterAbort(): void {
     if (!this.decoder || !this.configured) return;
+    this.transactionId += 1;
     try {
       this.decoder.reset();
       this.resetCount += 1;

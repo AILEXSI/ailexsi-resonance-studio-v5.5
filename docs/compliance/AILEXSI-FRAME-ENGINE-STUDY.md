@@ -788,3 +788,29 @@ Human-proven Windows V5.5 EXE hang after AFE-04: same production project, export
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner rebuilds EXE and retests the same project past 35% / 100% / MP4.  
 **HUMAN-PROVEN: NO**
 
+# AFE-07 — real video input recovery / exact-frame delivery (V5.5)
+
+Windows V1/V2 video input still failed with `AFE_DECODE_STALL` after AFE-06. VIS-only multi-scene export is HUMAN-PROVEN (do not re-investigate compositor / H.264 / muxer first). Defect is isolated to V1/V2 → AFE → VideoDecoder → exact frame delivery.
+
+## Windows shapes
+
+- Earlier A/B plus latest AFE-06: requested sample/PTS null, waiter null, `streamPts/Ready` 0, **`decodeQueue` 4, `flushes` 1**.
+- Mid-run `releaseHeld()` / flush cleared tracking while WebView2 still held frames. Lookahead 6 did not solve this. Do not treat it as insufficient lookahead.
+
+## Recovery (production VIDEO)
+
+1. **STEP A** — normal stream (CTTS, exact PTS, B-frames, open-GOP, prefetch, maxReorder, bounded ready, Abort, `VideoFrame.close`). Wait briefly for the exact PTS.
+2. **STEP B** — pump more decode-order samples, structure-bounded (`N + maxReorder + prefetch + next ref/GOP`). **No flush.**
+3. **STEP C** — one controlled GOP recovery: snapshot origin identity, recreate decoder (new `transactionId`; stale outputs closed/ignored), open-GOP `decodeOrigin`, resubmit enough, wait exact PTS.
+4. **STEP D** — `FINAL_FLUSH` only at true transaction/source tail, with watchdog. Else `AFE_DECODE_STALL`.
+
+`picture.kind === "video"` → exact frame or typed failure. Never null / nearest / neighbor / VIS / BLACK / `paintFallback`. `allowSkip=false`. Null-yield only if upstream already selected VIS or BLACK. VIS/BLACK never wait on AFE. AUTO line untouched.
+
+Origin identity (`originRequestedSample/Pts`, `originExportFrame`, `originTimelineMs`, `originClipId/Label`, `originSourceName`, `originPictureKind`) is preserved across PUMP / GOP_RECOVERY / FINAL_FLUSH / RESET. Stall dump includes `stallPhase` + transaction id.
+
+Requested VIDEO fate cannot be `DISCARDED_NOT_NEEDED`.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner G1–G6 on the production project.  
+**HUMAN-PROVEN: NO**
+

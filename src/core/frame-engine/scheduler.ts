@@ -1,10 +1,20 @@
 import { DecodedFrameCache } from "./cache";
 import { AfeVideoDecoder } from "./decoder";
 import { AfeError, isAfeError, throwIfAborted } from "./errors";
-import { decodeOrigin, keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
+import { decodeOrigin, keyframeAtOrBefore, nextKeyframeAfter, sampleIndexAtTime } from "./mp4-reader";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMax } from "./perf";
 import { isMonotonicRun, isPresentationRun, maxDecodeIndex, planDecodeSpan, planSampleIndexes, shouldSplitPresentationRun } from "./plan";
-import { pumpSubmitEnd, streamLookaheadSamples, type AfeStallSnapshot } from "./stall";
+import {
+  AFE_DECODE_STALL_MS,
+  AFE_WAIT_EXACT_PTS_MS,
+  formatStallMessage,
+  isTrueTransactionTail,
+  nowMs,
+  pumpMoreSubmitEnd,
+  pumpSubmitEnd,
+  streamLookaheadSamples,
+  type AfeStallSnapshot,
+} from "./stall";
 import type { AfeMemoryStats, AfeMovie, AfeSample, DrawableFrame } from "./types";
 
 /** Encoded samples submitted ahead of the next yield so encode can overlap decode.
@@ -186,7 +196,28 @@ export class AfeScheduler {
     const lookahead = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
     afePerfMax("prefetchWindow", lookahead);
 
+    const stallExtra = (idx: number): Partial<AfeStallSnapshot> => {
+      const sample = this.movie.samples[idx]!;
+      return {
+        ...this.exportStallExtra,
+        sourceSampleRequested: idx,
+        requestedPtsUs: this.decoder.chunkTimestampUs(sample),
+        gopKeyframeStart: keyframeAtOrBefore(this.movie, idx),
+        decodeStartSample: span.decodeStart,
+      };
+    };
+
+    const pumpThrough = (target: number) => {
+      while (this.nextDecode <= target) {
+        const sample = this.movie.samples[this.nextDecode];
+        if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${this.nextDecode}`);
+        this.decoder.submitEncoded(sample, signal);
+        this.nextDecode += 1;
+      }
+    };
+
     const pump = (requested: number) => {
+      this.decoder.setStallPhase("PUMP_LOOKAHEAD");
       const target = pumpSubmitEnd({
         requested,
         last,
@@ -196,12 +227,113 @@ export class AfeScheduler {
         maxReorderSamples: this.movie.maxReorderSamples,
         pendingOutputCount: this.decoder.pendingOutputCount,
       });
-      while (this.nextDecode <= target) {
-        const sample = this.movie.samples[this.nextDecode];
-        if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${this.nextDecode}`);
-        this.decoder.submitEncoded(sample, signal);
-        this.nextDecode += 1;
+      pumpThrough(target);
+    };
+
+    const pumpMore = (requested: number) => {
+      this.decoder.setStallPhase("PUMP_LOOKAHEAD");
+      const nextRef = nextKeyframeAfter(this.movie, requested) ?? this.movie.sampleCount - 1;
+      const target = pumpMoreSubmitEnd({
+        requested,
+        nextDecode: this.nextDecode,
+        sampleCount: this.movie.sampleCount,
+        prefetch: PREFETCH,
+        maxReorderSamples: this.movie.maxReorderSamples,
+        nextRefOrGop: nextRef,
+      });
+      pumpThrough(target);
+    };
+
+    const recoverGop = async (requested: number) => {
+      this.decoder.setStallPhase("GOP_RECOVERY");
+      this.decoder.noteRecoveryAttempt();
+      this.decoder.bindOrigin(stallExtra(requested));
+      await this.decoder.recreate(signal);
+      this.nextDecode = decodeOrigin(this.movie, requested);
+      this.warm = true;
+      this.decoder.beginStream(span.needed, span.decodeStart);
+      this.decoder.setPrefetchHint(PREFETCH);
+      this.decoder.bindOrigin(stallExtra(requested));
+      this.decoder.protectSample(requested);
+      pump(requested);
+      pumpMore(requested);
+    };
+
+    const atTail = (requested: number) =>
+      isTrueTransactionTail({
+        requested,
+        lastRequested: last,
+        nextDecode: this.nextDecode,
+        sampleCount: this.movie.sampleCount,
+      });
+
+    const throwStall = (requested: number): never => {
+      const dump = this.decoder.snapshot({
+        ...stallExtra(requested),
+        stalledMs: AFE_DECODE_STALL_MS,
+      });
+      throw new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
+    };
+
+    const waitExact = async (requested: number, budgetEnd: number): Promise<VideoFrame | null> => {
+      this.decoder.setStallPhase("WAIT_EXACT_PTS");
+      const remain = budgetEnd - nowMs();
+      if (remain <= 0) return null;
+      return this.decoder.awaitReady(requested, signal, stallExtra(requested), {
+        allowSkip: false,
+        throwOnTimeout: false,
+        timeoutMs: Math.min(AFE_WAIT_EXACT_PTS_MS, remain),
+      });
+    };
+
+    const exactVideoFrame = async (idx: number): Promise<VideoFrame> => {
+      const extra = stallExtra(idx);
+      this.decoder.bindOrigin(extra);
+      this.decoder.protectSample(idx);
+      const budgetEnd = nowMs() + AFE_DECODE_STALL_MS;
+      let recovered = false;
+
+      try {
+        pump(idx);
+      } catch (e) {
+        if (!isAfeError(e) || !/key frame/i.test(e.message)) throw e;
+        await recoverGop(idx);
+        recovered = true;
       }
+
+      let frame = this.decoder.takeReady(idx);
+      if (frame) {
+        afePerfCount("readyImmediate");
+        return frame;
+      }
+
+      afePerfCount("framePromiseWaits");
+      const t0 = afePerfEnabled() ? performance.now() : 0;
+      frame = await waitExact(idx, budgetEnd);
+      if (!frame) {
+        pumpMore(idx);
+        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+      }
+      if (!frame && !recovered) {
+        await recoverGop(idx);
+        recovered = true;
+        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, nowMs() + AFE_DECODE_STALL_MS));
+      }
+      if (!frame && atTail(idx)) {
+        this.decoder.setStallPhase("FINAL_FLUSH");
+        await this.decoder.flushTail(signal);
+        frame = this.decoder.takeReady(idx);
+        if (!frame) {
+          const remain = Math.max(16, budgetEnd - nowMs());
+          frame = await this.decoder.awaitReady(idx, signal, extra, {
+            allowSkip: false,
+            throwOnTimeout: false,
+            timeoutMs: remain,
+          });
+        }
+      }
+      if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
+      return frame ?? throwStall(idx);
     };
 
     try {
@@ -212,67 +344,14 @@ export class AfeScheduler {
           yield null;
           continue;
         }
+        this.decoder.clearOrigin();
         if (idx < this.nextDecode && !this.decoder.knowsSample(idx)) {
           const cached = this.cache.takeClone(idx) ?? (await this.decodeTo(idx, signal));
           afePerfCount("streamPathFrames");
           yield this.wrap(cached, this.movie.samples[idx]!);
           continue;
         }
-        try {
-          pump(idx);
-        } catch (e) {
-          if (!isAfeError(e) || !/key frame/i.test(e.message)) throw e;
-          await this.decoder.reset(signal);
-          this.nextDecode = decodeOrigin(this.movie, idx);
-          this.warm = true;
-          this.decoder.beginStream(span.needed, span.decodeStart);
-          pump(idx);
-        }
-        let frame = this.decoder.takeReady(idx);
-        if (frame) {
-          afePerfCount("readyImmediate");
-        } else {
-          afePerfCount("framePromiseWaits");
-          const t0 = afePerfEnabled() ? performance.now() : 0;
-          const inputExhausted =
-            this.nextDecode >= this.movie.sampleCount ||
-            (idx === last && this.nextDecode > last + lookahead);
-          if (idx === last || inputExhausted || this.decoder.pendingOutputCount === 0) {
-            await this.decoder.releaseHeld(signal);
-            frame = this.decoder.takeReady(idx);
-          }
-          if (!frame) {
-            const sample = this.movie.samples[idx]!;
-            frame = await this.decoder.awaitReady(
-              idx,
-              signal,
-              {
-                ...this.exportStallExtra,
-                sourceSampleRequested: idx,
-                requestedPtsUs: this.decoder.chunkTimestampUs(sample),
-                gopKeyframeStart: keyframeAtOrBefore(this.movie, idx),
-                decodeStartSample: span.decodeStart,
-              },
-              {
-                allowSkip: true,
-                onNeedsKeyframe: () => {
-                  this.nextDecode = keyframeAtOrBefore(this.movie, idx);
-                  pump(idx);
-                },
-              },
-            );
-          }
-          if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
-        }
-        if (idx === last && this.decoder.pendingOutputCount > 0) {
-          await this.decoder.releaseHeld(signal);
-          frame = frame ?? this.decoder.takeReady(idx);
-        }
-        if (!frame) {
-          afePerfCount("streamPathFrames");
-          yield null;
-          continue;
-        }
+        const frame = await exactVideoFrame(idx);
         const nextIdx = k + 1 < end ? indexes[k + 1] : undefined;
         if (nextIdx === idx) {
           this.cache.put(idx, frame.clone());
@@ -335,8 +414,7 @@ export class AfeScheduler {
       const promise = pending.get(idx);
       pending.delete(idx);
       if (!promise) {
-        yield null;
-        continue;
+        throw new AfeError("AFE_DECODE_FAILED", `no pending decode for sample ${idx}`, false);
       }
       if (idx === last) await this.decoder.releaseHeld(signal);
       yield this.wrap(await promise, this.movie.samples[idx]!);

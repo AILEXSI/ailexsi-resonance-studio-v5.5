@@ -559,3 +559,13 @@ export function decodeOrigin(movie: AfeMovie, index: number): number {
   if (key <= 0 || !isOpenGopAtKey(movie, key)) return key;
   return keyframeAtOrBefore(movie, key - 1);
 }
+
+/** Next I-frame strictly after `decodeIndex`, or null at the last GOP. */
+export function nextKeyframeAfter(movie: AfeMovie, decodeIndex: number): number | null {
+  const keys = movie.keyframeIndices;
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!;
+    if (k > decodeIndex) return k;
+  }
+  return null;
+}

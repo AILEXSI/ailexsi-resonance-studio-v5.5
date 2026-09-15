@@ -140,6 +140,7 @@ export type FrameRun = {
   clip: ExportClip | undefined;
   startIndex: number;
   count: number;
+  pictureKind: AfeDumpPictureKind;
 };
 
 export function exportPictureKind(job: ExportJob, timeMs: number): AfeDumpPictureKind {
@@ -153,6 +154,7 @@ export function countExportPictureKinds(job: ExportJob): {
   visFrames: number;
   afeFrames: number;
   blackFrames: number;
+  videoFramesRequested: number;
 } {
   const fps = Math.max(1, job.fps);
   const total = Math.max(1, Math.round((job.durationMs / 1000) * fps));
@@ -161,28 +163,34 @@ export function countExportPictureKinds(job: ExportJob): {
   let blackFrames = 0;
   for (let i = 0; i < total; i++) {
     const timeMs = (i / fps) * 1000;
-    const clip = videoClipAt(job, timeMs);
-    const opensAfe = Boolean(clip && !clip.missing && !clip.still && isPlayableSource(clip.sourceUrl));
+    const kind = exportPictureKind(job, timeMs);
+    const clip = kind === "video" ? videoClipAt(job, timeMs) : undefined;
+    const opensAfe = Boolean(
+      kind === "video" && clip && !clip.missing && !clip.still && isPlayableSource(clip.sourceUrl),
+    );
     if (opensAfe) {
       afeFrames += 1;
       continue;
     }
-    if (exportPictureKind(job, timeMs) === "vis") visFrames += 1;
+    if (kind === "vis") visFrames += 1;
     else blackFrames += 1;
   }
-  return { visFrames, afeFrames, blackFrames };
+  return { visFrames, afeFrames, blackFrames, videoFramesRequested: afeFrames };
 }
 
 export function groupFrameRuns(job: ExportJob, total: number, fps: number): FrameRun[] {
   const runs: FrameRun[] = [];
   let current: FrameRun | undefined;
   for (let i = 0; i < total; i++) {
-    const clip = videoClipAt(job, (i / fps) * 1000);
-    const id = clip?.id ?? "";
-    if (current && (current.clip?.id ?? "") === id) {
+    const timeMs = (i / fps) * 1000;
+    const pictureKind = exportPictureKind(job, timeMs);
+    const clip = pictureKind === "video" ? videoClipAt(job, timeMs) : undefined;
+    const id = `${pictureKind}:${clip?.id ?? ""}`;
+    const prev = current ? `${current.pictureKind}:${current.clip?.id ?? ""}` : "";
+    if (current && prev === id) {
       current.count += 1;
     } else {
-      current = { clip, startIndex: i, count: 1 };
+      current = { clip, startIndex: i, count: 1, pictureKind };
       runs.push(current);
     }
   }
@@ -371,19 +379,43 @@ export async function exportWithWebCodecs(
   let visFrames = 0;
   let afeFrames = 0;
   let blackFrames = 0;
+  let videoFramesRequested = 0;
+  let videoFramesDecoded = 0;
+  let videoFramesEncoded = 0;
+  let visFramesEncoded = 0;
+  let blackFramesEncoded = 0;
 
   const noteEncoded = (i: number, usedAfeSample: boolean) => {
     const timeMs = (i / job.fps) * 1000;
-    if (usedAfeSample) afeFrames += 1;
-    else if (exportPictureKind(job, timeMs) === "vis") visFrames += 1;
-    else blackFrames += 1;
+    if (usedAfeSample) {
+      afeFrames += 1;
+      videoFramesEncoded += 1;
+    } else if (exportPictureKind(job, timeMs) === "vis") {
+      visFrames += 1;
+      visFramesEncoded += 1;
+    } else {
+      blackFrames += 1;
+      blackFramesEncoded += 1;
+    }
   };
 
+  const progressCounts = () => ({
+    visFrames,
+    afeFrames,
+    blackFrames,
+    videoFramesRequested,
+    videoFramesDecoded,
+    videoFramesEncoded,
+    visFramesEncoded,
+    blackFramesEncoded,
+  });
+
   const encodingStage = () =>
-    `Encoding H.264 · visFrames ${visFrames} / afeFrames ${afeFrames} / blackFrames ${blackFrames}`;
+    `Encoding H.264 · video ${videoFramesRequested}/${videoFramesDecoded}/${videoFramesEncoded} · vis ${visFramesEncoded} · black ${blackFramesEncoded}`;
 
   const stallExtraFromClip = (clip: ExportClip, i: number): Partial<AfeStallSnapshot> => {
     const timeMs = (i / job.fps) * 1000;
+    const pictureKind = exportPictureKind(job, timeMs);
     return {
       exportFrameIndex: i,
       exportTimestampSec: i / job.fps,
@@ -393,11 +425,24 @@ export async function exportWithWebCodecs(
       sourceInMs: clip.sourceInMs ?? null,
       sourceOutMs: clip.sourceOutMs ?? null,
       timelineMs: timeMs,
-      pictureKind: exportPictureKind(job, timeMs),
+      pictureKind,
       fps: job.fps,
       visFrames,
       afeFrames,
       blackFrames,
+      videoFramesRequested,
+      videoFramesDecoded,
+      videoFramesEncoded,
+      visFramesEncoded,
+      blackFramesEncoded,
+      originRequestedSample: null,
+      originRequestedPts: null,
+      originExportFrame: i,
+      originTimelineMs: timeMs,
+      originClipId: clip.id,
+      originClipLabel: clip.label,
+      originSourceName: hostSafeSourceName(clip.sourceUrl),
+      originPictureKind: pictureKind,
     };
   };
 
@@ -406,7 +451,7 @@ export async function exportWithWebCodecs(
       if (hooks.signal?.aborted) throw new Error("Export aborted");
       if (encoderError) throw encoderError;
       const clip = run.clip;
-      if (!clip || clip.missing || !isPlayableSource(clip.sourceUrl)) {
+      if (run.pictureKind !== "video" || !clip || clip.missing || !isPlayableSource(clip.sourceUrl)) {
         for (let k = 0; k < run.count; k++) {
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           const i = run.startIndex + k;
@@ -414,9 +459,7 @@ export async function exportWithWebCodecs(
             percent: Math.round((i / frameCount) * 80) + 8,
             stage: encodingStage(),
             currentTimeMs: (i / job.fps) * 1000,
-            visFrames,
-            afeFrames,
-            blackFrames,
+            ...progressCounts(),
           });
           paintFallback(i);
           await encodeCanvas(i);
@@ -438,9 +481,7 @@ export async function exportWithWebCodecs(
             percent: Math.round((i / frameCount) * 80) + 8,
             stage: encodingStage(),
             currentTimeMs: (i / job.fps) * 1000,
-            visFrames,
-            afeFrames,
-            blackFrames,
+            ...progressCounts(),
           });
           const timeMs = (i / job.fps) * 1000;
           beginExportFrame(ctx, width, height, job, timeMs);
@@ -477,6 +518,7 @@ export async function exportWithWebCodecs(
           if (encoderError) throw encoderError;
           const stallFields = {
             ...stallExtraFromClip(clip, run.startIndex + k),
+            videoFramesRequested,
             encoderEncodeQueueSize: encoder.encodeQueueSize,
             lastProgressUpdateMs: lastProgressAt,
           };
@@ -493,7 +535,7 @@ export async function exportWithWebCodecs(
                   ...stallFields,
                   stalledMs: exportStallMs,
                 });
-              console.error("[AFE-06] DECODE STALL", dump);
+              console.error("[AFE-07] DECODE STALL", dump);
               reject(new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false));
             }, exportStallMs);
             next.then(
@@ -508,6 +550,7 @@ export async function exportWithWebCodecs(
             );
           });
           if (step.done) break;
+          videoFramesRequested += 1;
           const sample = step.value;
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           if (encoderError) throw encoderError;
@@ -517,25 +560,43 @@ export async function exportWithWebCodecs(
             percent: Math.round((i / frameCount) * 80) + 8,
             stage: encodingStage(),
             currentTimeMs: (i / job.fps) * 1000,
-            visFrames,
-            afeFrames,
-            blackFrames,
+            ...progressCounts(),
           });
           const timeMs = (i / job.fps) * 1000;
           const loop0 = afePerfEnabled() ? performance.now() : 0;
           beginExportFrame(ctx, width, height, job, timeMs);
           if (loop0) afePerfAdd("exportLoopOverhead", performance.now() - loop0);
-          if (sample) {
-            withVideoClipAlpha(ctx, job, clip, timeMs, () => {
-              sample.drawWithFit(ctx, { fit: "contain" });
-            });
-            sample.close();
-            painted += 1;
-          } else {
-            paintFallback(i);
+          if (!sample) {
+            const dump =
+              decoded.stallSnapshot({
+                ...stallFields,
+                stalledMs: AFE_DECODE_STALL_MS,
+              }) ??
+              emptyStallSnapshot({
+                ...stallFields,
+                stalledMs: AFE_DECODE_STALL_MS,
+              });
+            throw new AfeError(
+              "AFE_DECODE_STALL",
+              `silent VIDEO null-yield forbidden; ${formatStallMessage(dump)}`,
+              false,
+            );
           }
+          videoFramesDecoded += 1;
+          withVideoClipAlpha(ctx, job, clip, timeMs, () => {
+            sample.drawWithFit(ctx, { fit: "contain" });
+          });
+          sample.close();
+          painted += 1;
           await encodeCanvas(i);
-          noteEncoded(i, Boolean(sample));
+          noteEncoded(i, true);
+          if (videoFramesRequested !== videoFramesDecoded || videoFramesDecoded !== videoFramesEncoded) {
+            throw new AfeError(
+              "AFE_DECODE_FAILED",
+              `video chain broken requested=${videoFramesRequested} decoded=${videoFramesDecoded} encoded=${videoFramesEncoded}`,
+              false,
+            );
+          }
           k += 1;
         }
       } catch (e) {
@@ -554,7 +615,7 @@ export async function exportWithWebCodecs(
               lastProgressUpdateMs: lastProgressAt,
               stalledMs: AFE_DECODE_STALL_MS,
             });
-          console.error("[AFE-06] DECODE STALL", dump);
+          console.error("[AFE-07] DECODE STALL", dump);
           throw new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
         }
         if (/abort/i.test(msg) || (isAfeError(e) && e.code === "AFE_ABORTED")) throw e;
@@ -657,5 +718,10 @@ export async function exportWithWebCodecs(
     blob,
     brands: check.brands,
     audio: audioKind,
+    videoFramesRequested,
+    videoFramesDecoded,
+    videoFramesEncoded,
+    visFramesEncoded,
+    blackFramesEncoded,
   };
 }
