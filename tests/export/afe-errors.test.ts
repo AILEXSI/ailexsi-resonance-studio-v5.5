@@ -87,12 +87,15 @@ describe("AFE typed unsupported / decode errors", () => {
       "AFE_DECODE_CONFIG_FAILED",
       "AFE_DECODE_FAILED",
       "AFE_DECODE_STALL",
+      "AFE_REQUEST_OWNERSHIP_LOST",
       "AFE_ABORTED",
     ];
     for (const code of codes) {
       const err = new AfeError(code as "AFE_ABORTED", "x");
       expect(err.message.startsWith(code)).toBe(true);
-      expect(err.fallbackSafe).toBe(code !== "AFE_ABORTED" && code !== "AFE_DECODE_STALL");
+      expect(err.fallbackSafe).toBe(
+        code !== "AFE_ABORTED" && code !== "AFE_DECODE_STALL" && code !== "AFE_REQUEST_OWNERSHIP_LOST",
+      );
     }
   });
 });

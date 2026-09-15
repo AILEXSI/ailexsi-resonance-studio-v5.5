@@ -858,3 +858,24 @@ AFE-07/08 preserved: exact PTS, no null VIDEO yield, no mid-run flush as first r
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest same project (sample 38 / ~70s V1 pocket).  
 **HUMAN-PROVEN: NO**
 
+# AFE-10 — open VIDEO request keeps decode ownership until exact PTS (V5.5)
+
+Windows AFE-09: honest missing exact VIDEO frame — `videoReq/Dec/Enc` 47/46/46, opened sample 38 PTS 1625000, `unresolved` 1, `WAIT_EXACT_PTS`, `transactionComplete` false, recovery 1/1/1, submitted 44, `decodeQueue` 29, `lastRequested/Required` 140, `pending []` `ready []` `streamPts 0` `waiter null`, `flushes` 0.
+
+## Cause
+
+Open request was ledger-only. `recreate()` / `reset()` / `beginStream()` cleared `PtsIndexMap` and `streamWaiter` while `openedRequested` still listed sample 38. Pump after recovery stopped at lookahead (~44), never sliced toward `lastRequired` 140. Waiter timeout then left `unresolved=1` with no PTS tracking and no waiter — a 3s mystery `AFE_DECODE_STALL` instead of an immediate ownership error.
+
+## Fix
+
+1. TRACE ownership: `OPEN_REQUEST` → `PTS_REGISTERED` → `WAIT_INSTALLED` → (`RECOVERY_START` → `RECOVERY_REBUILDING` → `WAIT_REINSTALLED`) → `RESOLVED` → `ENCODED`.
+2. After recreate/reset: restore opened identity, exact sample/PTS, protected `REQUESTED` role, `PtsIndexMap` on resubmit, active exact-frame wait.
+3. Progressive pump: bounded lookahead-sized slices toward `lastRequiredDecodeSample`. Brief exact-PTS wait between slices. Stop when exact PTS resolves. No global PREFETCH bump. No `FINAL_FLUSH` until useful input is exhausted.
+4. `FINAL_FLUSH` only if `unresolved>0` AND `lastSubmitted>=lastRequired` AND no further useful input. `flushes==0` at submitted 44 / required 140 is correct.
+5. No VIDEO fallback (`paintFallback` / last-good / nearest / dup / VIS / BLACK / null). Exact `RESOLVED` or typed `AFE_DECODE_STALL`.
+6. Invariant: opened unresolved VIDEO >0 ⇒ active exact waiter OR PTS pending OR recovery rebuilding. Else immediate `AFE_REQUEST_OWNERSHIP_LOST` with full dump.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 → Req==Dec==Enc, unresolved 0, exact frame, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+

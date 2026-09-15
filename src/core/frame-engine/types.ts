@@ -11,6 +11,7 @@ export type AfeErrorCode =
   | "AFE_DECODE_CONFIG_FAILED"
   | "AFE_DECODE_FAILED"
   | "AFE_DECODE_STALL"
+  | "AFE_REQUEST_OWNERSHIP_LOST"
   | "AFE_ABORTED";
 
 export interface DrawableFrame {

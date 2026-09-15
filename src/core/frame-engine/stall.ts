@@ -27,6 +27,24 @@ export type SampleFate = "PENDING" | "READY" | "RESOLVED" | "DISCARDED_NOT_NEEDE
 /** Decode-order sample class for AFE-08 submit / cancel. */
 export type SampleRole = "REQUESTED" | "REFERENCE_REQUIRED" | "SPECULATIVE";
 
+/**
+ * AFE-10 — opened VIDEO request ownership. Ledger-only (opened/unresolved)
+ * is not enough: the request must own PTS tracking and/or an exact waiter
+ * until RESOLVED / ERROR / ABORT.
+ */
+export type RequestOwnershipState =
+  | "OPEN_REQUEST"
+  | "PTS_REGISTERED"
+  | "WAIT_INSTALLED"
+  | "RECOVERY_START"
+  | "RECOVERY_REBUILDING"
+  | "WAIT_REINSTALLED"
+  | "RESOLVED"
+  | "ENCODED"
+  | "ERROR"
+  | "ABORTED"
+  | "OWNERSHIP_LOST";
+
 /** Requested VIDEO cannot be DISCARDED_NOT_NEEDED. */
 export const REQUESTED_VIDEO_FATES: readonly SampleFate[] = ["READY", "RESOLVED", "ERROR", "ABORTED"];
 
@@ -104,6 +122,14 @@ export type AfeStallSnapshot = {
   openedRequestedVideoFrames: number;
   unresolvedRequestedVideoFrames: number;
   transactionComplete: boolean;
+  pumpSliceStart: number | null;
+  pumpSliceEnd: number | null;
+  ptsRegistered: boolean;
+  ownershipWaiterActive: boolean;
+  ownershipRebuilt: boolean;
+  recoveryRebuilding: boolean;
+  ownershipState: RequestOwnershipState | null;
+  finalFlushAttempted: boolean;
 };
 
 export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
@@ -169,6 +195,14 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     openedRequestedVideoFrames: 0,
     unresolvedRequestedVideoFrames: 0,
     transactionComplete: false,
+    pumpSliceStart: null,
+    pumpSliceEnd: null,
+    ptsRegistered: false,
+    ownershipWaiterActive: false,
+    ownershipRebuilt: false,
+    recoveryRebuilding: false,
+    ownershipState: null,
+    finalFlushAttempted: false,
     ...partial,
   };
 }
@@ -376,6 +410,43 @@ export function isTransactionComplete(args: {
 }
 
 /**
+ * AFE-10: opened unresolved VIDEO must own decode. Ledger-only without a
+ * waiter, pending PTS, or in-progress recovery rebuild is OWNERSHIP_LOST.
+ */
+export function requestOwnershipHolds(args: {
+  unresolvedRequestedVideoFrames: number;
+  streamWaiterIndex?: number | null;
+  pendingPtsCount?: number;
+  pendingPts?: readonly number[] | null;
+  recoveryRebuilding?: boolean;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames <= 0) return true;
+  if (args.streamWaiterIndex != null) return true;
+  if (args.recoveryRebuilding) return true;
+  const pending =
+    args.pendingPtsCount ??
+    (args.pendingPts != null ? args.pendingPts.length : 0);
+  return pending > 0;
+}
+
+/**
+ * Inclusive decode-order end of one bounded progressive slice toward
+ * lastRequired. Slice size is lookahead-sized — not a global PREFETCH bump.
+ */
+export function progressivePumpSliceEnd(args: {
+  nextDecode: number;
+  lastRequiredDecodeSample: number;
+  sampleCount: number;
+  sliceSamples: number;
+}): number {
+  if (args.sampleCount <= 0) return -1;
+  const hi = Math.min(args.sampleCount - 1, args.lastRequiredDecodeSample);
+  if (args.nextDecode > hi) return args.nextDecode - 1;
+  const slice = Math.max(1, args.sliceSamples | 0);
+  return Math.min(hi, args.nextDecode + slice - 1);
+}
+
+/**
  * One ledger: opened VIDEO presentation samples still open vs Enc/Req.
  * `unresolvedRequested>0` with `Enc>=Req` is the AFE-09 contradiction — fail closed.
  */
@@ -501,6 +572,13 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `openedRequested ${d.openedRequestedVideoFrames} (presentation asked)`,
     `unresolvedRequested ${d.unresolvedRequestedVideoFrames}`,
     `transactionComplete ${d.transactionComplete}`,
+    `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
+    `ptsRegistered ${d.ptsRegistered ? "yes" : "no"}`,
+    `waiterActive ${d.ownershipWaiterActive ? "yes" : "no"}`,
+    `ownershipRebuilt ${d.ownershipRebuilt ? "yes" : "no"}`,
+    `recoveryRebuilding ${d.recoveryRebuilding ? "yes" : "no"}`,
+    `ownershipState ${d.ownershipState}`,
+    `FINAL_FLUSH ${d.finalFlushAttempted ? "yes" : "no"}`,
     `stalledMs ${d.stalledMs}`,
   ].join("; ");
 }

@@ -15,10 +15,12 @@ import {
   mayFinalFlush,
   nowMs,
   originFromStall,
+  requestOwnershipHolds,
   requestedPtsIsPending,
   streamLookaheadSamples,
   type AfeStallPhase,
   type AfeStallSnapshot,
+  type RequestOwnershipState,
   type SampleRole,
 } from "./stall";
 import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
@@ -26,6 +28,16 @@ import type { AfeMovie, AfeSample } from "./types";
 import { sampleBytes } from "./mp4-reader";
 
 type FrameWaiter = { resolve: (frame: VideoFrame) => void; reject: (e: Error) => void };
+
+type OpenedRequestOwnership = {
+  index: number;
+  ptsUs: number | null;
+  transitions: RequestOwnershipState[];
+  waiterActive: boolean;
+  ptsRegistered: boolean;
+  recoveryRebuilding: boolean;
+  rebuilt: boolean;
+};
 
 export type AwaitReadyHooks = {
   /** Yield null when later presentation indexes are already ready (test-only hole). */
@@ -78,6 +90,10 @@ export class AfeVideoDecoder {
   private decodeQueueBeforeCancel: number | null = null;
   private decoderResetForTransactionEnd = false;
   private sampleRoles = new Map<number, SampleRole>();
+  private ownership = new Map<number, OpenedRequestOwnership>();
+  private pumpSliceStart: number | null = null;
+  private pumpSliceEnd: number | null = null;
+  private finalFlushAttempted = false;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -126,6 +142,50 @@ export class AfeVideoDecoder {
     return this.streamPts.fateOf(index);
   }
 
+  private ensureOwnership(index: number, ptsUs?: number | null): OpenedRequestOwnership {
+    let rec = this.ownership.get(index);
+    if (!rec) {
+      const sample = this.movie.samples[index];
+      rec = {
+        index,
+        ptsUs: ptsUs ?? (sample ? this.chunkTimestampUs(sample) : null),
+        transitions: ["OPEN_REQUEST"],
+        waiterActive: false,
+        ptsRegistered: false,
+        recoveryRebuilding: false,
+        rebuilt: false,
+      };
+      this.ownership.set(index, rec);
+    } else if (ptsUs != null && rec.ptsUs == null) {
+      rec.ptsUs = ptsUs;
+    }
+    return rec;
+  }
+
+  private noteOwnership(index: number, state: RequestOwnershipState): void {
+    const rec = this.ownership.get(index) ?? this.ensureOwnership(index);
+    const last = rec.transitions[rec.transitions.length - 1];
+    if (last === state) return;
+    rec.transitions.push(state);
+  }
+
+  private noteWaiterInstalled(index: number): void {
+    const rec = this.ensureOwnership(index);
+    rec.waiterActive = true;
+    if (rec.recoveryRebuilding || rec.rebuilt) {
+      rec.rebuilt = true;
+      rec.recoveryRebuilding = false;
+      this.noteOwnership(index, "WAIT_REINSTALLED");
+    } else {
+      this.noteOwnership(index, "WAIT_INSTALLED");
+    }
+  }
+
+  private noteWaiterCleared(index: number): void {
+    const rec = this.ownership.get(index);
+    if (rec) rec.waiterActive = false;
+  }
+
   roleOf(index: number): SampleRole | undefined {
     return this.sampleRoles.get(index);
   }
@@ -156,15 +216,105 @@ export class AfeVideoDecoder {
   }
 
   /** Export actually asked for this presentation sample (exact-PTS waiter / yield). */
-  openRequested(index: number): void {
+  openRequested(index: number, ptsUs?: number | null): void {
     this.openedRequested.add(index);
     this.requestedIndexes.add(index);
     this.protectSample(index);
+    if (this.isResolvedRequested(index)) return;
+    this.ensureOwnership(index, ptsUs);
   }
 
   markResolvedRequested(index: number): void {
     this.openedRequested.add(index);
     this.resolvedRequested.add(index);
+    this.noteOwnership(index, "RESOLVED");
+    const rec = this.ownership.get(index);
+    if (rec) {
+      rec.waiterActive = false;
+      rec.recoveryRebuilding = false;
+    }
+  }
+
+  markEncoded(index: number): void {
+    this.noteOwnership(index, "ENCODED");
+  }
+
+  ownershipTrace(index: number): RequestOwnershipState[] {
+    return [...(this.ownership.get(index)?.transitions ?? [])];
+  }
+
+  setPumpSlice(start: number, end: number): void {
+    this.pumpSliceStart = start;
+    this.pumpSliceEnd = end;
+  }
+
+  markRecoveryRebuilding(indexes?: Iterable<number>): void {
+    const ids = indexes ? [...indexes] : [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    for (const index of ids) {
+      const rec = this.ensureOwnership(index);
+      if (!rec.transitions.includes("RECOVERY_START")) this.noteOwnership(index, "RECOVERY_START");
+      rec.recoveryRebuilding = true;
+      rec.waiterActive = false;
+      rec.ptsRegistered = false;
+      this.noteOwnership(index, "RECOVERY_REBUILDING");
+    }
+  }
+
+  /**
+   * Re-bind opened identity after recreate/reset. Ledger already survived;
+   * PTS map + waiter are restored by resubmit + awaitReady.
+   */
+  restoreOpenedIdentity(index: number, ptsUs?: number | null): void {
+    this.openRequested(index, ptsUs);
+    this.protectSample(index);
+    const rec = this.ensureOwnership(index, ptsUs);
+    rec.recoveryRebuilding = true;
+    if (ptsUs != null) rec.ptsUs = ptsUs;
+    if (this.sampleRoles.get(index) !== "REQUESTED") {
+      this.sampleRoles.set(index, "REQUESTED");
+    }
+  }
+
+  confirmPtsRegistered(index: number, ptsUs?: number | null): boolean {
+    const sample = this.movie.samples[index];
+    const pts = ptsUs ?? (sample ? this.chunkTimestampUs(sample) : this.ownership.get(index)?.ptsUs ?? null);
+    const rec = this.ensureOwnership(index, pts);
+    if (this.streamReady.has(index) || this.isResolvedRequested(index)) {
+      rec.ptsRegistered = true;
+      this.noteOwnership(index, "PTS_REGISTERED");
+      return true;
+    }
+    if (pts != null && !this.streamPts.hasIndex(index)) {
+      this.streamPts.push(pts, index);
+    }
+    rec.ptsRegistered = this.streamPts.hasIndex(index) || (pts != null && this.hasPendingPts(pts));
+    if (rec.ptsRegistered) this.noteOwnership(index, "PTS_REGISTERED");
+    return rec.ptsRegistered;
+  }
+
+  assertOpenedOwnership(extra?: Partial<AfeStallSnapshot>): void {
+    const unresolved = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    if (unresolved.length === 0) return;
+    const waiter = this.streamWaiter?.index ?? null;
+    const pending = this.streamPts.pendingCount();
+    const rebuilding = unresolved.some((i) => this.ownership.get(i)?.recoveryRebuilding);
+    if (
+      requestOwnershipHolds({
+        unresolvedRequestedVideoFrames: unresolved.length,
+        streamWaiterIndex: waiter,
+        pendingPtsCount: pending,
+        recoveryRebuilding: rebuilding,
+      })
+    ) {
+      return;
+    }
+    for (const index of unresolved) this.noteOwnership(index, "OWNERSHIP_LOST");
+    const focus = extra?.sourceSampleRequested ?? unresolved[0]!;
+    const dump = this.snapshot({
+      sourceSampleRequested: focus,
+      ...extra,
+    });
+    throw new AfeError("AFE_REQUEST_OWNERSHIP_LOST", formatStallMessage(dump), false);
   }
 
   private isResolvedRequested(index: number): boolean {
@@ -220,6 +370,17 @@ export class AfeVideoDecoder {
     const dec = extra?.videoFramesDecoded ?? this.origin.videoFramesDecoded ?? null;
     const enc = extra?.videoFramesEncoded ?? this.origin.videoFramesEncoded ?? null;
     const opened = extra?.openedRequestedVideoFrames ?? this.openedRequested.size;
+    const focus = extra?.sourceSampleRequested ?? origin.sourceSampleRequested ?? waiter;
+    const rec = focus != null ? this.ownership.get(focus) : undefined;
+    const unresolvedRecs = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    const rebuilding =
+      extra?.recoveryRebuilding ??
+      unresolvedRecs.some((i) => this.ownership.get(i)?.recoveryRebuilding === true);
+    const ptsRegistered =
+      extra?.ptsRegistered ??
+      (focus != null
+        ? this.streamPts.hasIndex(focus) || this.hasPendingPts(extra?.requestedPtsUs ?? rec?.ptsUs)
+        : this.streamPts.pendingCount() > 0);
     const invariantOk = requestedEncodedInvariantHolds({
       unresolvedRequestedVideoFrames: unresolved,
       videoFramesRequested: req,
@@ -273,6 +434,14 @@ export class AfeVideoDecoder {
       openedRequestedVideoFrames: extra?.openedRequestedVideoFrames ?? opened,
       unresolvedRequestedVideoFrames: extra?.unresolvedRequestedVideoFrames ?? unresolved,
       transactionComplete: extra?.transactionComplete ?? complete,
+      pumpSliceStart: extra?.pumpSliceStart ?? this.pumpSliceStart,
+      pumpSliceEnd: extra?.pumpSliceEnd ?? this.pumpSliceEnd,
+      ptsRegistered: extra?.ptsRegistered ?? ptsRegistered,
+      ownershipWaiterActive: extra?.ownershipWaiterActive ?? (waiter != null || rec?.waiterActive === true),
+      ownershipRebuilt: extra?.ownershipRebuilt ?? [...this.ownership.values()].some((r) => r.rebuilt),
+      recoveryRebuilding: extra?.recoveryRebuilding ?? rebuilding,
+      ownershipState: extra?.ownershipState ?? rec?.transitions[rec.transitions.length - 1] ?? null,
+      finalFlushAttempted: extra?.finalFlushAttempted ?? this.finalFlushAttempted,
     });
   }
 
@@ -312,10 +481,14 @@ export class AfeVideoDecoder {
   async reset(signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
     this.stallPhase = "RESET";
+    const openedUnresolved = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    if (openedUnresolved.length > 0) this.markRecoveryRebuilding(openedUnresolved);
     this.generation += 1;
     this.streamMode = false;
     this.streamNeeded = null;
-    this.rejectWaiters(new AfeError("AFE_DECODE_FAILED", "decoder reset", false));
+    this.rejectWaiters(new AfeError("AFE_DECODE_FAILED", "decoder reset", false), {
+      keepOpenedOwnership: openedUnresolved.length > 0,
+    });
     if (this.decoder && this.configured) {
       try {
         this.decoder.reset();
@@ -341,6 +514,8 @@ export class AfeVideoDecoder {
   async recreate(signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
     this.stallPhase = "RESET";
+    const openedUnresolved = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    if (openedUnresolved.length > 0) this.markRecoveryRebuilding(openedUnresolved);
     this.transactionId += 1;
     this.generation += 1;
     this.recreateCount += 1;
@@ -354,6 +529,7 @@ export class AfeVideoDecoder {
     this.streamNeeded = null;
     this.needsKeyframe = true;
     this.configured = false;
+    this.lastSubmittedSample = null;
     if (this.decoder) {
       try {
         this.decoder.close();
@@ -395,6 +571,12 @@ export class AfeVideoDecoder {
     if (!bounds?.keepResolved) {
       this.resolvedRequested.clear();
       this.openedRequested.clear();
+      this.ownership.clear();
+    } else {
+      for (const index of this.openedRequested) {
+        if (this.isResolvedRequested(index)) continue;
+        this.restoreOpenedIdentity(index);
+      }
     }
     this.speculativeSubmitted = 0;
     this.cancelledSpeculativeSamples = 0;
@@ -567,7 +749,7 @@ export class AfeVideoDecoder {
     hooks?: AwaitReadyHooks,
   ): Promise<VideoFrame | null> {
     this.bindOrigin({ sourceSampleRequested: index, ...extra });
-    this.openRequested(index);
+    this.openRequested(index, extra?.requestedPtsUs ?? extra?.originRequestedPts);
     if (!this.stallPhase) this.stallPhase = "WAIT_EXACT_PTS";
     const hit = this.takeReady(index);
     if (hit) return Promise.resolve(hit);
@@ -596,7 +778,9 @@ export class AfeVideoDecoder {
         const err = new AfeError("AFE_DECODE_STALL", formatStallMessage(dumpStall()), false);
         this.lastError = err;
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
+        this.noteWaiterCleared(index);
         this.streamPts.failPending("ERROR");
+        this.noteOwnership(index, "ERROR");
         finish(() => reject(err));
       };
       const trySkip = (): boolean => {
@@ -605,6 +789,7 @@ export class AfeVideoDecoder {
         if (this.streamReady.has(index)) return false;
         if (!this.hasLaterReady(index)) return false;
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
+        this.noteWaiterCleared(index);
         if (this.streamPts.hasIndex(index)) {
           this.streamPts.deleteIndex(index);
           this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
@@ -625,11 +810,28 @@ export class AfeVideoDecoder {
           return;
         }
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
+        this.noteWaiterCleared(index);
+        const rec = this.ownership.get(index);
+        const pending = this.streamPts.pendingCount();
+        if (
+          this.openedRequested.has(index) &&
+          !this.isResolvedRequested(index) &&
+          pending === 0 &&
+          !rec?.recoveryRebuilding
+        ) {
+          this.noteOwnership(index, "OWNERSHIP_LOST");
+          const err = new AfeError("AFE_REQUEST_OWNERSHIP_LOST", formatStallMessage(dumpStall()), false);
+          this.lastError = err;
+          finish(() => reject(err));
+          return;
+        }
         finish(() => resolve(null));
       };
       const stallTimer = setTimeout(onTimeout, timeoutMs);
       const onAbort = () => {
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
+        this.noteWaiterCleared(index);
+        this.noteOwnership(index, "ABORTED");
         this.rejectWaiters(abortedError(signal));
         this.dropDecoderAfterAbort();
         finish(() => reject(abortedError(signal)));
@@ -640,6 +842,7 @@ export class AfeVideoDecoder {
         resolve: (f) => finish(() => resolve(f)),
         reject: (e) => finish(() => reject(e)),
       };
+      this.noteWaiterInstalled(index);
     });
   }
 
@@ -658,6 +861,9 @@ export class AfeVideoDecoder {
     if (role === "REQUESTED") this.protectSample(sample.index);
     this.streamPts.push(timestamp, sample.index);
     this.lastSubmittedSample = sample.index;
+    if (this.openedRequested.has(sample.index) && !this.isResolvedRequested(sample.index)) {
+      this.confirmPtsRegistered(sample.index, timestamp);
+    }
     try {
       this.decoder.decode(chunk);
       if (sample.isKeyframe) this.needsKeyframe = false;
@@ -742,6 +948,7 @@ export class AfeVideoDecoder {
       return;
     }
     this.stallPhase = "FINAL_FLUSH";
+    this.finalFlushAttempted = true;
     await this.settleOutputs(signal, false);
   }
 
@@ -956,6 +1163,11 @@ export class AfeVideoDecoder {
     } catch {
       /* */
     }
+    const openedUnresolved = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    if (openedUnresolved.length > 0) {
+      /* Keep exact-PTS ownership. An unmatched neighbor must not wipe PtsIndexMap / waiter. */
+      return;
+    }
     const err = new AfeError(
       "AFE_DECODE_FAILED",
       `unmatched VideoFrame timestamp ${timestamp} (PTS-keyed exact match only)`,
@@ -1007,20 +1219,33 @@ export class AfeVideoDecoder {
     this.rejectWaiters(err);
   }
 
-  private rejectWaiters(err: Error): void {
+  private rejectWaiters(err: Error, opts?: { keepOpenedOwnership?: boolean }): void {
     const pending: FrameWaiter[] = [];
     for (const q of this.waiters.values()) pending.push(...q);
     this.waiters.clear();
     for (const w of pending) w.reject(err);
+    const keep = opts?.keepOpenedOwnership === true;
     if (this.streamWaiter) {
       const w = this.streamWaiter;
+      const idx = w.index;
       this.streamWaiter = null;
+      this.noteWaiterCleared(idx);
+      if (keep) this.markRecoveryRebuilding([idx]);
+      else {
+        const waiterFate = isAfeError(err) && err.code === "AFE_ABORTED" ? "ABORTED" : "ERROR";
+        this.noteOwnership(idx, waiterFate);
+      }
       w.reject(err);
     }
     this.closeStreamFrames();
     const fate =
       isAfeError(err) && err.code === "AFE_ABORTED" ? "ABORTED" : "ERROR";
-    this.streamPts.failPending(fate);
+    if (keep) {
+      this.streamPts.failPending("ABORTED");
+      this.streamPts.clear();
+    } else {
+      this.streamPts.failPending(fate);
+    }
   }
 
   private dropDecoderAfterAbort(): void {
