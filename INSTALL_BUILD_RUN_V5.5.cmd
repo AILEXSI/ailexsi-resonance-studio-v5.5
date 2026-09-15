@@ -17,9 +17,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
-where npm >nul 2>&1
-if errorlevel 1 (
-  echo Fehler: npm wurde nicht gefunden. Befehl: npm
+rem Resolve npm.cmd for the PowerShell helper. Never a PowerShell npm alias
+rem (that can split to n + pm -> Unknown command: "pm").
+set "NPM_CMD="
+for /f "delims=" %%I in ('where npm.cmd 2^>nul') do (
+  set "NPM_CMD=%%I"
+  goto :have_npm
+)
+:have_npm
+if not defined NPM_CMD (
+  echo Fehler: npm.cmd wurde nicht gefunden. Befehl: npm.cmd
   echo Bitte Node.js LTS, enthaelt npm, selbst installieren. Dieser Starter laedt keine Installer herunter. Kosten: 0 EUR.
   pause
   exit /b 1
