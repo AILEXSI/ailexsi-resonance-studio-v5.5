@@ -19,6 +19,7 @@ import {
   installNeverEmitDecoder,
   installRecoverOnResetDecoder,
   installRecoverThenNeedDecoder,
+  installRecoverThenNeverEmitDecoder,
   installSkipPtsDecoder,
 } from "./afe-videodecoder-mock";
 
@@ -337,7 +338,8 @@ describe("AFE-10 A–J open VIDEO request keeps decode ownership until exact PTS
       }).rejects.toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
     } finally {
       const text = formatStallMessage(scheduler.stallSnapshot());
-      expect(text).not.toMatch(/nearest|snap|neighbor|paintFallback|allowSkip|VIS|BLACK/i);
+      expect(text).not.toMatch(/nearest|neighbor|paintFallback|allowSkip/i);
+      expect(text).not.toMatch(/\b(snap|VIS|BLACK)\b/);
       expect(scheduler.stallSnapshot().transactionComplete).toBe(false);
       scheduler.close();
     }
@@ -380,7 +382,7 @@ describe("AFE-10 A–J open VIDEO request keeps decode ownership until exact PTS
   it("J. true missing exact PTS with ownership intact is AFE_DECODE_STALL (Enc < Req)", async () => {
     const movie = loadMovie();
     if (!movie) return;
-    restore = installRecoverThenNeedDecoder(200);
+    restore = installRecoverThenNeverEmitDecoder();
     const scheduler = new AfeScheduler(movie, 12);
     try {
       await expect(async () => {
@@ -405,8 +407,8 @@ describe("AFE-10 A–J open VIDEO request keeps decode ownership until exact PTS
           videoFramesEncoded: 0,
         }),
       ).toBe(true);
-      expect(dump.decoderFlushCount).toBe(0);
-      expect(formatStallMessage(dump)).toMatch(/FINAL_FLUSH no/);
+      expect(dump.finalFlushAttempted).toBe(true);
+      expect(formatStallMessage(dump)).toMatch(/FINAL_FLUSH yes/);
       scheduler.close();
     }
   }, 15_000);

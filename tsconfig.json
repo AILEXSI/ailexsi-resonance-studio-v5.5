@@ -36,6 +36,7 @@
     "tests/export/afe-07-recovery.test.ts",
     "tests/export/afe-08-transaction-end.test.ts",
     "tests/export/afe-09-counter-invariant.test.ts",
-    "tests/export/afe-10-request-ownership.test.ts"
+    "tests/export/afe-10-request-ownership.test.ts",
+    "tests/export/afe-11-final-flush.test.ts"
   ]
 }

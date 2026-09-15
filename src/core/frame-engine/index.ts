@@ -53,6 +53,7 @@ export {
   lastRequiredDecodeSample,
   legacyPumpSubmitEnd,
   mayFinalFlush,
+  usefulInputExhausted,
   nowMs,
   originFromStall,
   progressivePumpSliceEnd,

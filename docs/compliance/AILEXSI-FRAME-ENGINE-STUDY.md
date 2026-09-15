@@ -879,3 +879,22 @@ Open request was ledger-only. `recreate()` / `reset()` / `beginStream()` cleared
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 → Req==Dec==Enc, unresolved 0, exact frame, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-11 — FINAL_FLUSH when useful input is exhausted for an open request (V5.5)
+
+Windows AFE-10: ownership rebuilt, pump reached `lastRequired=96`, sample 38 PTS 1625000 still missing. `videoReq/Dec/Enc` 47/46/46, `unresolved` 1, `WAIT_EXACT_PTS`, `submitted` 96, `lastRequested` 90, `decodeQueue` 81, `flushes` 0, `FINAL_FLUSH` no, `ptsRegistered` no, `waiterActive` no, `recoveryRebuilding` no, `ownershipState WAIT_REINSTALLED`.
+
+## Cause
+
+`FINAL_FLUSH` was gated on `atTail(currentRequestedSample)` (sample 38 === lastRequested 90). Useful input was already exhausted (`lastSubmitted>=lastRequired`). Hardware still held `decodeQueue` 81. The engine sat in `WAIT_EXACT_PTS` with no waiter and no flush — a 3s mystery stall instead of one tail flush.
+
+## Fix
+
+1. `FINAL_FLUSH` allowed when ALL: `unresolvedRequested>0`, `lastSubmitted>=lastRequiredDecodeSample`, no further useful input, waiter not active, pending PTS empty, not `recoveryRebuilding`, transaction not complete. Do **not** require `atTail(currentRequestedSample)`.
+2. Ownership: `unresolved>0` ⇒ `waiterActive` OR `ptsRegistered`/pending OR `recoveryRebuilding` OR `FINAL_FLUSH` armed/in progress. Else immediate `AFE_REQUEST_OWNERSHIP_LOST`.
+3. `WAIT_EXACT_PTS` → arm `FINAL_FLUSH` once → brief wait → exact PTS or typed `AFE_DECODE_STALL` with honest dump (`usefulInputExhausted`, `finalFlushArmed`, submitted/required, PTS, waiter, rebuilt).
+4. No fake success: `unresolved>0` ⇒ not `transactionComplete`. Exact PTS or typed stall only. No nearest / snap / dup / last-good / VIS / BLACK / null.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 → Req==Dec==Enc, unresolved 0, exact frame, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+

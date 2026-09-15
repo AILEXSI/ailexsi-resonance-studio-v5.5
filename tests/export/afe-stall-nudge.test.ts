@@ -106,7 +106,10 @@ describe("AFE-07 (was AFE-06 nudge): no mid-run flush + honest picture", () => {
         }
       }).rejects.toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
     } finally {
-      expect(scheduler.stallSnapshot().decoderFlushCount).toBe(0);
+      const dump = scheduler.stallSnapshot();
+      expect(dump.finalFlushAttempted).toBe(true);
+      expect(dump.decoderFlushCount).toBeGreaterThanOrEqual(1);
+      expect(dump.transactionComplete).toBe(false);
       scheduler.close();
     }
   }, 15_000);
