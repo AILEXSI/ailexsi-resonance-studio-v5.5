@@ -9,6 +9,8 @@ import {
   AFE_WAIT_EXACT_PTS_MS,
   formatStallMessage,
   isTrueTransactionTail,
+  lastRequiredDecodeSample,
+  mayFinalFlush,
   nowMs,
   pumpMoreSubmitEnd,
   pumpSubmitEnd,
@@ -191,7 +193,25 @@ export class AfeScheduler {
     await this.ensureForward(indexes[start]!, signal);
     await this.decoder.ensure(signal);
     this.decoder.setPrefetchHint(PREFETCH);
-    this.decoder.beginStream(span.needed, span.decodeStart);
+    const requestedIndexes: number[] = [];
+    for (let k = start; k < end; k++) {
+      const idx = indexes[k];
+      if (idx != null) requestedIndexes.push(idx);
+    }
+    const lastRequested = span.decodeEnd;
+    const nextRefAfterLast = nextKeyframeAfter(this.movie, lastRequested);
+    const lastRequired = lastRequiredDecodeSample({
+      lastRequested,
+      maxReorderSamples: this.movie.maxReorderSamples,
+      prefetch: PREFETCH,
+      sampleCount: this.movie.sampleCount,
+      nextRefOrGop: nextRefAfterLast,
+    });
+    this.decoder.beginStream(span.needed, span.decodeStart, {
+      lastRequested,
+      lastRequiredDecodeSample: lastRequired,
+      requestedIndexes,
+    });
 
     const lookahead = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
     afePerfMax("prefetchWindow", lookahead);
@@ -227,12 +247,12 @@ export class AfeScheduler {
         maxReorderSamples: this.movie.maxReorderSamples,
         pendingOutputCount: this.decoder.pendingOutputCount,
       });
-      pumpThrough(target);
+      pumpThrough(Math.min(target, lastRequired));
     };
 
     const pumpMore = (requested: number) => {
       this.decoder.setStallPhase("PUMP_LOOKAHEAD");
-      const nextRef = nextKeyframeAfter(this.movie, requested) ?? this.movie.sampleCount - 1;
+      const nextRef = nextKeyframeAfter(this.movie, requested);
       const target = pumpMoreSubmitEnd({
         requested,
         nextDecode: this.nextDecode,
@@ -240,8 +260,9 @@ export class AfeScheduler {
         prefetch: PREFETCH,
         maxReorderSamples: this.movie.maxReorderSamples,
         nextRefOrGop: nextRef,
+        lastRequested,
       });
-      pumpThrough(target);
+      pumpThrough(Math.min(target, lastRequired));
     };
 
     const recoverGop = async (requested: number) => {
@@ -251,7 +272,12 @@ export class AfeScheduler {
       await this.decoder.recreate(signal);
       this.nextDecode = decodeOrigin(this.movie, requested);
       this.warm = true;
-      this.decoder.beginStream(span.needed, span.decodeStart);
+      this.decoder.beginStream(span.needed, span.decodeStart, {
+        lastRequested,
+        lastRequiredDecodeSample: lastRequired,
+        requestedIndexes,
+        keepResolved: true,
+      });
       this.decoder.setPrefetchHint(PREFETCH);
       this.decoder.bindOrigin(stallExtra(requested));
       this.decoder.protectSample(requested);
@@ -319,7 +345,16 @@ export class AfeScheduler {
         recovered = true;
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, nowMs() + AFE_DECODE_STALL_MS));
       }
-      if (!frame && atTail(idx)) {
+      if (
+        !frame &&
+        atTail(idx) &&
+        mayFinalFlush({
+          unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
+          nextDecode: this.nextDecode,
+          sampleCount: this.movie.sampleCount,
+          lastRequiredDecodeSample: lastRequired,
+        })
+      ) {
         this.decoder.setStallPhase("FINAL_FLUSH");
         await this.decoder.flushTail(signal);
         frame = this.decoder.takeReady(idx);

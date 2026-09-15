@@ -814,3 +814,29 @@ Requested VIDEO fate cannot be `DISCARDED_NOT_NEEDED`.
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner G1–G6 on the production project.  
 **HUMAN-PROVEN: NO**
 
+# AFE-08 — transaction end must not drain unneeded speculative decode (V5.5)
+
+Windows VIDEO after AFE-07 decoded and encoded every requested frame, then failed at `TRANSACTION_END`. VIS-only multi-scene export stayed Fertig / playable (do not re-investigate compositor / H.264 / muxer / encoder).
+
+## Windows shapes (owner screenshots)
+
+- VIDEO #1: `videoReq/Dec/Enc` 37/37/37, `stallPhase TRANSACTION_END`, sample/PTS null, `streamPts/Ready` 0, `decodeQueue` 124, `submitted` 140, `flushes` 1, `resets` 1, `recreates` 1.
+- VIDEO #2: 39/39/39, same shape, `decodeQueue` 110, `submitted` 140.
+- VIS-only PASS, playable MP4.
+
+Cause: requested VIDEO was already terminal. Pump/STEP B treated a missing next keyframe as EOF and submitted the rest of the file. `TRANSACTION_END` then waited on leftover WebCodecs work (`decodeQueue` 110–124) → flush → watchdog → `AFE_DECODE_STALL`. That leftover work is speculative, not a decode failure.
+
+## Fix
+
+1. Transaction COMPLETE when all requested VIDEO frames are terminal, decoded, handed to the encoder; no waiter. `videoReq==Dec==Enc` and no waiter → nothing left to flush. Do not wait `decodeQueueSize>0` speculative work.
+2. Cancel speculative work at end: invalidate generation, clear tracking, reset/recreate decoder, ignore stale callbacks, finish SUCCESS. No `AFE_DECODE_STALL` for an abandoned speculative queue.
+3. `FINAL_FLUSH` only if `unresolvedRequestedVideoFrames>0` AND no further useful input. All RESOLVED/ENCODED → flush forbidden.
+4. Bound submit to last requested + B-reorder + refs. Measure `lastRequestedSample`, `lastRequiredDecodeSample`, `lastSubmittedSample`, `speculativeSamplesSubmitted`.
+5. Classify samples `REQUESTED` / `REFERENCE_REQUIRED` / `SPECULATIVE`. Speculative is cancellable at end.
+6. `TRANSACTION_END` + null request + Req==Enc → TRANSACTION COMPLETE, not stall. May log `cancelledSpeculativeSamples`, `decodeQueueBeforeCancel`, `decoderResetForTransactionEnd`.
+7. AFE-07 preserved: no `allowSkip` / null VIDEO / `paintFallback` / nearest / ±1 / neighbor / VIS / BLACK. Exact PTS.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner G1–G4 on the production project.  
+**HUMAN-PROVEN: NO**
+

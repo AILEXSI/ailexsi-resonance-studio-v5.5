@@ -6,14 +6,19 @@ import {
   AFE_DECODE_STALL_MS,
   AFE_FLUSH_WATCHDOG_MS,
   AFE_SETTLE_DRAIN_MS,
+  classifySampleRole,
   emptyStallSnapshot,
   formatStallMessage,
+  isTransactionComplete,
+  lastRequiredDecodeSample,
+  mayFinalFlush,
   nowMs,
   originFromStall,
   requestedPtsIsPending,
   streamLookaheadSamples,
   type AfeStallPhase,
   type AfeStallSnapshot,
+  type SampleRole,
 } from "./stall";
 import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
 import type { AfeMovie, AfeSample } from "./types";
@@ -60,6 +65,16 @@ export class AfeVideoDecoder {
   private stallPhase: AfeStallPhase | null = null;
   private origin: Partial<AfeStallSnapshot> = {};
   private protectedIndexes = new Set<number>();
+  private requestedIndexes = new Set<number>();
+  private resolvedRequested = new Set<number>();
+  private lastRequestedSample: number | null = null;
+  private lastRequiredSample: number | null = null;
+  private streamDecodeStartBound = 0;
+  private speculativeSubmitted = 0;
+  private cancelledSpeculativeSamples = 0;
+  private decodeQueueBeforeCancel: number | null = null;
+  private decoderResetForTransactionEnd = false;
+  private sampleRoles = new Map<number, SampleRole>();
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -108,6 +123,28 @@ export class AfeVideoDecoder {
     return this.streamPts.fateOf(index);
   }
 
+  roleOf(index: number): SampleRole | undefined {
+    return this.sampleRoles.get(index);
+  }
+
+  unresolvedRequestedCount(): number {
+    let n = 0;
+    for (const index of this.requestedIndexes) {
+      const fate = this.streamPts.fateOf(index);
+      if (fate === "PENDING" || fate === "READY") n += 1;
+      else if (fate == null && (this.streamPts.hasIndex(index) || this.streamReady.has(index))) n += 1;
+    }
+    return n;
+  }
+
+  resolvedRequestedCount(): number {
+    let n = 0;
+    for (const index of this.requestedIndexes) {
+      if (this.resolvedRequested.has(index) || this.streamPts.fateOf(index) === "RESOLVED") n += 1;
+    }
+    return n;
+  }
+
   allSubmittedTerminal(): boolean {
     return this.streamPts.allTerminal();
   }
@@ -151,13 +188,24 @@ export class AfeVideoDecoder {
 
   snapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
     const origin = originFromStall({ ...this.origin, ...extra });
+    const unresolved = extra?.unresolvedRequestedVideoFrames ?? this.unresolvedRequestedCount();
+    const waiter = extra?.streamWaiterIndex ?? this.streamWaiter?.index ?? null;
+    const complete = isTransactionComplete({
+      unresolvedRequestedVideoFrames: unresolved,
+      streamWaiterIndex: waiter,
+      requestedVideoFrameCount: this.requestedIndexes.size,
+      resolvedRequestedVideoFrames: this.resolvedRequestedCount(),
+      videoFramesRequested: extra?.videoFramesRequested ?? this.origin.videoFramesRequested ?? null,
+      videoFramesDecoded: extra?.videoFramesDecoded ?? this.origin.videoFramesDecoded ?? null,
+      videoFramesEncoded: extra?.videoFramesEncoded ?? this.origin.videoFramesEncoded ?? null,
+    });
     return emptyStallSnapshot({
       decodeStartSample: this.streamMode ? this.streamDecodeStart : null,
       lastSubmittedSample: this.lastSubmittedSample,
       decodeQueueSize: this.decodeQueueSize,
       streamPtsPending: this.streamPts.pendingCount(),
       streamReadySize: this.streamReady.size,
-      streamWaiterIndex: this.streamWaiter?.index ?? null,
+      streamWaiterIndex: waiter,
       reorderCap: this.reorderCap,
       lastVideoFrameTimestamp: this.lastVideoFrameTimestamp,
       lastSampleResolved: this.lastSampleResolved,
@@ -177,6 +225,15 @@ export class AfeVideoDecoder {
       requestedPtsUs: extra?.requestedPtsUs ?? origin.requestedPtsUs ?? null,
       ...extra,
       ...origin,
+      lastRequestedSample: extra?.lastRequestedSample ?? this.lastRequestedSample,
+      lastRequiredDecodeSample: extra?.lastRequiredDecodeSample ?? this.lastRequiredSample,
+      speculativeSamplesSubmitted: extra?.speculativeSamplesSubmitted ?? this.speculativeSubmitted,
+      cancelledSpeculativeSamples: extra?.cancelledSpeculativeSamples ?? this.cancelledSpeculativeSamples,
+      decodeQueueBeforeCancel: extra?.decodeQueueBeforeCancel ?? this.decodeQueueBeforeCancel,
+      decoderResetForTransactionEnd:
+        extra?.decoderResetForTransactionEnd ?? this.decoderResetForTransactionEnd,
+      unresolvedRequestedVideoFrames: extra?.unresolvedRequestedVideoFrames ?? unresolved,
+      transactionComplete: extra?.transactionComplete ?? complete,
     });
   }
 
@@ -278,34 +335,131 @@ export class AfeVideoDecoder {
     return samplePtsToChunkTimestampUs(sample.ptsTimescale, this.movie.timescale);
   }
 
-  beginStream(needed: Uint8Array, decodeStart: number): void {
+  beginStream(
+    needed: Uint8Array,
+    decodeStart: number,
+    bounds?: {
+      lastRequested: number;
+      lastRequiredDecodeSample: number;
+      requestedIndexes?: Iterable<number>;
+      keepResolved?: boolean;
+    },
+  ): void {
     this.closeStreamFrames();
     this.streamPts.clear();
     this.streamMode = true;
     this.streamNeeded = needed;
     this.streamDecodeStart = decodeStart;
+    this.streamDecodeStartBound = decodeStart;
+    this.requestedIndexes.clear();
+    this.sampleRoles.clear();
+    if (!bounds?.keepResolved) this.resolvedRequested.clear();
+    this.speculativeSubmitted = 0;
+    this.cancelledSpeculativeSamples = 0;
+    this.decodeQueueBeforeCancel = null;
+    this.decoderResetForTransactionEnd = false;
+    if (bounds) {
+      this.lastRequestedSample = bounds.lastRequested;
+      this.lastRequiredSample = bounds.lastRequiredDecodeSample;
+      if (bounds.requestedIndexes) {
+        for (const index of bounds.requestedIndexes) this.requestedIndexes.add(index);
+      }
+    } else {
+      this.lastRequestedSample = decodeStart + Math.max(0, needed.length - 1);
+      this.lastRequiredSample = lastRequiredDecodeSample({
+        lastRequested: this.lastRequestedSample,
+        maxReorderSamples: this.movie.maxReorderSamples,
+        prefetch: this.prefetchHint,
+        sampleCount: this.movie.sampleCount,
+      });
+    }
+    if (this.requestedIndexes.size === 0) {
+      for (let i = 0; i < needed.length; i++) {
+        if (needed[i] === 1) this.requestedIndexes.add(decodeStart + i);
+      }
+    }
+    for (const index of this.requestedIndexes) this.protectSample(index);
   }
 
+  /**
+   * Transaction tail: if every requested VIDEO sample is already terminal,
+   * abandon leftover speculative WebCodecs work. Not a decode failure.
+   * Never flush decodeQueueSize>0 speculative samples.
+   */
   endStream(): void {
     this.stallPhase = "TRANSACTION_END";
     this.streamMode = false;
     this.streamNeeded = null;
     this.closeStreamFrames();
+    const unresolvedRequested: number[] = [];
+    const cancelled: number[] = [];
     for (const index of this.streamPts.unresolved()) {
-      if (this.protectedIndexes.has(index)) {
+      const role = this.roleOf(index) ?? this.classifySubmitted(index);
+      if (role === "REQUESTED" || (this.protectedIndexes.has(index) && this.requestedIndexes.has(index))) {
         this.streamPts.mark(index, "ERROR");
+        unresolvedRequested.push(index);
         continue;
       }
       this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
+      cancelled.push(index);
     }
     this.streamPts.failPending("ERROR");
-    if (this.streamWaiter) {
-      const w = this.streamWaiter;
+    this.cancelledSpeculativeSamples = cancelled.length;
+    this.decodeQueueBeforeCancel = this.decodeQueueSize;
+    const waiter = this.streamWaiter;
+    const complete =
+      unresolvedRequested.length === 0 &&
+      waiter == null &&
+      isTransactionComplete({
+        unresolvedRequestedVideoFrames: 0,
+        streamWaiterIndex: null,
+      });
+    if (waiter) {
       this.streamWaiter = null;
-      w.reject(new AfeError("AFE_DECODE_FAILED", "stream ended", false));
+      waiter.reject(new AfeError("AFE_DECODE_FAILED", "stream ended", false));
+    }
+    if (complete || unresolvedRequested.length === 0) {
+      this.abandonSpeculativeDecoder();
     }
     this.protectedIndexes.clear();
-    this.clearOrigin();
+    /* Keep origin for post-stream stall dumps (AFE-07 identity). */
+  }
+
+  private classifySubmitted(index: number): SampleRole {
+    return classifySampleRole(index, {
+      requestedIndexes: this.requestedIndexes,
+      decodeStart: this.streamDecodeStartBound,
+      lastRequiredDecodeSample: this.lastRequiredSample ?? index,
+    });
+  }
+
+  /**
+   * Invalidate generation, drop tracking, reset/recreate so stale callbacks
+   * cannot poison the next transaction. Does not flush. Does not stall.
+   */
+  private abandonSpeculativeDecoder(): void {
+    this.generation += 1;
+    this.transactionId += 1;
+    this.decoderResetForTransactionEnd = true;
+    this.resetCount += 1;
+    this.lastError = null;
+    if (this.decoder && this.configured) {
+      try {
+        this.decoder.reset();
+        this.decoder.configure(decoderConfigOf(this.movie.avc));
+        this.needsKeyframe = true;
+        if (!afePerfProbeInstalled()) afePerfCount("decoderResets");
+      } catch {
+        try {
+          this.decoder.close();
+        } catch {
+          /* */
+        }
+        this.decoder = null;
+        this.configured = false;
+        this.needsKeyframe = true;
+      }
+    }
   }
 
   drainStream(put: (index: number, frame: VideoFrame) => void): void {
@@ -325,6 +479,7 @@ export class AfeVideoDecoder {
     if (!frame) return null;
     this.streamReady.delete(index);
     this.streamPts.mark(index, "RESOLVED");
+    if (this.requestedIndexes.has(index)) this.resolvedRequested.add(index);
     this.lastSampleResolved = index;
     return frame;
   }
@@ -438,6 +593,10 @@ export class AfeVideoDecoder {
     if (!this.decoder) throw new AfeError("AFE_DECODE_FAILED", "decoder missing");
     if (this.lastError) throw this.lastError;
     const { timestamp, chunk } = this.makeChunk(sample);
+    const role = this.classifySubmitted(sample.index);
+    this.sampleRoles.set(sample.index, role);
+    if (role === "SPECULATIVE") this.speculativeSubmitted += 1;
+    if (role === "REQUESTED") this.protectSample(sample.index);
     this.streamPts.push(timestamp, sample.index);
     this.lastSubmittedSample = sample.index;
     try {
@@ -511,6 +670,18 @@ export class AfeVideoDecoder {
 
   /** Tail / transaction-end flush only. Watchdog → AFE_DECODE_STALL. */
   async flushTail(signal?: AbortSignal): Promise<void> {
+    const unresolved = this.unresolvedRequestedCount();
+    const lastRequired = this.lastRequiredSample ?? this.lastSubmittedSample ?? 0;
+    if (
+      !mayFinalFlush({
+        unresolvedRequestedVideoFrames: unresolved,
+        nextDecode: (this.lastSubmittedSample ?? -1) + 1,
+        sampleCount: this.movie.sampleCount,
+        lastRequiredDecodeSample: lastRequired,
+      })
+    ) {
+      return;
+    }
     this.stallPhase = "FINAL_FLUSH";
     await this.settleOutputs(signal, false);
   }
@@ -557,6 +728,8 @@ export class AfeVideoDecoder {
   private async settleOutputs(signal?: AbortSignal, persist = false): Promise<void> {
     const dec = this.decoder;
     if (!dec) return;
+    const unresolvedRequested = this.unresolvedRequestedCount();
+    if (this.waiterCount() === 0 && unresolvedRequested === 0 && !this.streamWaiter) return;
     if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
 
     this.stallPhase = this.stallPhase === "FINAL_FLUSH" ? "FINAL_FLUSH" : "DECODER_DRAIN";
@@ -662,6 +835,7 @@ export class AfeVideoDecoder {
   private resolveStream(index: number, frame: VideoFrame): boolean {
     if (this.streamWaiter?.index === index) {
       this.streamPts.mark(index, "RESOLVED");
+      if (this.requestedIndexes.has(index)) this.resolvedRequested.add(index);
       this.lastSampleResolved = index;
       const w = this.streamWaiter;
       this.streamWaiter = null;

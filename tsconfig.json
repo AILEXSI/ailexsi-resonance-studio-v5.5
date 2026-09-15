@@ -33,6 +33,7 @@
     "tests/export/afe-bframe-hard.test.ts",
     "tests/export/afe-stall-watchdog.test.ts",
     "tests/export/afe-stall-nudge.test.ts",
-    "tests/export/afe-07-recovery.test.ts"
+    "tests/export/afe-07-recovery.test.ts",
+    "tests/export/afe-08-transaction-end.test.ts"
   ]
 }

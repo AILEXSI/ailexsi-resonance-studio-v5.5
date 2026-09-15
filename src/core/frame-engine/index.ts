@@ -41,11 +41,17 @@ export {
   AFE_STALL_NUDGE_MS,
   AFE_STALL_NUDGE_WAIT_MS,
   AFE_WAIT_EXACT_PTS_MS,
+  classifySampleRole,
   emptyStallSnapshot,
   formatStallMessage,
+  hasFurtherUsefulInput,
   hostSafeSourceName,
+  isExportTransactionComplete,
+  isTransactionComplete,
   isTrueTransactionTail,
+  lastRequiredDecodeSample,
   legacyPumpSubmitEnd,
+  mayFinalFlush,
   nowMs,
   originFromStall,
   pumpMoreSubmitEnd,
@@ -55,7 +61,15 @@ export {
   REQUESTED_VIDEO_FATES,
   streamLookaheadSamples,
 } from "./stall";
-export type { AfeDumpPictureKind, AfeStallPhase, AfeStallSnapshot, PumpMoreArgs, PumpSubmitArgs, SampleFate } from "./stall";
+export type {
+  AfeDumpPictureKind,
+  AfeStallPhase,
+  AfeStallSnapshot,
+  PumpMoreArgs,
+  PumpSubmitArgs,
+  SampleFate,
+  SampleRole,
+} from "./stall";
 export {
   samplePtsToChunkTimestampUs,
   sampleDurationToChunkDurationUs,
