@@ -560,6 +560,17 @@ export function decodeOrigin(movie: AfeMovie, index: number): number {
   return keyframeAtOrBefore(movie, key - 1);
 }
 
+/**
+ * One I-frame earlier than `currentOrigin`, or null at the file start.
+ * AFE-13: walk-back escape after a recreate that froze at HIGH_WATER.
+ */
+export function earlierKeyframeOrigin(movie: AfeMovie, currentOrigin: number): number | null {
+  if (currentOrigin <= 0) return null;
+  const earlier = keyframeAtOrBefore(movie, currentOrigin - 1);
+  if (earlier >= currentOrigin) return null;
+  return earlier;
+}
+
 /** Next I-frame strictly after `decodeIndex`, or null at the last GOP. */
 export function nextKeyframeAfter(movie: AfeMovie, decodeIndex: number): number | null {
   const keys = movie.keyframeIndices;

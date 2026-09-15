@@ -21,6 +21,11 @@ export const AFE_STALL_NUDGE_WAIT_MS = 250;
 export const AFE_SETTLE_DRAIN_MS = 80;
 /** Watchdog around the one allowed FINAL_FLUSH / DECODER_DRAIN. */
 export const AFE_FLUSH_WATCHDOG_MS = AFE_DECODE_STALL_MS;
+/**
+ * After recreate, detect frozen HIGH_WATER without sitting the 3s stall budget.
+ * One dequeue/output window — not a mystery timeout, not a flush timer.
+ */
+export const AFE_POST_RECREATE_OUTPUT_BUDGET_MS = 80;
 
 /**
  * Hard ceiling for WebCodecs decodeQueue HIGH_WATER.
@@ -163,6 +168,10 @@ export type AfeStallSnapshot = {
   lastOutputProgressTimestamp: number | null;
   /** Compact per-pump traces (phase + queue + lastDecoded). */
   submitPhaseTraces: SubmitPhaseTrace[];
+  /** AFE-13: HIGH_WATER + stuck lastDecoded after recreate (cannot pump). */
+  frozenAtHighWater: boolean;
+  /** AFE-13: one walk-back GOP recover from an earlier keyframe already used. */
+  earlierKeyframeRecovered: boolean;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -259,6 +268,8 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     noMoreSubmission: false,
     lastOutputProgressTimestamp: null,
     submitPhaseTraces: [],
+    frozenAtHighWater: false,
+    earlierKeyframeRecovered: false,
     ...partial,
   };
 }
@@ -327,6 +338,64 @@ export function noMoreSubmissionRequired(args: {
   outputProgressed: boolean;
 }): boolean {
   return args.decodeQueueSize >= args.highWater && !args.outputProgressed;
+}
+
+/**
+ * AFE-13 deadlock: after recreate the producer is paused at HIGH_WATER
+ * waiting for output that never comes, and FINAL_FLUSH is illegal because
+ * lastSubmitted < lastRequired. Cannot pump, cannot flush.
+ */
+export function frozenHighWaterDeadlock(args: {
+  recreateCount: number;
+  decodeQueueSize: number;
+  highWater: number;
+  lastDecodedStuck: boolean;
+  unresolvedRequestedVideoFrames: number;
+  lastSubmittedSample: number | null;
+  lastRequiredDecodeSample: number | null;
+  backpressureBlocked: boolean;
+  noMoreSubmission: boolean;
+}): boolean {
+  if (args.recreateCount < 1) return false;
+  if (args.unresolvedRequestedVideoFrames <= 0) return false;
+  if (args.decodeQueueSize < args.highWater) return false;
+  if (!args.lastDecodedStuck) return false;
+  if (!args.noMoreSubmission || !args.backpressureBlocked) return false;
+  const submitted = args.lastSubmittedSample ?? -1;
+  const required = args.lastRequiredDecodeSample ?? -1;
+  return submitted < required;
+}
+
+/**
+ * Producer permanently noMoreSubmission, lastDecoded unchanged, and
+ * lastSubmitted < lastRequired — useful decode progress is impossible
+ * without an earlier-keyframe recreate. Not a FINAL_FLUSH trigger
+ * (AFE-06: no mid-run flush as pressure release).
+ */
+export function usefulProgressImpossible(args: {
+  noMoreSubmission: boolean;
+  lastDecodedUnchanged: boolean;
+  lastSubmittedSample: number | null;
+  lastRequiredDecodeSample: number | null;
+}): boolean {
+  if (!args.noMoreSubmission || !args.lastDecodedUnchanged) return false;
+  const submitted = args.lastSubmittedSample ?? -1;
+  const required = args.lastRequiredDecodeSample ?? -1;
+  return submitted < required;
+}
+
+/**
+ * ONE additional controlled GOP recover from an earlier I-frame.
+ * Prefer this before any flush. Null origin → typed stall, not flush.
+ */
+export function mayEarlierKeyframeRecover(args: {
+  frozenHighWaterAfterRecreate: boolean;
+  earlierKeyframeOrigin: number | null;
+  earlierKeyframeRecovered: boolean;
+}): boolean {
+  if (!args.frozenHighWaterAfterRecreate) return false;
+  if (args.earlierKeyframeRecovered) return false;
+  return args.earlierKeyframeOrigin != null && args.earlierKeyframeOrigin >= 0;
 }
 
 export type PumpSubmitArgs = {
@@ -693,6 +762,8 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `decodeQueue ${d.decodeQueueSize}`,
     `lastDecodedTs ${d.lastDecodedTimestamp}`,
     `gopStart ${d.gopKeyframeStart}`,
+    `frozenAtHighWater ${d.frozenAtHighWater ? "yes" : "no"}`,
+    `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
     `submitted ${d.lastSubmittedSample}`,
     `lastSubmittedSample ${d.lastSubmittedSample} (sample-index)`,
     `decodeStart ${d.decodeStartSample}`,

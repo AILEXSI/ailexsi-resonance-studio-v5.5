@@ -5,6 +5,7 @@ import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMarkDecoded, afePerfMa
 import {
   AFE_DECODE_STALL_MS,
   AFE_FLUSH_WATCHDOG_MS,
+  AFE_POST_RECREATE_OUTPUT_BUDGET_MS,
   AFE_SETTLE_DRAIN_MS,
   classifySampleRole,
   decodeQueueHighWater,
@@ -110,6 +111,10 @@ export class AfeVideoDecoder {
   private openSubmitPhase: SubmitPhaseTrace | null = null;
   private readonly capacityOutputWaiters = new Set<() => void>();
   private readonly capacityExactWaiters = new Set<() => void>();
+  private gopKeyframeStart: number | null = null;
+  private frozenAfterRecreate = false;
+  private earlierKeyframeRecovered = false;
+  private earlierKeyframeRecoverCount = 0;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -161,6 +166,32 @@ export class AfeVideoDecoder {
 
   noteRecoveryAttempt(): void {
     this.recoveryAttempts += 1;
+  }
+
+  get currentGopKeyframeStart(): number | null {
+    return this.gopKeyframeStart;
+  }
+
+  setGopKeyframeStart(origin: number | null): void {
+    this.gopKeyframeStart = origin;
+  }
+
+  get earlierKeyframeRecoverUsed(): boolean {
+    return this.earlierKeyframeRecovered;
+  }
+
+  noteEarlierKeyframeRecover(): void {
+    this.earlierKeyframeRecovered = true;
+    this.earlierKeyframeRecoverCount += 1;
+  }
+
+  isFrozenAtHighWaterAfterRecreate(): boolean {
+    if (this.recreateCount < 1) return false;
+    if (this.unresolvedRequestedCount() <= 0) return false;
+    if (this.decodeQueueSize < this.decodeQueueHighWater) return false;
+    if (this.frozenAfterRecreate) return true;
+    if (!this.noMoreSubmission && !this.backpressureBlocked) return false;
+    return this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit;
   }
 
   fateOf(index: number) {
@@ -306,7 +337,9 @@ export class AfeVideoDecoder {
    *
    * Returns false when the caller must not submit more. Before the first
    * recreate, that is a stop-for-STEP-C signal (do not 3s-stall). After
-   * recreate, a still-stuck HIGH_WATER queue is a typed AFE_DECODE_STALL.
+   * recreate, a still-stuck HIGH_WATER queue returns false after a short
+   * output-progress budget so the scheduler can walk back one earlier
+   * keyframe (or typed-stall). Do not sit the 3s mystery stall.
    */
   async waitForDecodeCapacity(
     signal?: AbortSignal,
@@ -317,6 +350,7 @@ export class AfeVideoDecoder {
     this.noteQueuePeak();
     const requested = opts?.requested;
     if (requested != null && this.streamReady.has(requested)) return true;
+    if (requested != null) this.ensureRebuildOwnership(requested);
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
     if (
       maySubmitEncoded({
@@ -327,6 +361,7 @@ export class AfeVideoDecoder {
     ) {
       this.noMoreSubmission = false;
       this.backpressureBlocked = false;
+      this.frozenAfterRecreate = false;
       return true;
     }
     this.noMoreSubmission = true;
@@ -335,13 +370,15 @@ export class AfeVideoDecoder {
     if (this.openSubmitPhase) this.openSubmitPhase.pausedForCapacity = true;
     if (this.recreateCount === 0) return false;
     const tsAtPause = this.lastVideoFrameTimestamp;
-    const deadline = opts?.budgetEnd ?? nowMs() + AFE_DECODE_STALL_MS;
+    const short = nowMs() + AFE_POST_RECREATE_OUTPUT_BUDGET_MS;
+    const deadline = Math.min(short, opts?.budgetEnd ?? short);
     const dec = this.decoder;
     while (this.decodeQueueSize >= high) {
       throwIfAborted(signal);
       if (requested != null && this.streamReady.has(requested)) {
         this.backpressureBlocked = false;
         this.noMoreSubmission = false;
+        this.frozenAfterRecreate = false;
         return true;
       }
       if (this.lastError) throw this.lastError;
@@ -349,13 +386,8 @@ export class AfeVideoDecoder {
       if (remain <= 0) {
         if (this.lastVideoFrameTimestamp === tsAtPause && this.decodeQueueSize >= high) {
           this.noMoreSubmission = true;
-          const dump = this.snapshot({
-            sourceSampleRequested: requested ?? this.origin.sourceSampleRequested ?? null,
-            stalledMs: AFE_DECODE_STALL_MS,
-          });
-          const err = new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
-          this.lastError = err;
-          throw err;
+          this.frozenAfterRecreate = true;
+          return false;
         }
         this.backpressureBlocked = false;
         return this.decodeQueueSize < high;
@@ -364,16 +396,19 @@ export class AfeVideoDecoder {
       if (reason === "exact" || (requested != null && this.streamReady.has(requested))) {
         this.backpressureBlocked = false;
         this.noMoreSubmission = false;
+        this.frozenAfterRecreate = false;
         return true;
       }
       if (this.lastVideoFrameTimestamp !== tsAtPause || this.decodeQueueSize < high) {
         this.noMoreSubmission = false;
+        this.frozenAfterRecreate = false;
         this.backpressureBlocked = this.decodeQueueSize >= high;
         if (this.decodeQueueSize < high) return true;
       }
     }
     this.backpressureBlocked = false;
     this.noMoreSubmission = false;
+    this.frozenAfterRecreate = false;
     return true;
   }
 
@@ -496,6 +531,19 @@ export class AfeVideoDecoder {
     });
   }
 
+  /**
+   * RECOVERY_REBUILDING must not sit with waiter null + ptsRegistered no.
+   * Re-bind PTS immediately so ownership holds during the rebuild step.
+   */
+  private ensureRebuildOwnership(index: number): void {
+    if (!this.openedRequested.has(index) || this.isResolvedRequested(index)) return;
+    const rec = this.ensureOwnership(index);
+    if (rec.ptsRegistered || this.streamWaiter?.index === index) return;
+    if (rec.recoveryRebuilding || this.recreateCount > 0) {
+      this.confirmPtsRegistered(index, rec.ptsUs);
+    }
+  }
+
   confirmPtsRegistered(index: number, ptsUs?: number | null): boolean {
     const sample = this.movie.samples[index];
     const pts = ptsUs ?? (sample ? this.chunkTimestampUs(sample) : this.ownership.get(index)?.ptsUs ?? null);
@@ -577,6 +625,7 @@ export class AfeVideoDecoder {
   bindOrigin(fields: Partial<AfeStallSnapshot>): void {
     const next = originFromStall(fields);
     const sample = next.originRequestedSample ?? null;
+    if (fields.gopKeyframeStart != null) this.gopKeyframeStart = fields.gopKeyframeStart;
     if (this.origin.originRequestedSample != null && this.origin.originRequestedSample === sample) {
       return;
     }
@@ -693,6 +742,9 @@ export class AfeVideoDecoder {
       lastOutputProgressTimestamp:
         extra?.lastOutputProgressTimestamp ?? this.lastOutputProgressTimestamp,
       submitPhaseTraces: extra?.submitPhaseTraces ?? [...this.submitPhaseTraces],
+      gopKeyframeStart: extra?.gopKeyframeStart ?? this.gopKeyframeStart,
+      frozenAtHighWater: extra?.frozenAtHighWater ?? this.isFrozenAtHighWaterAfterRecreate(),
+      earlierKeyframeRecovered: extra?.earlierKeyframeRecovered ?? this.earlierKeyframeRecovered,
     });
   }
 
@@ -786,6 +838,7 @@ export class AfeVideoDecoder {
     this.submitsWithoutOutputProgress = 0;
     this.backpressureBlocked = false;
     this.noMoreSubmission = false;
+    this.frozenAfterRecreate = false;
     if (this.decoder) {
       try {
         this.decoder.close();
@@ -847,6 +900,12 @@ export class AfeVideoDecoder {
     this.lastDecodedAtSubmit = null;
     this.submitPhaseTraces = [];
     this.openSubmitPhase = null;
+    this.frozenAfterRecreate = false;
+    if (!bounds?.keepResolved) {
+      this.gopKeyframeStart = null;
+      this.earlierKeyframeRecovered = false;
+      this.earlierKeyframeRecoverCount = 0;
+    }
     if (bounds) {
       this.lastRequestedSample = bounds.lastRequested;
       this.lastRequiredSample = bounds.lastRequiredDecodeSample;
@@ -1478,6 +1537,7 @@ export class AfeVideoDecoder {
     }
     this.lastVideoFrameTimestamp = frame.timestamp;
     this.lastOutputProgressTimestamp = frame.timestamp;
+    this.frozenAfterRecreate = false;
     this.notifyCapacityOutput();
     if (this.streamMode) {
       const idx = this.matchStreamIndex(frame.timestamp);
