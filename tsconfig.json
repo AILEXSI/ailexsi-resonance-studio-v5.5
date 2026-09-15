@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src", "tests"],
+  "exclude": [
+    "tests/media/user-fixtures.test.ts",
+    "tests/export/afe-parser.test.ts",
+    "tests/export/afe-oracle.test.ts",
+    "tests/v55/mediabunny-absent.test.ts",
+    "tests/v55/identity.test.ts",
+    "tests/export/afe-cache-abort.test.ts",
+    "tests/export/afe-stream-plan.test.ts"
+  ]
+}

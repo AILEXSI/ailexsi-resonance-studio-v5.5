@@ -1,0 +1,573 @@
+{
+  "schemaVersion": 5,
+  "pass": "AFE-03",
+  "historical": true,
+  "label": "HISTORICAL V5 AFE-03 vs Mediabunny (AFE-EQUAL). V5.5 keeps AFE; Mediabunny is removed.",
+  "classification": "AFE-EQUAL",
+  "environment": {
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36",
+    "webCodecs": true,
+    "videoEncoder": true,
+    "platform": "Linux x86_64"
+  },
+  "prefetch": 4,
+  "pixels": {
+    "mediabunny": {
+      "EXACT": 2960,
+      "WITHIN 1 FRAME": 0,
+      ">1 FRAME ERROR": 0,
+      "FAILED SEEK": 0,
+      "TIMEOUT": 0,
+      "WRONG FRAME": 0,
+      "UNKNOWN": 0
+    },
+    "afe": {
+      "EXACT": 2960,
+      "WITHIN 1 FRAME": 0,
+      ">1 FRAME ERROR": 0,
+      "FAILED SEEK": 0,
+      "TIMEOUT": 0,
+      "WRONG FRAME": 0,
+      "UNKNOWN": 0
+    },
+    "compared": 2960,
+    "agree": 2960
+  },
+  "mismatchCount": 0,
+  "sequential": {
+    "mediabunny": {
+      "totalMs": 455.69999999925494,
+      "n": 1728,
+      "worstMs": 0,
+      "avgMs": 0.2637152777773466
+    },
+    "afe": {
+      "totalMs": 342.59999999962747,
+      "n": 1728,
+      "worstMs": 0,
+      "avgMs": 0.1982638888886733
+    }
+  },
+  "random": {
+    "mediabunny": {
+      "totalMs": 3898.099999967031,
+      "n": 1232,
+      "worstMs": 40.299999999813735,
+      "avgMs": 3.1640422077654473
+    },
+    "afe": {
+      "totalMs": 4009.600000030361,
+      "n": 1232,
+      "worstMs": 47.69999999925494,
+      "avgMs": 3.2545454545700983
+    }
+  },
+  "memory": {
+    "twoSec": {
+      "label": "2s",
+      "loops": 1,
+      "last": {
+        "loop": 0,
+        "decodedCached": 0,
+        "maxDecodedCached": 12,
+        "approxBytes": 0,
+        "peakDecodedCached": 0
+      },
+      "peakDecoded": 0,
+      "peakBytes": 0,
+      "stabilized": false
+    },
+    "twentyEight": {
+      "label": "28s",
+      "loops": 1,
+      "last": {
+        "loop": 0,
+        "decodedCached": 0,
+        "maxDecodedCached": 12,
+        "approxBytes": 0,
+        "peakDecodedCached": 0
+      },
+      "peakDecoded": 0,
+      "peakBytes": 0,
+      "stabilized": false
+    },
+    "sevenMinSim": {
+      "label": "7min-sim",
+      "loops": 210,
+      "last": {
+        "loop": 209,
+        "decodedCached": 0,
+        "maxDecodedCached": 12,
+        "approxBytes": 0,
+        "peakDecodedCached": 0
+      },
+      "peakDecoded": 0,
+      "peakBytes": 0,
+      "stabilized": true
+    },
+    "thirtyMinTail": {
+      "label": "30min-tail",
+      "loops": 50,
+      "last": {
+        "loop": 49,
+        "decodedCached": 0,
+        "maxDecodedCached": 12,
+        "approxBytes": 0,
+        "peakDecodedCached": 0
+      },
+      "peakDecoded": 0,
+      "peakBytes": 0,
+      "stabilized": true
+    }
+  },
+  "abort": {
+    "batch": {
+      "ok": true,
+      "code": "AFE_ABORTED",
+      "late": 0,
+      "error": "AFE_ABORTED: signal is aborted without reason"
+    },
+    "open": {
+      "ok": true,
+      "code": "AFE_ABORTED",
+      "error": "AFE_ABORTED: signal is aborted without reason"
+    },
+    "random": {
+      "ok": true,
+      "code": "AFE_ABORTED",
+      "error": "AFE_ABORTED: signal is aborted without reason"
+    },
+    "export": {
+      "ok": true,
+      "aborted": true,
+      "error": "Export aborted"
+    }
+  },
+  "fallback": {
+    "ok": true,
+    "code": "AFE_UNSUPPORTED_CONTAINER",
+    "error": "AFE_UNSUPPORTED_CONTAINER: invalid box size for E fr"
+  },
+  "exportRepeatsOfficial": {
+    "label": "isolated 10 warmup + 50 measured after FIFO + mid-GOP extra-sample",
+    "alternated": true,
+    "warmupN": 10,
+    "measuredN": 50,
+    "mediabunny": {
+      "n": 50,
+      "mean": 263.81200000001115,
+      "median": 262.90000000037253,
+      "p50": 262.90000000037253,
+      "p95": 273.90000000037253,
+      "worst": 303.29999999981374,
+      "min": 250.79999999981374,
+      "stddev": 7.837107629745305
+    },
+    "afe": {
+      "n": 50,
+      "mean": 263.01800000002606,
+      "median": 261.20000000018626,
+      "p50": 261.20000000018626,
+      "p95": 275.70000000018626,
+      "worst": 293.8999999994412,
+      "min": 255.19999999925494,
+      "stddev": 6.89558380407733
+    }
+  },
+  "exportRepeatsFirst": {
+    "label": "first 10+50 before mid-GOP extra-sample (sequential path unchanged)",
+    "mediabunny": {
+      "n": 50,
+      "mean": 257.2280000000261,
+      "median": 256.5500000002794,
+      "p50": 256.5500000002794,
+      "p95": 269.5,
+      "worst": 276.29999999981374,
+      "min": 246.60000000009313,
+      "stddev": 6.206771785665582
+    },
+    "afe": {
+      "n": 50,
+      "mean": 256.2719999999832,
+      "median": 255.69999999995343,
+      "p50": 255.69999999995343,
+      "p95": 269.5,
+      "worst": 274.20000000018626,
+      "min": 241.70000000018626,
+      "stddev": 7.27640130831215
+    }
+  },
+  "longExport": {
+    "seconds": 30,
+    "warmupN": 4,
+    "measuredN": 8,
+    "label": "post-fix 30s 720p30 repeated-source",
+    "mediabunny": {
+      "n": 8,
+      "mean": 3775.8874999999534,
+      "median": 3784.350000000093,
+      "p50": 3784.350000000093,
+      "p95": 3823.699999999255,
+      "worst": 3823.699999999255,
+      "min": 3714.7000000001863,
+      "stddev": 37.68565501253495
+    },
+    "afe": {
+      "n": 8,
+      "mean": 3726.7375000000466,
+      "median": 3713.2999999998137,
+      "p50": 3713.2999999998137,
+      "p95": 3829.2000000001863,
+      "worst": 3829.2000000001863,
+      "min": 3665.4000000003725,
+      "stddev": 53.37782633039828
+    }
+  },
+  "longExportFirst": {
+    "seconds": 30,
+    "mediabunny": {
+      "n": 8,
+      "mean": 3650.1750000000466,
+      "median": 3665.5500000002794,
+      "p50": 3665.5500000002794,
+      "p95": 3718.899999999907,
+      "worst": 3718.899999999907,
+      "min": 3568.899999999907,
+      "stddev": 50.106305740903274
+    },
+    "afe": {
+      "n": 8,
+      "mean": 3631.6749999999884,
+      "median": 3636.0499999998137,
+      "p50": 3636.0499999998137,
+      "p95": 3680.7999999998137,
+      "worst": 3680.7999999998137,
+      "min": 3554.8000000002794,
+      "stddev": 38.06716925371931
+    }
+  },
+  "phaseCountsAFE": {
+    "decoderCreates": 1,
+    "decoderConfigures": 1,
+    "decoderResets": 0,
+    "decoderFlushes": 1,
+    "encodedSamplesRead": 60,
+    "encodedChunksSubmitted": 60,
+    "framesDecoded": 60,
+    "framesYielded": 60,
+    "decodeSpanCalls": 0,
+    "cacheLookups": 0,
+    "cacheHits": 0,
+    "cacheMisses": 0,
+    "cacheEvictions": 0,
+    "duplicateDecodes": 0,
+    "videoFrameClones": 0,
+    "videoFrameCreates": 60,
+    "framesClosed": 60,
+    "keyframeLookups": 2,
+    "sampleIndexLookups": 60,
+    "sampleByteSlices": 0,
+    "readyImmediate": 0,
+    "framePromiseWaits": 60,
+    "streamPathFrames": 60,
+    "randomPathFrames": 0,
+    "inFlightPeak": 4,
+    "prefetchWindow": 4
+  },
+  "phaseCountsMB": {
+    "decoderCreates": 1,
+    "decoderConfigures": 1,
+    "decoderResets": 0,
+    "decoderFlushes": 2,
+    "encodedSamplesRead": 0,
+    "encodedChunksSubmitted": 60,
+    "framesDecoded": 60,
+    "framesYielded": 60,
+    "decodeSpanCalls": 0,
+    "cacheLookups": 0,
+    "cacheHits": 0,
+    "cacheMisses": 0,
+    "cacheEvictions": 0,
+    "duplicateDecodes": 0,
+    "videoFrameClones": 0,
+    "videoFrameCreates": 0,
+    "framesClosed": 60,
+    "keyframeLookups": 0,
+    "sampleIndexLookups": 0,
+    "sampleByteSlices": 0,
+    "readyImmediate": 0,
+    "framePromiseWaits": 0,
+    "streamPathFrames": 0,
+    "randomPathFrames": 0,
+    "inFlightPeak": 0,
+    "prefetchWindow": 0
+  },
+  "benchesAJ": [
+    {
+      "id": "A",
+      "title": "sequential one-source 720p30",
+      "rawMb": 255.30000000074506,
+      "rawAfe": 248.09999999962747,
+      "exportMb": {
+        "n": 3,
+        "mean": 263.766666666915,
+        "median": 265.6000000005588,
+        "p50": 265.6000000005588,
+        "p95": 268,
+        "worst": 268,
+        "min": 257.70000000018626,
+        "stddev": 4.400252517998468
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 263.86666666685295,
+        "median": 264.90000000037253,
+        "p50": 264.90000000037253,
+        "p95": 266.90000000037253,
+        "worst": 266.90000000037253,
+        "min": 259.79999999981374,
+        "stddev": 2.9892399631127824
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "B",
+      "title": "repeated segments",
+      "rawMb": 236,
+      "rawAfe": 229.5,
+      "exportMb": {
+        "n": 3,
+        "mean": 146.13333333376795,
+        "median": 144.30000000074506,
+        "p50": 144.30000000074506,
+        "p95": 151.1000000005588,
+        "worst": 151.1000000005588,
+        "min": 143,
+        "stddev": 3.551838334791599
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 147.8000000001242,
+        "median": 146.90000000037253,
+        "p50": 146.90000000037253,
+        "p95": 149.59999999962747,
+        "worst": 149.59999999962747,
+        "min": 146.90000000037253,
+        "stddev": 1.2727922057845618
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "C",
+      "title": "random",
+      "rawMb": 420.19999999925494,
+      "rawAfe": 339.5,
+      "exportMb": null,
+      "exportAfe": null,
+      "rawByFps": null
+    },
+    {
+      "id": "D",
+      "title": "hard cuts",
+      "rawMb": 230.29999999981374,
+      "rawAfe": 222,
+      "exportMb": {
+        "n": 3,
+        "mean": 303.7333333333954,
+        "median": 304.20000000018626,
+        "p50": 304.20000000018626,
+        "p95": 309,
+        "worst": 309,
+        "min": 298,
+        "stddev": 4.502838610877976
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 290.2666666666046,
+        "median": 294.09999999962747,
+        "p50": 294.09999999962747,
+        "p95": 302.70000000018626,
+        "worst": 302.70000000018626,
+        "min": 274,
+        "stddev": 12.026175156278109
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "E",
+      "title": "crossfade",
+      "rawMb": 127.79999999981374,
+      "rawAfe": 127.80000000074506,
+      "exportMb": {
+        "n": 3,
+        "mean": 246.3000000001242,
+        "median": 243.90000000037253,
+        "p50": 243.90000000037253,
+        "p95": 257,
+        "worst": 257,
+        "min": 238,
+        "stddev": 7.940193112643459
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 232.00000000031045,
+        "median": 232.30000000074506,
+        "p50": 232.30000000074506,
+        "p95": 236.40000000037253,
+        "worst": 236.40000000037253,
+        "min": 227.29999999981374,
+        "stddev": 3.7211109454693845
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "F",
+      "title": "Source In",
+      "rawMb": 137,
+      "rawAfe": 127.6000000005588,
+      "exportMb": {
+        "n": 3,
+        "mean": 161.23333333308497,
+        "median": 160.40000000037253,
+        "p50": 160.40000000037253,
+        "p95": 168.19999999925494,
+        "worst": 168.19999999925494,
+        "min": 155.09999999962747,
+        "stddev": 5.380417166609368
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 157.6666666669771,
+        "median": 156.29999999981374,
+        "p50": 156.29999999981374,
+        "p95": 160.6000000005588,
+        "worst": 160.6000000005588,
+        "min": 156.1000000005588,
+        "stddev": 2.0757863304222135
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "G",
+      "title": "clip rate 2",
+      "rawMb": 139.6000000005588,
+      "rawAfe": 140.5,
+      "exportMb": {
+        "n": 3,
+        "mean": 170.1999999995654,
+        "median": 168.5,
+        "p50": 168.5,
+        "p95": 178.3999999994412,
+        "worst": 178.3999999994412,
+        "min": 163.69999999925494,
+        "stddev": 6.120457499253944
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 167.1666666669771,
+        "median": 166.59999999962747,
+        "p50": 166.59999999962747,
+        "p95": 170.80000000074506,
+        "worst": 170.80000000074506,
+        "min": 164.1000000005588,
+        "stddev": 2.764456949027282
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "H",
+      "title": "long GOP 250",
+      "rawMb": 15.600000000558794,
+      "rawAfe": 14.399999999441206,
+      "exportMb": {
+        "n": 3,
+        "mean": 16,
+        "median": 15.100000000558794,
+        "p50": 15.100000000558794,
+        "p95": 18,
+        "worst": 18,
+        "min": 14.899999999441206,
+        "stddev": 1.416568624084683
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 15.000000000310441,
+        "median": 15,
+        "p50": 15,
+        "p95": 15.100000000558794,
+        "worst": 15.100000000558794,
+        "min": 14.900000000372529,
+        "stddev": 0.08164965816881477
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "I",
+      "title": "short GOP / all-intra",
+      "rawMb": 32.5,
+      "rawAfe": 12.899999999441206,
+      "exportMb": {
+        "n": 3,
+        "mean": 30.066666666418314,
+        "median": 30,
+        "p50": 30,
+        "p95": 31.199999999254942,
+        "worst": 31.199999999254942,
+        "min": 29,
+        "stddev": 0.8993825039025143
+      },
+      "exportAfe": {
+        "n": 3,
+        "mean": 13.36666666685293,
+        "median": 13.600000000558794,
+        "p50": 13.600000000558794,
+        "p95": 14,
+        "worst": 14,
+        "min": 12.5,
+        "stddev": 0.6342099197498772
+      },
+      "rawByFps": null
+    },
+    {
+      "id": "J",
+      "title": "multiple fps raw",
+      "rawMb": null,
+      "rawAfe": null,
+      "exportMb": null,
+      "exportAfe": null,
+      "rawByFps": [
+        {
+          "file": "afe-cfr-24-g24-2s",
+          "fps": 24,
+          "mediabunny": 11.5,
+          "afe": 9.700000000186265
+        },
+        {
+          "file": "afe-cfr-25-g25-2s",
+          "fps": 25,
+          "mediabunny": 11.699999999254942,
+          "afe": 9.700000000186265
+        },
+        {
+          "file": "afe-cfr-50-g50-2s",
+          "fps": 50,
+          "mediabunny": 18.40000000037253,
+          "afe": 15.900000000372529
+        },
+        {
+          "file": "afe-cfr-60-g60-2s",
+          "fps": 60,
+          "mediabunny": 35.700000000186265,
+          "afe": 20.600000000558794
+        }
+      ]
+    }
+  ],
+  "hardGate": {
+    "packetMismatches": 0,
+    "pixelMismatches": 0,
+    "afeMedianLteMb": true,
+    "officialAfeMedian": 261.20000000018626,
+    "officialMbMedian": 262.90000000037253
+  }
+}

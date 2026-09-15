@@ -1,0 +1,181 @@
+/**
+ * Generate deterministic frame-identity H.264 MP4s for AFE-01.
+ * Test-only. Not copied into dist / public / Tauri.
+ */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { AFE_HEIGHT, AFE_WIDTH, paintIdentityFrame } from "./afe-shared.mjs";
+
+const outDir = join(dirname(fileURLToPath(import.meta.url)), "..", "tests", "fixtures", "afe");
+mkdirSync(outDir, { recursive: true });
+
+const SPECS = [
+  { id: "afe-cfr-30-g1-2s", fps: 30, seconds: 2, gop: 1 },
+  { id: "afe-cfr-30-g24-2s", fps: 30, seconds: 2, gop: 24 },
+  { id: "afe-cfr-30-g25-2s", fps: 30, seconds: 2, gop: 25 },
+  { id: "afe-cfr-30-g30-2s", fps: 30, seconds: 2, gop: 30 },
+  { id: "afe-cfr-30-g50-3s", fps: 30, seconds: 3, gop: 50 },
+  { id: "afe-cfr-30-g60-8s", fps: 30, seconds: 8, gop: 60 },
+  { id: "afe-cfr-30-g250-28s", fps: 30, seconds: 28, gop: 250 },
+  { id: "afe-cfr-24-g24-2s", fps: 24, seconds: 2, gop: 24 },
+  { id: "afe-cfr-25-g25-2s", fps: 25, seconds: 2, gop: 25 },
+  { id: "afe-cfr-50-g50-2s", fps: 50, seconds: 2, gop: 50 },
+  { id: "afe-cfr-60-g60-2s", fps: 60, seconds: 2, gop: 60 },
+  { id: "afe-cfr-30-g30-720p-2s", fps: 30, seconds: 2, gop: 30, width: 1280, height: 720 },
+];
+
+function runFfmpeg(args, stdin) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] });
+    let err = "";
+    child.stderr.on("data", (d) => {
+      err += String(d);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exit ${code}\n${err.slice(-2000)}`));
+    });
+    if (stdin) {
+      child.stdin.write(stdin);
+      child.stdin.end();
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
+async function encodeSpec(spec) {
+  const width = spec.width ?? AFE_WIDTH;
+  const height = spec.height ?? AFE_HEIGHT;
+  const frames = Math.round(spec.fps * spec.seconds);
+  const frameSize = width * height * 3;
+  const raw = Buffer.alloc(frames * frameSize);
+  for (let n = 0; n < frames; n++) {
+    paintIdentityFrame(raw.subarray(n * frameSize, (n + 1) * frameSize), width, height, n);
+  }
+  const file = join(outDir, `${spec.id}.mp4`);
+  await runFfmpeg(
+    [
+      "-y",
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgb24",
+      "-s",
+      `${width}x${height}`,
+      "-r",
+      String(spec.fps),
+      "-i",
+      "pipe:0",
+      "-an",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-profile:v",
+      "baseline",
+      "-bf",
+      "0",
+      "-g",
+      String(spec.gop),
+      "-keyint_min",
+      String(spec.gop),
+      "-x264-params",
+      `keyint=${spec.gop}:min-keyint=${spec.gop}:scenecut=0`,
+      "-movflags",
+      "+faststart",
+      file,
+    ],
+    raw,
+  );
+  return { ...spec, width, height, frames, file: `tests/fixtures/afe/${spec.id}.mp4` };
+}
+
+function probeKeyframes(file) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-skip_frame",
+        "nokey",
+        "-show_entries",
+        "frame=pts_time,pict_type",
+        "-of",
+        "csv=p=0",
+        file,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => {
+      out += String(d);
+    });
+    child.stderr.on("data", (d) => {
+      err += String(d);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffprobe exit ${code}\n${err}`));
+        return;
+      }
+      const times = out
+        .trim()
+        .split("\n")
+        .map((line) => Number.parseFloat(line.split(",")[0] ?? ""))
+        .filter((n) => Number.isFinite(n));
+      resolve(times);
+    });
+  });
+}
+
+async function main() {
+  const files = [];
+  for (const spec of SPECS) {
+    const encoded = await encodeSpec(spec);
+    const abs = join(outDir, `${spec.id}.mp4`);
+    const keyframes = await probeKeyframes(abs);
+    files.push({
+      id: spec.id,
+      fps: spec.fps,
+      seconds: spec.seconds,
+      gop: spec.gop,
+      width: encoded.width,
+      height: encoded.height,
+      frames: encoded.frames,
+      path: encoded.file,
+      keyframeSec: keyframes,
+    });
+    console.log("wrote", encoded.file, "frames", encoded.frames, "keyframes", keyframes.length);
+  }
+  const manifest = {
+    generated: true,
+    note: "Deterministic frame-identity H.264 (barcode). Test-only. Not product media.",
+    width: AFE_WIDTH,
+    height: AFE_HEIGHT,
+    files,
+  };
+  writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  writeFileSync(
+    join(outDir, "README.md"),
+    [
+      "# AFE frame-identity fixtures",
+      "",
+      "Generated by `node scripts/generate-afe-media.mjs`.",
+      "Each frame encodes its index as a 4×4 black/white barcode.",
+      "Test-only. Not for product distribution.",
+      "",
+    ].join("\n"),
+  );
+  console.log("manifest", files.length, "files");
+}
+
+await main();

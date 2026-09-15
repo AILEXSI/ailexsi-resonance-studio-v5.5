@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <!-- Developer/test-only diagnostic. Not under public/; Vite does not copy this into dist / Tauri. -->
+  <head><meta charset="utf-8" /><title>export-check pending</title></head>
+  <body>
+    <pre id="out">starting</pre>
+    <video id="player" controls style="max-width:100%;background:#111"></video>
+    <a id="dl" style="display:none">download mp4</a>
+    <script type="module">
+      import { createEmptyProject } from "/src/core/project.ts";
+      import { importMediaFile } from "/src/core/media.ts";
+      import { placeAsset } from "/src/core/timeline.ts";
+      import { jobFromProject, exportTimeline, hexHeader, mp4HasAudioTrack } from "/src/core/exporter/index.ts";
+
+      const out = document.getElementById("out");
+      function show(t) {
+        out.textContent = t;
+        document.title = t.split("\n")[0];
+        window.__EXPORT_TEXT = t;
+      }
+
+      async function report(path, body, headers) {
+        try {
+          await fetch("http://127.0.0.1:18765" + path, { method: "POST", body, headers });
+        } catch (e) {
+          console.warn("report failed", e);
+        }
+      }
+
+      async function loadFile(url, name, type) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("fetch " + url + " -> " + res.status);
+        const blob = await res.blob();
+        return new File([blob], name, { type });
+      }
+
+      try {
+        const videoFile = await loadFile("/tests/fixtures/user-video.mp4", "user-video.mp4", "video/mp4");
+        const audioFile = await loadFile("/tests/fixtures/user-audio.mp3", "user-audio.mp3", "audio/mpeg");
+        const videoAsset = await importMediaFile(videoFile);
+        const audioAsset = await importMediaFile(audioFile);
+        let project = createEmptyProject("UserExport");
+        project = {
+          ...project,
+          assets: [videoAsset, audioAsset],
+          inPointMs: 0,
+          outPointMs: Math.min(videoAsset.durationMs, 5000),
+        };
+        const vPlaced = placeAsset(project, videoAsset.id, "V1", 0);
+        if (vPlaced.error) throw new Error(vPlaced.error);
+        const aPlaced = placeAsset(vPlaced.project, audioAsset.id, "A1", 0);
+        if (aPlaced.error) throw new Error(aPlaced.error);
+        project = aPlaced.project;
+        const job = jobFromProject(project, { fileName: "v5-user-export.mp4" });
+        const result = await exportTimeline(job, {
+          onProgress: (p) => {
+            document.title = p.percent + "% " + p.stage;
+          },
+        });
+        if (!result.success || !result.blob) {
+          const msg = "FAIL\n" + (result.error || "no blob");
+          show(msg);
+          await report("/fail", msg);
+        } else {
+          const buf = new Uint8Array(await result.blob.arrayBuffer());
+          const hex = hexHeader(buf, 16);
+          const hasAudio = mp4HasAudioTrack(buf);
+          const meta = [
+            "SUCCESS",
+            "size=" + buf.length,
+            "hex=" + hex,
+            "mime=" + result.mimeType,
+            "brands=" + (result.brands || []).join(","),
+            "audio=" + (result.audio || "none"),
+            "hasAudioTrack=" + hasAudio,
+            "durationMs=" + result.durationMs,
+            "videoDurationMs=" + videoAsset.durationMs,
+            "outMs=" + project.outPointMs,
+          ].join("\n");
+          const url = URL.createObjectURL(result.blob);
+          const player = document.getElementById("player");
+          player.src = url;
+          const dl = document.getElementById("dl");
+          dl.href = url;
+          dl.download = result.fileName;
+          dl.style.display = "inline";
+          show(meta);
+          await report("/upload", result.blob, {
+            "content-type": "video/mp4",
+            "x-export-meta": meta.replace(/\n/g, " | "),
+          });
+        }
+      } catch (e) {
+        const msg = "FAIL\n" + (e && e.message ? e.message : String(e));
+        show(msg);
+        await report("/fail", msg);
+      }
+    </script>
+  </body>
+</html>

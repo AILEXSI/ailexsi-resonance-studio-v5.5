@@ -1,0 +1,362 @@
+/** Session chrome (mixer fold/width + preview/arrange split). localStorage is enough. */
+
+export const MIXER_COLLAPSED_KEY = "resonance-studio-v5-5-mixer-collapsed";
+export const SPLIT_RATIO_KEY = "resonance-studio-v5-5-preview-split";
+export const H_SPLIT_RATIO_KEY = "resonance-studio-v5-5-preview-h-split";
+export const LANE_LABEL_PX_KEY = "resonance-studio-v5-5-lane-label-px";
+export const LANE_HEIGHTS_KEY = "resonance-studio-v5-5-lane-heights";
+
+export const DEFAULT_LANE_LABEL_PX = 96;
+export const LANE_LABEL_MIN_PX = 72;
+export const LANE_LABEL_MAX_PX = 160;
+export const DEFAULT_LANE_HEIGHT_PX = 52;
+export const LANE_HEIGHT_MIN_PX = 36;
+export const LANE_HEIGHT_MAX_PX = 120;
+/** Stacked name + M/S (or VIS M + scene) needs ~44px (14px label, 4px gap, ~20px buttons). */
+export const LANE_HEADER_STACK_MIN_PX = 46;
+
+export type LaneHeightGroup = "vis" | "video" | "audio";
+export interface LaneHeights {
+  vis: number;
+  video: number;
+  audio: number;
+}
+
+export const PREVIEW_MIN_PX = 120;
+export const ARRANGE_MIN_PX = 200;
+export const SPLITTER_PX = 18;
+export const DEFAULT_SPLIT_RATIO = 0.52;
+export const PREVIEW_H_MIN_PX = 200;
+export const INSPECTOR_MIN_PX = 180;
+export const H_SPLITTER_PX = 14;
+export const DEFAULT_H_SPLIT_RATIO = 0.74;
+export const GROUP_COLLAPSED_KEY = "resonance-studio-v5-5-group-collapsed";
+export const VOLUME_LANE_OPEN_KEY = "resonance-studio-v5-5-volume-lane-open";
+/** Extra Volume sub-lane height. Clip lanes stay at their existing height. */
+export const VOLUME_LANE_HEIGHT_PX = 48;
+/** Chapter/group header row. Collapse UI only — not a clip lane. */
+export const GROUP_LANE_HEIGHT_PX = 28;
+
+/** Inline box lock so content (filmstrip / W+VOL chrome) cannot stretch a lane. */
+export function fixedLaneBoxStyle(px: number): { height: number; minHeight: number; maxHeight: number } {
+  const h = Number.isFinite(px) ? Math.max(1, Math.round(px)) : DEFAULT_LANE_HEIGHT_PX;
+  return { height: h, minHeight: h, maxHeight: h };
+}
+export const MIXER_WIDTH_KEY = "resonance-studio-v5-5-mixer-width";
+export const MIXER_EXPANDED_PX = 228;
+export const MIXER_COLLAPSED_PX = 56;
+/** Expanded mixer: MST + ≥1 channel peek + chrome. Never 0. */
+export const MIXER_MIN_PX = 120;
+/**
+ * Persist/load fallback only — never used as the live drag cap.
+ * Live max is always arrangeWidth − TIMELINE_MIN_PX (Follow-region reachable).
+ */
+export const MIXER_MAX_PX = 8192;
+/** Thin usable timeline (lane labels + a clip sliver). Divider can reach Follow. */
+export const TIMELINE_MIN_PX = 160;
+export const MIXER_SPLITTER_PX = 8;
+
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export function clampSplitRatio(ratio: number, availablePx: number): number {
+  if (!Number.isFinite(ratio)) return DEFAULT_SPLIT_RATIO;
+  if (!Number.isFinite(availablePx) || availablePx <= 0) {
+    return Math.min(0.85, Math.max(0.15, ratio));
+  }
+  const minR = PREVIEW_MIN_PX / availablePx;
+  const maxR = 1 - ARRANGE_MIN_PX / availablePx;
+  if (minR >= maxR) {
+    return PREVIEW_MIN_PX / (PREVIEW_MIN_PX + ARRANGE_MIN_PX);
+  }
+  return Math.min(maxR, Math.max(minR, ratio));
+}
+
+export function applySplitPointer(opts: {
+  clientY: number;
+  stageTop: number;
+  stageHeight: number;
+  splitterPx?: number;
+}): { ratio: number; previewPx: number; arrangePx: number } {
+  const splitter = opts.splitterPx ?? SPLITTER_PX;
+  const available = Math.max(1, opts.stageHeight - splitter);
+  const ratio = clampSplitRatio((opts.clientY - opts.stageTop) / available, available);
+  const previewPx = Math.round(ratio * available);
+  return { ratio, previewPx, arrangePx: available - previewPx };
+}
+
+export function loadCollapsedGroupIds(storage?: StorageLike | null): string[] {
+  try {
+    const raw = storage?.getItem(GROUP_COLLAPSED_KEY);
+    if (raw == null || raw === "") return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((id): id is string => typeof id === "string" && id.length > 0);
+    }
+    if (parsed && typeof parsed === "object") {
+      return Object.entries(parsed as Record<string, unknown>)
+        .filter(([, collapsed]) => collapsed === true)
+        .map(([id]) => id)
+        .filter((id) => id.length > 0);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCollapsedGroupIds(
+  storage: StorageLike | null | undefined,
+  ids: Iterable<string>,
+): void {
+  try {
+    const unique = [...new Set([...ids].filter((id) => typeof id === "string" && id.length > 0))];
+    storage?.setItem(GROUP_COLLAPSED_KEY, JSON.stringify(unique));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function toggleCollapsedGroupId(ids: readonly string[], groupId: string): string[] {
+  if (!groupId) return [...ids];
+  return ids.includes(groupId) ? ids.filter((id) => id !== groupId) : [...ids, groupId];
+}
+
+export function loadOpenVolumeLaneIds(storage?: StorageLike | null): string[] {
+  try {
+    const raw = storage?.getItem(VOLUME_LANE_OPEN_KEY);
+    if (raw == null || raw === "") return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string" && id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+export function saveOpenVolumeLaneIds(
+  storage: StorageLike | null | undefined,
+  ids: Iterable<string>,
+): void {
+  try {
+    const unique = [...new Set([...ids].filter((id) => typeof id === "string" && id.length > 0))];
+    storage?.setItem(VOLUME_LANE_OPEN_KEY, JSON.stringify(unique));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function toggleOpenVolumeLaneId(ids: readonly string[], trackId: string): string[] {
+  if (!trackId) return [...ids];
+  return ids.includes(trackId) ? ids.filter((id) => id !== trackId) : [...ids, trackId];
+}
+
+export function loadMixerCollapsed(storage?: StorageLike | null): boolean {
+  try {
+    return storage?.getItem(MIXER_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveMixerCollapsed(storage: StorageLike | null | undefined, collapsed: boolean): void {
+  try {
+    storage?.setItem(MIXER_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function mixerWidthMax(arrangeWidthPx?: number): number {
+  if (arrangeWidthPx != null && Number.isFinite(arrangeWidthPx) && arrangeWidthPx > 0) {
+    return Math.max(MIXER_MIN_PX, arrangeWidthPx - TIMELINE_MIN_PX);
+  }
+  return MIXER_MAX_PX;
+}
+
+export function clampMixerWidth(px: number, arrangeWidthPx?: number): number {
+  if (!Number.isFinite(px)) return MIXER_EXPANDED_PX;
+  return Math.round(Math.min(mixerWidthMax(arrangeWidthPx), Math.max(MIXER_MIN_PX, px)));
+}
+
+/** Left-edge divider: drag left → wider mixer; drag right → narrower. */
+export function applyMixerWidthPointer(opts: {
+  clientX: number;
+  arrangeLeft: number;
+  arrangeWidth: number;
+}): { widthPx: number } {
+  const mixerPx = opts.arrangeLeft + opts.arrangeWidth - opts.clientX;
+  return { widthPx: clampMixerWidth(mixerPx, opts.arrangeWidth) };
+}
+
+export function loadMixerWidth(storage?: StorageLike | null): number {
+  try {
+    const raw = storage?.getItem(MIXER_WIDTH_KEY);
+    if (raw == null) return MIXER_EXPANDED_PX;
+    return clampMixerWidth(Number(raw));
+  } catch {
+    return MIXER_EXPANDED_PX;
+  }
+}
+
+export function saveMixerWidth(storage: StorageLike | null | undefined, px: number): void {
+  try {
+    storage?.setItem(MIXER_WIDTH_KEY, String(clampMixerWidth(px)));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function loadSplitRatio(storage?: StorageLike | null): number {
+  try {
+    const raw = storage?.getItem(SPLIT_RATIO_KEY);
+    if (raw == null) return DEFAULT_SPLIT_RATIO;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return DEFAULT_SPLIT_RATIO;
+    return clampSplitRatio(n, PREVIEW_MIN_PX + ARRANGE_MIN_PX + 400);
+  } catch {
+    return DEFAULT_SPLIT_RATIO;
+  }
+}
+
+export function saveSplitRatio(storage: StorageLike | null | undefined, ratio: number): void {
+  try {
+    if (!Number.isFinite(ratio)) return;
+    storage?.setItem(SPLIT_RATIO_KEY, String(ratio));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function clampHSplitRatio(ratio: number, availablePx: number): number {
+  if (!Number.isFinite(ratio)) return DEFAULT_H_SPLIT_RATIO;
+  if (!Number.isFinite(availablePx) || availablePx <= 0) {
+    return Math.min(0.9, Math.max(0.35, ratio));
+  }
+  const minR = PREVIEW_H_MIN_PX / availablePx;
+  const maxR = 1 - INSPECTOR_MIN_PX / availablePx;
+  if (minR >= maxR) {
+    return PREVIEW_H_MIN_PX / (PREVIEW_H_MIN_PX + INSPECTOR_MIN_PX);
+  }
+  return Math.min(maxR, Math.max(minR, ratio));
+}
+
+export function applyHSplitPointer(opts: {
+  clientX: number;
+  workspaceLeft: number;
+  workspaceWidth: number;
+  splitterPx?: number;
+}): { ratio: number; previewPx: number; inspectorPx: number } {
+  const splitter = opts.splitterPx ?? H_SPLITTER_PX;
+  const available = Math.max(1, opts.workspaceWidth - splitter);
+  const ratio = clampHSplitRatio((opts.clientX - opts.workspaceLeft) / available, available);
+  const previewPx = Math.round(ratio * available);
+  return { ratio, previewPx, inspectorPx: available - previewPx };
+}
+
+export function loadHSplitRatio(storage?: StorageLike | null): number {
+  try {
+    const raw = storage?.getItem(H_SPLIT_RATIO_KEY);
+    if (raw == null) return DEFAULT_H_SPLIT_RATIO;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return DEFAULT_H_SPLIT_RATIO;
+    return clampHSplitRatio(n, PREVIEW_H_MIN_PX + INSPECTOR_MIN_PX + 600);
+  } catch {
+    return DEFAULT_H_SPLIT_RATIO;
+  }
+}
+
+export function saveHSplitRatio(storage: StorageLike | null | undefined, ratio: number): void {
+  try {
+    if (!Number.isFinite(ratio)) return;
+    storage?.setItem(H_SPLIT_RATIO_KEY, String(ratio));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function clampLaneLabelPx(px: number): number {
+  if (!Number.isFinite(px)) return DEFAULT_LANE_LABEL_PX;
+  return Math.round(Math.min(LANE_LABEL_MAX_PX, Math.max(LANE_LABEL_MIN_PX, px)));
+}
+
+export function loadLaneLabelPx(storage?: StorageLike | null): number {
+  try {
+    const raw = storage?.getItem(LANE_LABEL_PX_KEY);
+    if (raw == null) return DEFAULT_LANE_LABEL_PX;
+    return clampLaneLabelPx(Number(raw));
+  } catch {
+    return DEFAULT_LANE_LABEL_PX;
+  }
+}
+
+export function saveLaneLabelPx(storage: StorageLike | null | undefined, px: number): void {
+  try {
+    storage?.setItem(LANE_LABEL_PX_KEY, String(clampLaneLabelPx(px)));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function clampLaneHeightPx(px: number): number {
+  if (!Number.isFinite(px)) return DEFAULT_LANE_HEIGHT_PX;
+  return Math.round(Math.min(LANE_HEIGHT_MAX_PX, Math.max(LANE_HEIGHT_MIN_PX, px)));
+}
+
+export function defaultLaneHeights(): LaneHeights {
+  return {
+    vis: DEFAULT_LANE_HEIGHT_PX,
+    video: DEFAULT_LANE_HEIGHT_PX,
+    audio: DEFAULT_LANE_HEIGHT_PX,
+  };
+}
+
+export function clampLaneHeights(raw: Partial<LaneHeights> | null | undefined): LaneHeights {
+  const base = defaultLaneHeights();
+  return {
+    vis: clampLaneHeightPx(raw?.vis ?? base.vis),
+    video: clampLaneHeightPx(raw?.video ?? base.video),
+    audio: clampLaneHeightPx(raw?.audio ?? base.audio),
+  };
+}
+
+export function loadLaneHeights(storage?: StorageLike | null): LaneHeights {
+  try {
+    const raw = storage?.getItem(LANE_HEIGHTS_KEY);
+    if (raw == null) return defaultLaneHeights();
+    const parsed = JSON.parse(raw) as Partial<LaneHeights>;
+    return clampLaneHeights(parsed);
+  } catch {
+    return defaultLaneHeights();
+  }
+}
+
+export function saveLaneHeights(storage: StorageLike | null | undefined, heights: LaneHeights): void {
+  try {
+    storage?.setItem(LANE_HEIGHTS_KEY, JSON.stringify(clampLaneHeights(heights)));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function heightGroupOfLane(id: string): LaneHeightGroup {
+  if (id === "VIS") return "vis";
+  if (id === "V1" || id === "V2") return "video";
+  return "audio";
+}
+
+/** When a V/A/VIS header is shorter than the stacked name + chrome block, pack them in one row. */
+export function laneHeaderPacksInline(heightPx: number): boolean {
+  return Number.isFinite(heightPx) && heightPx < LANE_HEADER_STACK_MIN_PX;
+}
+
+export function browserLayoutStorage(): StorageLike | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return localStorage;
+  } catch {
+    return null;
+  }
+}

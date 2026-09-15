@@ -1,0 +1,34 @@
+{
+  "productName": "AILEXSI Resonance Studio V5.5",
+  "version": "5.5.0",
+  "identifier": "com.ailexsi.resonance-studio-v5-5",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:1421",
+    "beforeDevCommand": "npm run web:dev",
+    "beforeBuildCommand": "npm run web:build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AILEXSI Resonance Studio V5.5",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

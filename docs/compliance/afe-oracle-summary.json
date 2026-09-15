@@ -1,0 +1,39 @@
+{
+  "historical": true,
+  "label": "HISTORICAL V5 AFE-03 vs Mediabunny EncodedPacketSink (removed in V5.5)",
+  "oracle": "mediabunny EncodedPacketSink.getPacket",
+  "compared": 10228,
+  "exact": 10228,
+  "mismatches": 0,
+  "plan": {
+    "total": 10228,
+    "byPattern": {
+      "sequential": 1728,
+      "keyframe-boundary": 228,
+      "source-in-out": 99,
+      "clip-rate": 660,
+      "repeated-segment": 88,
+      "random": 3700,
+      "sequential-repeat": 888,
+      "sequential-repeat-2": 888,
+      "long-gop-mix": 1831,
+      "mixed-fps": 110,
+      "export-720p-sample": 8
+    },
+    "byFile": {
+      "afe-cfr-30-g1-2s": 666,
+      "afe-cfr-30-g24-2s": 559,
+      "afe-cfr-30-g25-2s": 559,
+      "afe-cfr-30-g30-2s": 555,
+      "afe-cfr-30-g50-3s": 645,
+      "afe-cfr-30-g60-8s": 1103,
+      "afe-cfr-30-g250-28s": 3679,
+      "afe-cfr-24-g24-2s": 519,
+      "afe-cfr-25-g25-2s": 525,
+      "afe-cfr-50-g50-2s": 675,
+      "afe-cfr-60-g60-2s": 735,
+      "afe-cfr-30-g30-720p-2s": 8
+    }
+  },
+  "firstMismatches": []
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@ailexsi/resonance-studio-v5.5",
+  "version": "5.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "web:dev": "vite --host 127.0.0.1 --port 1421 --strictPort",
+    "web:build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fixtures": "node scripts/generate-fixtures.mjs",
+    "afe:media": "node scripts/generate-afe-media.mjs",
+    "afe:chrome": "node scripts/afe-run-chrome.mjs",
+    "tauri": "tauri",
+    "tauri:exe": "tauri build && powershell -ExecutionPolicy Bypass -File scripts/copy-exe.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-fs": "^2.4.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3",
+    "vitest": "^3.2.4"
+  }
+}

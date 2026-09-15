@@ -1,0 +1,17 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "tests", "fixtures");
+mkdirSync(dir, { recursive: true });
+const sampleRate = 8000, samples = 2000, dataSize = samples * 2;
+const buf = Buffer.alloc(44 + dataSize);
+buf.write("RIFF", 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write("WAVE", 8);
+buf.write("fmt ", 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20);
+buf.writeUInt16LE(1, 22); buf.writeUInt32LE(sampleRate, 24);
+buf.writeUInt32LE(sampleRate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+buf.write("data", 36); buf.writeUInt32LE(dataSize, 40);
+for (let i = 0; i < samples; i++) buf.writeInt16LE(((i % 32) - 16) * 200, 44 + i * 2);
+writeFileSync(join(dir, "tone-250ms.wav"), buf);
+writeFileSync(join(dir, "not-media.txt"), "this is not audio or video\n");
+writeFileSync(join(dir, "README.md"), "Generated tiny fixtures. No large binaries.\n");
+console.log("fixtures", buf.length);

@@ -1,0 +1,22 @@
+{
+  "identifier": "default",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/*" },
+        { "path": "$APPDATA/**" }
+      ]
+    }
+  ]
+}

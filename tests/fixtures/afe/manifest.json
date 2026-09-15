@@ -1,0 +1,240 @@
+{
+  "generated": true,
+  "note": "Deterministic frame-identity H.264 (barcode). Test-only. Not product media.",
+  "width": 160,
+  "height": 90,
+  "files": [
+    {
+      "id": "afe-cfr-30-g1-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 1,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-cfr-30-g1-2s.mp4",
+      "keyframeSec": [
+        0,
+        0.033333,
+        0.066667,
+        0.1,
+        0.133333,
+        0.166667,
+        0.2,
+        0.233333,
+        0.266667,
+        0.3,
+        0.333333,
+        0.366667,
+        0.4,
+        0.433333,
+        0.466667,
+        0.5,
+        0.533333,
+        0.566667,
+        0.6,
+        0.633333,
+        0.666667,
+        0.7,
+        0.733333,
+        0.766667,
+        0.8,
+        0.833333,
+        0.866667,
+        0.9,
+        0.933333,
+        0.966667,
+        1,
+        1.033333,
+        1.066667,
+        1.1,
+        1.133333,
+        1.166667,
+        1.2,
+        1.233333,
+        1.266667,
+        1.3,
+        1.333333,
+        1.366667,
+        1.4,
+        1.433333,
+        1.466667,
+        1.5,
+        1.533333,
+        1.566667,
+        1.6,
+        1.633333,
+        1.666667,
+        1.7,
+        1.733333,
+        1.766667,
+        1.8,
+        1.833333,
+        1.866667,
+        1.9,
+        1.933333,
+        1.966667
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g24-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 24,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-cfr-30-g24-2s.mp4",
+      "keyframeSec": [
+        0,
+        0.8,
+        1.6
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g25-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 25,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-cfr-30-g25-2s.mp4",
+      "keyframeSec": [
+        0,
+        0.833333,
+        1.666667
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g30-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-cfr-30-g30-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g50-3s",
+      "fps": 30,
+      "seconds": 3,
+      "gop": 50,
+      "width": 160,
+      "height": 90,
+      "frames": 90,
+      "path": "tests/fixtures/afe/afe-cfr-30-g50-3s.mp4",
+      "keyframeSec": [
+        0,
+        1.666667
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g60-8s",
+      "fps": 30,
+      "seconds": 8,
+      "gop": 60,
+      "width": 160,
+      "height": 90,
+      "frames": 240,
+      "path": "tests/fixtures/afe/afe-cfr-30-g60-8s.mp4",
+      "keyframeSec": [
+        0,
+        2,
+        4,
+        6
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g250-28s",
+      "fps": 30,
+      "seconds": 28,
+      "gop": 250,
+      "width": 160,
+      "height": 90,
+      "frames": 840,
+      "path": "tests/fixtures/afe/afe-cfr-30-g250-28s.mp4",
+      "keyframeSec": [
+        0,
+        8.333333,
+        16.666667,
+        25
+      ]
+    },
+    {
+      "id": "afe-cfr-24-g24-2s",
+      "fps": 24,
+      "seconds": 2,
+      "gop": 24,
+      "width": 160,
+      "height": 90,
+      "frames": 48,
+      "path": "tests/fixtures/afe/afe-cfr-24-g24-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "afe-cfr-25-g25-2s",
+      "fps": 25,
+      "seconds": 2,
+      "gop": 25,
+      "width": 160,
+      "height": 90,
+      "frames": 50,
+      "path": "tests/fixtures/afe/afe-cfr-25-g25-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "afe-cfr-50-g50-2s",
+      "fps": 50,
+      "seconds": 2,
+      "gop": 50,
+      "width": 160,
+      "height": 90,
+      "frames": 100,
+      "path": "tests/fixtures/afe/afe-cfr-50-g50-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "afe-cfr-60-g60-2s",
+      "fps": 60,
+      "seconds": 2,
+      "gop": 60,
+      "width": 160,
+      "height": 90,
+      "frames": 120,
+      "path": "tests/fixtures/afe/afe-cfr-60-g60-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "afe-cfr-30-g30-720p-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 1280,
+      "height": 720,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-cfr-30-g30-720p-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ]
+    }
+  ]
+}

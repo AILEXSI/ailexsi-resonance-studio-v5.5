@@ -1,0 +1,1044 @@
+<!doctype html>
+<html>
+  <!-- AFE-03 harness. Dev-only. Not under public/; Vite does not copy this into dist / Tauri. -->
+  <head>
+    <meta charset="utf-8" />
+    <title>AFE frame harness pending</title>
+    <style>
+      body { font-family: ui-monospace, monospace; background: #111; color: #ddd; margin: 16px; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>AILEXSI Frame Engine vs Mediabunny</h1>
+    <pre id="out">starting</pre>
+    <script type="module">
+      import {
+        clearFrameSources,
+        getDecoder,
+        resetFrameSourceBackend,
+        setFrameSourceBackend,
+        sourceTimeSec,
+      } from "/src/core/exporter/frame-source.ts";
+      import { exportWithWebCodecs } from "/src/core/exporter/webcodecs.ts";
+      import {
+        beginAfePerf,
+        createFrameSourceBackend,
+        endAfePerf,
+        getAfeSequentialPrefetch,
+        installWebCodecsProbe,
+        isAfeError,
+        setAfeSequentialPrefetch,
+        summarizePhases,
+      } from "/src/core/frame-engine/index.ts";
+      import {
+        classifyFrameHit,
+        expectedFrameAtSec,
+        AFE_HEIGHT,
+        AFE_WIDTH,
+        readBarcodeFromImageData,
+      } from "/scripts/afe-shared.mjs";
+      import { clipOf, jobOf, wallStats } from "/scripts/afe-bench.ts";
+      import { buildRequestPlan, randomTimes, sequentialTimes, summarizePlan } from "/tests/export/afe-plan.ts";
+
+      const out = document.getElementById("out");
+      const RECEIVE = "http://127.0.0.1:" + (new URLSearchParams(location.search).get("receive") || "18767");
+
+      function show(text) {
+        out.textContent = text;
+        document.title = text.split("\n")[0].slice(0, 80);
+        window.__AFE_TEXT = text;
+        void report("/afe-progress", { text, t: performance.now() });
+      }
+
+      async function report(path, body) {
+        try {
+          await fetch(RECEIVE + path, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: typeof body === "string" ? body : JSON.stringify(body),
+          });
+        } catch (e) {
+          console.warn("report failed", e);
+        }
+      }
+
+      function readCanvasFrame(canvas) {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const dark = img.data[0] < 8 && img.data[1] < 8 && img.data[2] < 8;
+        const index = readBarcodeFromImageData(img.data, canvas.width);
+        return { index, empty: dark && index === 0 && canvas.width > 0 };
+      }
+
+      function makeCanvas(w, h) {
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        return canvas;
+      }
+
+      async function paintSource(opened, identity, timeSec, width, height) {
+        const started = performance.now();
+        const canvas = makeCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, width, height);
+        try {
+          const sample = await opened.getFrameAt(timeSec);
+          if (!sample) {
+            return {
+              backend: identity,
+              requestedSec: timeSec,
+              ms: performance.now() - started,
+              class: "UNKNOWN",
+              error: "null sample",
+            };
+          }
+          sample.draw(ctx, 0, 0, width, height);
+          const presentedSec = sample.timestamp;
+          sample.close();
+          const read = readCanvasFrame(canvas);
+          return {
+            backend: identity,
+            requestedSec: timeSec,
+            presentedSec,
+            actualFrame: read.index,
+            ms: performance.now() - started,
+            empty: read.empty,
+          };
+        } catch (e) {
+          return {
+            backend: identity,
+            requestedSec: timeSec,
+            ms: performance.now() - started,
+            class: "FAILED SEEK",
+            error: e instanceof Error ? e.message : String(e),
+          };
+        }
+      }
+
+      function finalizeHit(hit, fps, frames) {
+        if (hit.class) return hit;
+        const expected = expectedFrameAtSec(hit.requestedSec, fps);
+        let actual = hit.actualFrame;
+        if (actual != null && (actual < 0 || actual >= frames + 4)) {
+          return { ...hit, expectedFrame: expected, class: "WRONG FRAME", frameDelta: null };
+        }
+        if (hit.empty && expected !== 0) {
+          return { ...hit, expectedFrame: expected, class: "UNKNOWN", frameDelta: null };
+        }
+        const klass = classifyFrameHit(expected, actual);
+        const frameDelta = actual == null ? null : actual - expected;
+        const timeDelta = hit.presentedSec == null ? null : hit.presentedSec - hit.requestedSec;
+        return { ...hit, expectedFrame: expected, class: klass, frameDelta, timeDelta };
+      }
+
+      function summarize(rows) {
+        const counts = {
+          EXACT: 0,
+          "WITHIN 1 FRAME": 0,
+          ">1 FRAME ERROR": 0,
+          "FAILED SEEK": 0,
+          TIMEOUT: 0,
+          "WRONG FRAME": 0,
+          UNKNOWN: 0,
+        };
+        let totalMs = 0;
+        let worstMs = 0;
+        for (const row of rows) {
+          counts[row.class] = (counts[row.class] ?? 0) + 1;
+          totalMs += row.ms ?? 0;
+          worstMs = Math.max(worstMs, row.ms ?? 0);
+        }
+        return {
+          n: rows.length,
+          counts,
+          totalMs,
+          avgMs: rows.length ? totalMs / rows.length : 0,
+          worstMs,
+        };
+      }
+
+      async function batchPaint(identity, src, times, width, height, fps, frames) {
+        const started = performance.now();
+        const opened = await createFrameSourceBackend(identity).open(src);
+        const canvas = makeCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        const rows = [];
+        let i = 0;
+        try {
+          for await (const sample of opened.getFramesAt(times)) {
+            const t = times[i++];
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, width, height);
+            if (!sample) {
+              rows.push(
+                finalizeHit(
+                  { backend: identity, requestedSec: t, ms: 0, class: "UNKNOWN", error: "null" },
+                  fps,
+                  frames,
+                ),
+              );
+              continue;
+            }
+            sample.draw(ctx, 0, 0, width, height);
+            const presentedSec = sample.timestamp;
+            sample.close();
+            const read = readCanvasFrame(canvas);
+            const now = performance.now();
+            rows.push(
+              finalizeHit(
+                {
+                  backend: identity,
+                  requestedSec: t,
+                  presentedSec,
+                  actualFrame: read.index,
+                  ms: 0,
+                  empty: read.empty,
+                },
+                fps,
+                frames,
+              ),
+            );
+            void now;
+          }
+        } finally {
+          opened.close();
+        }
+        const totalMs = performance.now() - started;
+        const avg = rows.length ? totalMs / rows.length : 0;
+        for (const row of rows) row.ms = avg;
+        return { rows, totalMs, avgMs: avg };
+      }
+
+      async function memoryPass(src, loops, label) {
+        const opened = await createFrameSourceBackend("ailexsi").open(src);
+        const peaks = [];
+        try {
+          const file = { fps: 30, frames: 60, seconds: 2 };
+          const times = sequentialTimes({ ...file, id: label, path: "", gop: 1, keyframeSec: [0] });
+          for (let n = 0; n < loops; n++) {
+            for await (const sample of opened.getFramesAt(times)) {
+              sample?.close();
+            }
+            const stats = opened.memoryStats();
+            peaks.push({ loop: n, ...stats });
+          }
+        } finally {
+          opened.close();
+        }
+        return {
+          label,
+          loops,
+          last: peaks[peaks.length - 1],
+          peakDecoded: Math.max(...peaks.map((p) => p.peakDecodedCached)),
+          peakBytes: Math.max(...peaks.map((p) => p.approxBytes)),
+          stabilized: peaks.length > 2 && peaks.slice(-3).every((p) => p.decodedCached <= (peaks[0].maxDecodedCached || 12)),
+        };
+      }
+
+      function exportJob(url, width, height, durationMs, fps) {
+        return jobOf("afe-720", url, width, height, durationMs, fps, [
+          clipOf("c1", url, 0, durationMs, { sourceInMs: 0, sourceOutMs: durationMs, label: "720p" }),
+        ]);
+      }
+
+      const qs = new URLSearchParams(location.search);
+      const MODE = qs.get("mode") || "full";
+      const WARMUP_N = Math.max(0, Number(qs.get("warmup") ?? 10));
+      const MEASURED_N = Math.max(1, Number(qs.get("measured") ?? 50));
+      const AJ_WARMUP = Math.max(0, Number(qs.get("ajWarmup") ?? 2));
+      const AJ_MEASURED = Math.max(1, Number(qs.get("ajMeasured") ?? 3));
+      const LONG_SECONDS = Math.max(0, Number(qs.get("longSeconds") ?? 30));
+      const LONG_WARMUP = Math.max(0, Number(qs.get("longWarmup") ?? 10));
+      const LONG_MEASURED = Math.max(1, Number(qs.get("longMeasured") ?? 12));
+      const SWEEP = qs.get("sweep") === "1";
+      const SKIP_PIXELS = MODE === "export" || MODE === "quick" || qs.get("skipPixels") === "1";
+      const SKIP_AJ = MODE === "quick" || qs.get("skipAj") === "1";
+      const PREFETCH_LOCK = qs.get("prefetch");
+      if (PREFETCH_LOCK) setAfeSequentialPrefetch(Number(PREFETCH_LOCK));
+
+      async function timedExport(identity, job) {
+        installWebCodecsProbe();
+        beginAfePerf(identity);
+        setFrameSourceBackend(identity);
+        clearFrameSources();
+        const t0 = performance.now();
+        const out = await exportWithWebCodecs(job);
+        const wall = performance.now() - t0;
+        const snap = endAfePerf();
+        resetFrameSourceBackend();
+        clearFrameSources();
+        return {
+          result: { success: out.success, error: out.error, bytes: out.fileSizeBytes, audio: out.audio },
+          wall,
+          snap,
+          phases: snap ? summarizePhases(snap) : [],
+        };
+      }
+
+      async function runOneExport(identity, job, i) {
+        setFrameSourceBackend(identity);
+        clearFrameSources();
+        const t0 = performance.now();
+        const out = await exportWithWebCodecs({ ...job, fileName: `${job.fileName}-${identity}-${i}` });
+        const ms = performance.now() - t0;
+        resetFrameSourceBackend();
+        clearFrameSources();
+        return { ok: out.success, error: out.error, ms };
+      }
+
+      async function repeatExport(identity, job, warmup, measured) {
+        const warm = [];
+        const measuredMs = [];
+        const total = warmup + measured;
+        for (let i = 0; i < total; i++) {
+          show("export " + identity + " " + (job.fileName || "?") + " " + (i + 1) + "/" + total);
+          const out = await runOneExport(identity, job, i);
+          if (!out.ok) {
+            return { error: out.error, warmup: wallStats(warm), measured: wallStats(measuredMs) };
+          }
+          if (i < warmup) warm.push(out.ms);
+          else measuredMs.push(out.ms);
+        }
+        return { warmup: wallStats(warm), measured: wallStats(measuredMs), rawWarm: warm, rawMeasured: measuredMs };
+      }
+
+      /** Alternate backends each trial so order does not favor the first identity. */
+      async function repeatExportBoth(job, warmup, measured, seed = 0xafe03) {
+        let a = seed >>> 0;
+        const rand = () => {
+          a += 0x6d2b79f5;
+          let t = a;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        const mbW = [];
+        const afeW = [];
+        const mbM = [];
+        const afeM = [];
+        const order = [];
+        for (let i = 0; i < warmup + measured; i++) {
+          const afeFirst = i % 2 === 0 ? rand() < 0.5 : !order[i - 1];
+          order.push(afeFirst);
+          const first = afeFirst ? "ailexsi" : "mediabunny";
+          const second = afeFirst ? "mediabunny" : "ailexsi";
+          const a = await runOneExport(first, job, i * 2);
+          const b = await runOneExport(second, job, i * 2 + 1);
+          if (!a.ok) {
+            return { error: `${first}: ${a.error}`, mediabunny: { warmup: wallStats(mbW), measured: wallStats(mbM) }, afe: { warmup: wallStats(afeW), measured: wallStats(afeM) } };
+          }
+          if (!b.ok) {
+            return { error: `${second}: ${b.error}`, mediabunny: { warmup: wallStats(mbW), measured: wallStats(mbM) }, afe: { warmup: wallStats(afeW), measured: wallStats(afeM) } };
+          }
+          const pair = { mediabunny: first === "mediabunny" ? a.ms : b.ms, afe: first === "ailexsi" ? a.ms : b.ms };
+          if (i < warmup) {
+            mbW.push(pair.mediabunny);
+            afeW.push(pair.afe);
+          } else {
+            mbM.push(pair.mediabunny);
+            afeM.push(pair.afe);
+          }
+        }
+        return {
+          alternated: true,
+          warmupN: warmup,
+          measuredN: measured,
+          mediabunny: { warmup: wallStats(mbW), measured: wallStats(mbM), rawWarm: mbW, rawMeasured: mbM },
+          afe: { warmup: wallStats(afeW), measured: wallStats(afeM), rawWarm: afeW, rawMeasured: afeM },
+        };
+      }
+
+      async function rawDecodePass(identity, url, times, width, height, reuseOpened) {
+        installWebCodecsProbe();
+        beginAfePerf(identity);
+        const tAll = performance.now();
+        const opened = await createFrameSourceBackend(identity).open(url);
+        if (reuseOpened) {
+          for await (const sample of opened.getFramesAt(times)) sample?.close();
+          endAfePerf();
+          beginAfePerf(identity);
+        }
+        const canvas = makeCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        const t0 = performance.now();
+        let n = 0;
+        for await (const sample of opened.getFramesAt(times)) {
+          n += 1;
+          if (n === 1 || n % 20 === 0) show("raw " + identity + " " + n + "/" + times.length);
+          if (!sample) continue;
+          sample.draw(ctx, 0, 0, width, height);
+          sample.close();
+        }
+        const decodeWall = performance.now() - t0;
+        const wall = reuseOpened ? decodeWall : performance.now() - tAll;
+        const snap = endAfePerf();
+        opened.close();
+        return { wall, decodeWall, snap, n: times.length, cold: !reuseOpened };
+      }
+
+      try {
+        show("loading manifest");
+        const manifest = await (await fetch("/tests/fixtures/afe/manifest.json")).json();
+        const plan = buildRequestPlan(manifest);
+        const planInfo = summarizePlan(plan);
+        show("plan " + planInfo.total);
+
+        const decodeFiles = manifest.files.filter((f) => (f.width ?? 160) <= 160);
+        const comparisons = [];
+        const sequential = [];
+        const randomSeek = [];
+        let seqMb = { totalMs: 0, n: 0, worstMs: 0 };
+        let seqAfe = { totalMs: 0, n: 0, worstMs: 0 };
+        let randMb = { totalMs: 0, n: 0, worstMs: 0 };
+        let randAfe = { totalMs: 0, n: 0, worstMs: 0 };
+
+        if (SKIP_PIXELS) {
+          show("skip pixels mode=" + MODE);
+        }
+
+        for (const file of SKIP_PIXELS ? [] : decodeFiles) {
+          const url = new URL("/" + file.path, location.origin).href;
+          const w = file.width ?? AFE_WIDTH;
+          const h = file.height ?? AFE_HEIGHT;
+          show("file " + file.id);
+
+          const seq = sequentialTimes(file);
+          const mbBatch = await batchPaint("mediabunny", url, seq, w, h, file.fps, file.frames);
+          const afeBatch = await batchPaint("ailexsi", url, seq, w, h, file.fps, file.frames);
+          seqMb.totalMs += mbBatch.totalMs;
+          seqMb.n += mbBatch.rows.length;
+          seqAfe.totalMs += afeBatch.totalMs;
+          seqAfe.n += afeBatch.rows.length;
+          for (let i = 0; i < seq.length; i++) {
+            const a = mbBatch.rows[i];
+            const b = afeBatch.rows[i];
+            const row = {
+              file: file.id,
+              fps: file.fps,
+              gop: file.gop,
+              requestedSec: seq[i],
+              expectedFrame: expectedFrameAtSec(seq[i], file.fps),
+              pattern: "sequential",
+              mediabunny: a,
+              afe: b,
+              match: a.actualFrame === b.actualFrame && a.class === "EXACT" && b.class === "EXACT",
+            };
+            comparisons.push(row);
+            sequential.push(row);
+          }
+
+          const probes = plan.filter((r) => {
+            if (r.file !== file.id) return false;
+            if (r.pattern === "sequential" || r.pattern === "sequential-repeat" || r.pattern === "sequential-repeat-2") return false;
+            return true;
+          });
+          const seen = new Set(seq.map((t) => t.toFixed(6)));
+          let randomKept = 0;
+          const mbOpen = await createFrameSourceBackend("mediabunny").open(url);
+          const afeOpen = await createFrameSourceBackend("ailexsi").open(url);
+          for (const req of probes) {
+            if (seen.has(req.requestedSec.toFixed(6))) continue;
+            if (req.pattern === "random" || req.pattern === "long-gop-mix") {
+              const required = [10, 2, 25, 5, 18, 1].some((x) => Math.abs(x - req.requestedSec) < 1e-6);
+              if (!required) {
+                randomKept += 1;
+                if (randomKept > 80) continue;
+              }
+            }
+            seen.add(req.requestedSec.toFixed(6));
+            const a = finalizeHit(await paintSource(mbOpen, "mediabunny", req.requestedSec, w, h), file.fps, file.frames);
+            const b = finalizeHit(await paintSource(afeOpen, "ailexsi", req.requestedSec, w, h), file.fps, file.frames);
+            randMb.totalMs += a.ms;
+            randMb.n += 1;
+            randMb.worstMs = Math.max(randMb.worstMs, a.ms);
+            randAfe.totalMs += b.ms;
+            randAfe.n += 1;
+            randAfe.worstMs = Math.max(randAfe.worstMs, b.ms);
+            const row = {
+              file: file.id,
+              fps: file.fps,
+              gop: file.gop,
+              requestedSec: req.requestedSec,
+              expectedFrame: req.expectedFrame,
+              pattern: req.pattern,
+              mediabunny: a,
+              afe: b,
+              match: a.actualFrame === b.actualFrame && a.class === "EXACT" && b.class === "EXACT",
+            };
+            comparisons.push(row);
+            if (file.id.includes("g250") && [10, 2, 25, 5, 18, 1].some((x) => Math.abs(x - req.requestedSec) < 1e-6)) {
+              randomSeek.push(row);
+            }
+          }
+          mbOpen.close();
+          afeOpen.close();
+        }
+
+        show("memory + abort + fallback");
+        const twoSec = decodeFiles.find((f) => f.id === "afe-cfr-30-g1-2s");
+        const longFile = decodeFiles.find((f) => f.id.includes("g250"));
+        const twoUrl = new URL("/" + twoSec.path, location.origin).href;
+        const longUrl = new URL("/" + longFile.path, location.origin).href;
+        const memory = {
+          twoSec: await memoryPass(twoUrl, 1, "2s"),
+          twentyEight: await memoryPass(longUrl, 1, "28s"),
+          sevenMinSim: await memoryPass(twoUrl, 210, "7min-sim"),
+          thirtyMinTail: await memoryPass(twoUrl, 50, "30min-tail"),
+        };
+
+        let abortTest = { ok: false, error: null };
+        {
+          const opened = await createFrameSourceBackend("ailexsi").open(new URL("/" + decodeFiles[0].path, location.origin).href);
+          const ac = new AbortController();
+          const times = sequentialTimes(decodeFiles.find((f) => f.seconds === 8) || decodeFiles[0]);
+          let late = 0;
+          const p = (async () => {
+            for await (const sample of opened.getFramesAt(times, ac.signal)) {
+              if (ac.signal.aborted) late += 1;
+              sample?.close();
+            }
+          })();
+          ac.abort();
+          try {
+            await p;
+            abortTest = { ok: false, error: "iterator finished after abort", late };
+          } catch (e) {
+            abortTest = {
+              ok: isAfeError(e) && e.code === "AFE_ABORTED",
+              code: isAfeError(e) ? e.code : null,
+              late,
+              error: e instanceof Error ? e.message : String(e),
+            };
+          }
+          opened.close();
+        }
+
+        let abortOpen = { ok: false };
+        {
+          const ac = new AbortController();
+          ac.abort();
+          try {
+            await createFrameSourceBackend("ailexsi").open(new URL("/" + decodeFiles[0].path, location.origin).href, ac.signal);
+            abortOpen = { ok: false, error: "open ignored abort" };
+          } catch (e) {
+            abortOpen = {
+              ok: isAfeError(e) && e.code === "AFE_ABORTED",
+              code: isAfeError(e) ? e.code : null,
+              error: e instanceof Error ? e.message : String(e),
+            };
+          }
+        }
+
+        let abortRandom = { ok: false };
+        {
+          const opened = await createFrameSourceBackend("ailexsi").open(new URL("/" + decodeFiles[0].path, location.origin).href);
+          const ac = new AbortController();
+          ac.abort();
+          try {
+            await opened.getFrameAt(0.4, ac.signal);
+            abortRandom = { ok: false, error: "getFrameAt ignored abort" };
+          } catch (e) {
+            abortRandom = {
+              ok: isAfeError(e) && e.code === "AFE_ABORTED",
+              code: isAfeError(e) ? e.code : null,
+              error: e instanceof Error ? e.message : String(e),
+            };
+          }
+          opened.close();
+        }
+
+        let abortExport = { ok: false };
+        if (typeof VideoEncoder !== "undefined") {
+          const url = new URL("/" + decodeFiles[0].path, location.origin).href;
+          const ac = new AbortController();
+          setFrameSourceBackend("ailexsi");
+          clearFrameSources();
+          const job = exportJob(url, 160, 90, 2000, 30);
+          const p = exportWithWebCodecs(job, { signal: ac.signal });
+          ac.abort();
+          const out = await p;
+          abortExport = {
+            ok: Boolean(out.aborted || /abort/i.test(out.error || "")),
+            aborted: out.aborted,
+            error: out.error || null,
+          };
+          resetFrameSourceBackend();
+          clearFrameSources();
+        }
+
+        let fallbackTest = { ok: false };
+        try {
+          await createFrameSourceBackend("ailexsi").open(new URL("/tests/fixtures/afe/README.md", location.origin).href);
+          fallbackTest = { ok: false, error: "AFE accepted non-MP4" };
+        } catch (e) {
+          fallbackTest = {
+            ok: isAfeError(e) && e.code === "AFE_UNSUPPORTED_CONTAINER",
+            code: isAfeError(e) ? e.code : "other",
+            error: e instanceof Error ? e.message : String(e),
+          };
+        }
+
+        show("720p30 export + AFE-02 phases");
+        const wide = manifest.files.find((f) => (f.width ?? 0) >= 1280);
+        const g1 = decodeFiles.find((f) => f.id === "afe-cfr-30-g1-2s");
+        const g250 = decodeFiles.find((f) => f.id.includes("g250"));
+        const fpsFiles = decodeFiles.filter((f) => [24, 25, 50, 60].includes(f.fps));
+        let export720 = { ran: false };
+        let phaseExport = { ran: false };
+        let exportRepeats = { ran: false };
+        let raw720 = { ran: false };
+        let benches = [];
+        let prefetchSweep = { ran: false };
+        let longExport = { ran: false };
+        let productionExport = { ran: false };
+        if (wide && typeof VideoEncoder !== "undefined") {
+          installWebCodecsProbe();
+          const srcUrl = new URL("/" + wide.path, location.origin).href;
+          const jobA = exportJob(srcUrl, 1280, 720, 2000, 30);
+          const seq720 = sequentialTimes(wide);
+
+          show("phase export mediabunny");
+          const mbPhase = await timedExport("mediabunny", { ...jobA, fileName: "afe-720p30-mb-phase.mp4" });
+          show("phase export ailexsi");
+          const afePhase = await timedExport("ailexsi", { ...jobA, fileName: "afe-720p30-afe-phase.mp4" });
+          phaseExport = {
+            ran: true,
+            mediabunny: mbPhase,
+            afe: afePhase,
+            bothOk: Boolean(mbPhase.result.success && afePhase.result.success),
+          };
+          export720 = {
+            ran: true,
+            mediabunny: { ...mbPhase.result, ms: mbPhase.wall },
+            afe: { ...afePhase.result, ms: afePhase.wall },
+            bothOk: phaseExport.bothOk,
+          };
+
+          show("raw 720 COLD/WARM");
+          const mbCold = await rawDecodePass("mediabunny", srcUrl, seq720, 1280, 720, false);
+          const afeCold = await rawDecodePass("ailexsi", srcUrl, seq720, 1280, 720, false);
+          const mbWarm = await rawDecodePass("mediabunny", srcUrl, seq720, 1280, 720, true);
+          const afeWarm = await rawDecodePass("ailexsi", srcUrl, seq720, 1280, 720, true);
+          raw720 = {
+            ran: true,
+            cold: { mediabunny: mbCold, afe: afeCold },
+            warm: { mediabunny: mbWarm, afe: afeWarm },
+          };
+
+          show("repeat 720p30 alternate warmup=" + WARMUP_N + " measured=" + MEASURED_N);
+          const bothRep = await repeatExportBoth(jobA, WARMUP_N, MEASURED_N);
+          exportRepeats = {
+            ran: true,
+            warmupN: WARMUP_N,
+            measuredN: MEASURED_N,
+            alternated: true,
+            prefetch: getAfeSequentialPrefetch(),
+            mediabunny: bothRep.mediabunny,
+            afe: bothRep.afe,
+            error: bothRep.error || null,
+          };
+
+          {
+            const mbRowsCp = comparisons.map((c) => c.mediabunny);
+            const afeRowsCp = comparisons.map((c) => c.afe);
+            const checkpoint = {
+              environment: {
+                userAgent: navigator.userAgent,
+                webCodecs: typeof VideoDecoder !== "undefined",
+                videoEncoder: typeof VideoEncoder !== "undefined",
+                platform: navigator.platform,
+              },
+              totals: {
+                mediabunny: summarize(mbRowsCp).counts,
+                afe: summarize(afeRowsCp).counts,
+                compared: comparisons.length,
+                agree: comparisons.filter((c) => c.match).length,
+              },
+              mismatchCount: comparisons.filter((c) => !c.match).length,
+              sequentialBatch: {
+                mediabunny: { ...seqMb, avgMs: seqMb.n ? seqMb.totalMs / seqMb.n : 0 },
+                afe: { ...seqAfe, avgMs: seqAfe.n ? seqAfe.totalMs / seqAfe.n : 0 },
+              },
+              random: {
+                mediabunny: { ...randMb, avgMs: randMb.n ? randMb.totalMs / randMb.n : 0 },
+                afe: { ...randAfe, avgMs: randAfe.n ? randAfe.totalMs / randAfe.n : 0 },
+              },
+              memory,
+              abortTest,
+              abortOpen,
+              abortRandom,
+              abortExport,
+              fallbackTest,
+              export720,
+              phaseExport,
+              exportRepeats,
+              raw720,
+            };
+            show("checkpoint pixels=" + checkpoint.totals.compared + " agree=" + checkpoint.totals.agree);
+            await report("/afe-progress", { text: "checkpoint core evidence", checkpoint });
+          }
+
+          if (SWEEP) {
+            show("prefetch sweep");
+            const saved = getAfeSequentialPrefetch();
+            const sweep = [];
+            for (const n of [2, 4, 6, 8, 12]) {
+              setAfeSequentialPrefetch(n);
+              const both = await repeatExportBoth(jobA, 4, 8, 0xafe03 + n);
+              sweep.push({
+                prefetch: n,
+                mediabunny: both.mediabunny.measured,
+                afe: both.afe.measured,
+              });
+            }
+            setAfeSequentialPrefetch(saved);
+            prefetchSweep = { ran: true, sweep };
+          }
+
+          function longTimelineJob(url, seconds) {
+            const clipMs = 2000;
+            const n = Math.max(1, Math.round((seconds * 1000) / clipMs));
+            const clips = [];
+            for (let i = 0; i < n; i++) {
+              clips.push(
+                clipOf(`L${i}`, url, i * clipMs, (i + 1) * clipMs, {
+                  sourceInMs: 0,
+                  sourceOutMs: clipMs,
+                  label: `rep-${i}`,
+                }),
+              );
+            }
+            return jobOf(`long-${seconds}s`, url, 1280, 720, n * clipMs, 30, clips);
+          }
+
+          const productionJob = jobOf(
+            "prod-like",
+            srcUrl,
+            1280,
+            720,
+            5000,
+            30,
+            [
+              clipOf("p1", srcUrl, 0, 1500, { sourceInMs: 0, sourceOutMs: 1500, label: "head" }),
+              clipOf("p2", srcUrl, 1500, 2800, { sourceInMs: 400, sourceOutMs: 1700, label: "cut" }),
+              clipOf("p3", srcUrl, 2500, 4000, { sourceInMs: 0, sourceOutMs: 1500, label: "xfade" }),
+              clipOf("p4", srcUrl, 4000, 5000, { sourceInMs: 0, sourceOutMs: 1000, rate: 1, label: "repeat" }),
+            ],
+            {
+              transitions: [
+                {
+                  id: "xf",
+                  type: "crossfade",
+                  startMs: 2500,
+                  durationMs: 300,
+                  sourceAClipId: "p2",
+                  sourceBClipId: "p3",
+                  audio: "cut",
+                  audioMode: "cut",
+                  audioDurationMs: 0,
+                },
+              ],
+            },
+          );
+
+          if (LONG_SECONDS > 0) {
+            show("long export " + LONG_SECONDS + "s + production-like");
+            const longJob = longTimelineJob(srcUrl, LONG_SECONDS);
+            longExport = { ran: true, seconds: LONG_SECONDS, frames: Math.round(LONG_SECONDS * 30), ...(await repeatExportBoth(longJob, LONG_WARMUP, LONG_MEASURED, 0x30e03)) };
+            productionExport = { ran: true, ...(await repeatExportBoth(productionJob, 6, 12, 0x70d03)) };
+          }
+
+          const smallUrl = new URL("/" + g1.path, location.origin).href;
+          const longUrl = new URL("/" + g250.path, location.origin).href;
+          if (SKIP_AJ) {
+            show("skip A-J mode=" + MODE);
+          }
+          const seekRawPass = async (label, identity, url, times, width, height) => {
+            installWebCodecsProbe();
+            beginAfePerf(identity);
+            const tAll = performance.now();
+            const opened = await createFrameSourceBackend(identity).open(url);
+            const canvas = makeCanvas(width, height);
+            const ctx = canvas.getContext("2d");
+            const t0 = performance.now();
+            for (let i = 0; i < times.length; i++) {
+              if (i === 0 || i % 8 === 0) show("bench " + label + " raw " + identity + " " + i + "/" + times.length);
+              const sample = await opened.getFrameAt(times[i]);
+              if (!sample) continue;
+              sample.draw(ctx, 0, 0, width, height);
+              sample.close();
+            }
+            const decodeWall = performance.now() - t0;
+            const snap = endAfePerf();
+            opened.close();
+            return { wall: performance.now() - tAll, decodeWall, snap, n: times.length, cold: true };
+          };
+          const timesAreMonotonic = (times) => {
+            for (let i = 1; i < times.length; i++) if (times[i] < times[i - 1]) return false;
+            return true;
+          };
+          const makeAj = async (id, title, raw, job) => {
+            show("bench " + id + " " + title);
+            const sequentialRaw = timesAreMonotonic(raw.times);
+            const mbRaw = sequentialRaw
+              ? await rawDecodePass("mediabunny", raw.url, raw.times, raw.w, raw.h, false)
+              : await seekRawPass(id, "mediabunny", raw.url, raw.times, raw.w, raw.h);
+            const afeRaw = sequentialRaw
+              ? await rawDecodePass("ailexsi", raw.url, raw.times, raw.w, raw.h, false)
+              : await seekRawPass(id, "ailexsi", raw.url, raw.times, raw.w, raw.h);
+            let exp = null;
+            if (job) {
+              const mbE = await repeatExport("mediabunny", job, AJ_WARMUP, AJ_MEASURED);
+              const afeE = await repeatExport("ailexsi", job, AJ_WARMUP, AJ_MEASURED);
+              exp = { mediabunny: mbE, afe: afeE };
+            }
+            return {
+              id,
+              title,
+              raw: { mediabunny: { wall: mbRaw.wall, snap: mbRaw.snap }, afe: { wall: afeRaw.wall, snap: afeRaw.snap } },
+              export: exp,
+            };
+          };
+
+          if (!SKIP_AJ) {
+          benches.push(
+            await makeAj("A", "sequential one-source 720p30", { url: srcUrl, times: seq720, w: 1280, h: 720 }, jobA),
+          );
+          const repTimes = [];
+          for (let k = 0; k < 2; k++) {
+            for (let i = 0; i < 15; i++) repTimes.push((i + 0.5) / 30);
+          }
+          benches.push(
+            await makeAj(
+              "B",
+              "repeated segments",
+              { url: srcUrl, times: repTimes, w: 1280, h: 720 },
+              jobOf("B", srcUrl, 1280, 720, 1000, 30, [
+                clipOf("b1", srcUrl, 0, 500, { sourceInMs: 0, sourceOutMs: 500 }),
+                clipOf("b2", srcUrl, 500, 1000, { sourceInMs: 0, sourceOutMs: 500 }),
+              ]),
+            ),
+          );
+          benches.push(
+            await makeAj("C", "random", { url: srcUrl, times: randomTimes(wide, 40, 0xafe02), w: 1280, h: 720 }, null),
+          );
+          benches.push(
+            await makeAj(
+              "D",
+              "hard cuts",
+              { url: srcUrl, times: [...sequentialTimes({ ...wide, frames: 15, fps: 30 }), ...sequentialTimes({ ...wide, frames: 15, fps: 30 })] , w: 1280, h: 720 },
+              jobOf("D", srcUrl, 1280, 720, 2000, 30, [
+                clipOf("d1", srcUrl, 0, 1000, { sourceInMs: 0, sourceOutMs: 1000 }),
+                clipOf("d2", srcUrl, 1000, 2000, { sourceInMs: 500, sourceOutMs: 1500 }),
+              ]),
+            ),
+          );
+          benches.push(
+            await makeAj(
+              "E",
+              "crossfade",
+              { url: srcUrl, times: sequentialTimes({ ...wide, frames: 30, fps: 30 }), w: 1280, h: 720 },
+              jobOf(
+                "E",
+                srcUrl,
+                1280,
+                720,
+                1500,
+                30,
+                [
+                  clipOf("e1", srcUrl, 0, 900, { sourceInMs: 0, sourceOutMs: 900 }),
+                  clipOf("e2", srcUrl, 600, 1500, { sourceInMs: 200, sourceOutMs: 1100 }),
+                ],
+                {
+                  transitions: [
+                    {
+                      id: "xf",
+                      type: "crossfade",
+                      startMs: 600,
+                      durationMs: 300,
+                      sourceAClipId: "e1",
+                      sourceBClipId: "e2",
+                      audio: "cut",
+                      audioMode: "cut",
+                      audioDurationMs: 0,
+                    },
+                  ],
+                },
+              ),
+            ),
+          );
+          benches.push(
+            await makeAj(
+              "F",
+              "Source In",
+              { url: srcUrl, times: sequentialTimes({ ...wide, frames: 30, fps: 30 }).map((t) => t + 0.5), w: 1280, h: 720 },
+              jobOf("F", srcUrl, 1280, 720, 1000, 30, [
+                clipOf("f1", srcUrl, 0, 1000, { sourceInMs: 500, sourceOutMs: 1500 }),
+              ]),
+            ),
+          );
+          benches.push(
+            await makeAj(
+              "G",
+              "clip rate 2",
+              { url: srcUrl, times: sequentialTimes({ ...wide, frames: 30, fps: 30 }).map((t) => t * 2), w: 1280, h: 720 },
+              jobOf("G", srcUrl, 1280, 720, 1000, 30, [
+                clipOf("g1", srcUrl, 0, 1000, { sourceInMs: 0, sourceOutMs: 2000, rate: 2 }),
+              ]),
+            ),
+          );
+          const longTimes = sequentialTimes({ ...g250, frames: 60, fps: 30 });
+          benches.push(
+            await makeAj(
+              "H",
+              "long GOP 250",
+              { url: longUrl, times: longTimes, w: g250.width ?? 160, h: g250.height ?? 90 },
+              jobOf("H", longUrl, 160, 90, 2000, 30, [
+                clipOf("h1", longUrl, 0, 2000, { sourceInMs: 0, sourceOutMs: 2000 }),
+              ]),
+            ),
+          );
+          const intraTimes = sequentialTimes(g1);
+          benches.push(
+            await makeAj(
+              "I",
+              "short GOP / all-intra",
+              { url: smallUrl, times: intraTimes, w: g1.width ?? 160, h: g1.height ?? 90 },
+              jobOf("I", smallUrl, 160, 90, 2000, 30, [
+                clipOf("i1", smallUrl, 0, 2000, { sourceInMs: 0, sourceOutMs: 2000 }),
+              ]),
+            ),
+          );
+          const jRaw = [];
+          for (const file of fpsFiles) {
+            const url = new URL("/" + file.path, location.origin).href;
+            const times = sequentialTimes(file);
+            const mb = await rawDecodePass("mediabunny", url, times, file.width ?? 160, file.height ?? 90, false);
+            const afe = await rawDecodePass("ailexsi", url, times, file.width ?? 160, file.height ?? 90, false);
+            jRaw.push({ file: file.id, fps: file.fps, mediabunny: mb.wall, afe: afe.wall });
+          }
+          benches.push({ id: "J", title: "multiple fps raw", rawByFps: jRaw, export: null });
+          }
+        }
+
+        const mbRows = comparisons.map((c) => c.mediabunny);
+        const afeRows = comparisons.map((c) => c.afe);
+        const mismatches = comparisons
+          .filter((c) => !c.match)
+          .map((c) => ({
+            file: c.file,
+            requestedSec: c.requestedSec,
+            pattern: c.pattern,
+            mediabunnyFrame: c.mediabunny.actualFrame ?? null,
+            afeFrame: c.afe.actualFrame ?? null,
+            mediabunnyPts: c.mediabunny.presentedSec ?? null,
+            afePts: c.afe.presentedSec ?? null,
+            frameDelta:
+              c.mediabunny.actualFrame == null || c.afe.actualFrame == null
+                ? null
+                : c.afe.actualFrame - c.mediabunny.actualFrame,
+            mediabunnyClass: c.mediabunny.class,
+            afeClass: c.afe.class,
+          }));
+
+        const result = {
+          environment: {
+            userAgent: navigator.userAgent,
+            webCodecs: typeof VideoDecoder !== "undefined",
+            videoEncoder: typeof VideoEncoder !== "undefined",
+            platform: navigator.platform,
+          },
+          plan: planInfo,
+          decoded: comparisons.length,
+          sequentialBatch: {
+            mediabunny: { ...seqMb, avgMs: seqMb.n ? seqMb.totalMs / seqMb.n : 0 },
+            afe: { ...seqAfe, avgMs: seqAfe.n ? seqAfe.totalMs / seqAfe.n : 0 },
+          },
+          random: {
+            mediabunny: { ...randMb, avgMs: randMb.n ? randMb.totalMs / randMb.n : 0 },
+            afe: { ...randAfe, avgMs: randAfe.n ? randAfe.totalMs / randAfe.n : 0 },
+          },
+          performance: {
+            mediabunny: summarize(mbRows),
+            afe: summarize(afeRows),
+          },
+          totals: {
+            mediabunny: summarize(mbRows).counts,
+            afe: summarize(afeRows).counts,
+            compared: comparisons.length,
+            agree: comparisons.filter((c) => c.match).length,
+          },
+          randomSeek,
+          mismatches: mismatches.slice(0, 64),
+          mismatchCount: mismatches.length,
+          memory,
+          abortTest,
+          abortOpen,
+          abortRandom,
+          abortExport,
+          fallbackTest,
+          export720,
+          phaseExport,
+          exportRepeats,
+          raw720,
+          longExport,
+          productionExport,
+          prefetchSweep,
+          benches,
+          afe03: {
+            warmupN: WARMUP_N,
+            measuredN: MEASURED_N,
+            prefetch: getAfeSequentialPrefetch(),
+            mode: MODE,
+          },
+          semantics: {
+            sourceTimeSecRate2: sourceTimeSec(
+              {
+                id: "c",
+                trackId: "V1",
+                kind: "video",
+                startMs: 0,
+                endMs: 2000,
+                sourceUrl: "",
+                sourceInMs: 2000,
+                sourceOutMs: 4000,
+                gain: 1,
+                fadeInMs: 0,
+                fadeOutMs: 0,
+                rate: 2,
+                missing: false,
+                label: "sem",
+              },
+              250,
+              30,
+            ),
+          },
+        };
+        window.__AFE_RESULT = result;
+        show(
+          "AFE_DONE compared=" +
+            result.totals.compared +
+            " agree=" +
+            result.totals.agree +
+            " mismatches=" +
+            result.mismatchCount +
+            "\nMB " +
+            JSON.stringify(result.totals.mediabunny) +
+            "\nAFE " +
+            JSON.stringify(result.totals.afe),
+        );
+        await report("/afe-results", result);
+      } catch (e) {
+        const msg = e instanceof Error ? e.stack || e.message : String(e);
+        show("AFE_FAIL " + msg);
+        await report("/afe-results", { error: msg });
+      } finally {
+        resetFrameSourceBackend();
+        clearFrameSources();
+      }
+    </script>
+  </body>
+</html>

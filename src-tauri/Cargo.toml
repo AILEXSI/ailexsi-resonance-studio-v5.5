@@ -1,0 +1,20 @@
+[package]
+name = "ailexsi-resonance-studio-v5-5"
+version = "5.5.0"
+description = "AILEXSI Resonance Studio V5.5 standalone"
+authors = ["AILEXSI"]
+edition = "2021"
+
+[lib]
+name = "ailexsi_resonance_studio_v5_5_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.2", features = [] }
+tauri-plugin-fs = "2.4"
+tauri-plugin-dialog = "2.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

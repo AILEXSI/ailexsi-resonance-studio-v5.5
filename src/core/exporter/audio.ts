@@ -1,0 +1,274 @@
+import { scheduleGainEnvelope } from "../fades";
+import { clampClipRate } from "../models";
+import { scheduleTransitionAudioGain } from "../transition";
+import { clampPan, equalPowerPan } from "../volume";
+import { scheduleVolumeAutomation, volumeAutomationIsActive } from "../volume-automation";
+import { audioClipsForMix, mixWindowsForClip, presentLinkedAudioMates } from "./job";
+import { decodeAudio, isPlayableSource } from "./media";
+import type { AacSample } from "./mp4";
+import type { ExportHooks, ExportJob } from "./types";
+import type { TrackId } from "../models";
+
+function trackPanOfJob(job: ExportJob, trackId: TrackId): number {
+  return clampPan(job.tracks.find((t) => t.id === trackId)?.pan ?? 0);
+}
+
+/** Pan last: gain envelope (clip/fade/fader/master) already on `input`. */
+function connectTrackPan(ctx: OfflineAudioContext, input: AudioNode, pan: number): void {
+  const p = clampPan(pan);
+  if (typeof ctx.createStereoPanner === "function") {
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = p;
+    input.connect(panner);
+    panner.connect(ctx.destination);
+    return;
+  }
+  const { left, right } = equalPowerPan(p);
+  const merger = ctx.createChannelMerger(2);
+  const gL = ctx.createGain();
+  const gR = ctx.createGain();
+  gL.gain.value = left;
+  gR.gain.value = right;
+  input.connect(gL);
+  input.connect(gR);
+  gL.connect(merger, 0, 0);
+  gR.connect(merger, 0, 1);
+  merger.connect(ctx.destination);
+}
+
+export type AacProbe = {
+  sampleRate: number;
+  channels: number;
+  bitrate: number;
+};
+
+const AAC_CODEC = "mp4a.40.2";
+
+export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => resolve(fallback), ms);
+    p.then(
+      (v) => { window.clearTimeout(t); resolve(v); },
+      (e) => { window.clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+export async function probeAac(): Promise<AacProbe | null> {
+  if (typeof AudioEncoder === "undefined") return null;
+  const candidates: AacProbe[] = [
+    { sampleRate: 44100, channels: 2, bitrate: 128_000 },
+    { sampleRate: 48000, channels: 2, bitrate: 128_000 },
+    { sampleRate: 44100, channels: 1, bitrate: 96_000 },
+    { sampleRate: 48000, channels: 1, bitrate: 96_000 },
+  ];
+  for (const c of candidates) {
+    try {
+      let failed = false;
+      const encoder = new AudioEncoder({
+        output: () => {},
+        error: () => {
+          failed = true;
+        },
+      });
+      encoder.configure({
+        codec: AAC_CODEC,
+        numberOfChannels: c.channels,
+        sampleRate: c.sampleRate,
+        bitrate: c.bitrate,
+      });
+      encoder.close();
+      if (!failed) return c;
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
+/** Video-only / empty decode: no channels or no frames → skip, do not fail the mix. */
+export function decodedBufferIsAudible(
+  buf: Pick<AudioBuffer, "numberOfChannels" | "length">,
+): boolean {
+  return buf.numberOfChannels > 0 && buf.length > 0;
+}
+
+export async function mixJobAudio(
+  job: ExportJob,
+  probe: AacProbe,
+  signal?: AbortSignal,
+): Promise<AudioBuffer | null> {
+  const clips = audioClipsForMix(job).filter((c) => isPlayableSource(c.sourceUrl));
+  if (clips.length === 0) return null;
+  const length = Math.max(1, Math.ceil((job.durationMs / 1000) * probe.sampleRate));
+  const ctx = new OfflineAudioContext(probe.channels, length, probe.sampleRate);
+  let added = 0;
+  for (const clip of clips) {
+    if (signal?.aborted) throw new Error("Export aborted");
+    try {
+      const decoded = await decodeAudio(clip.sourceUrl);
+      if (!decodedBufferIsAudible(decoded)) continue;
+      const src = ctx.createBufferSource();
+      src.buffer = decoded;
+      const gain = ctx.createGain();
+      const peak = Number.isFinite(clip.gain) ? Math.max(0, clip.gain) : 1;
+      const durationMs = Math.max(1, clip.endMs - clip.startMs);
+      const mates = clip.skipMix ? presentLinkedAudioMates(job, clip) : [];
+      const windows = clip.skipMix && mates.length > 0 ? mixWindowsForClip(clip, mates) : [
+        { startMs: clip.startMs, endMs: clip.endMs },
+      ];
+      if (windows.length === 0) continue;
+      scheduleGainEnvelope(
+        gain.gain,
+        clip.startMs,
+        durationMs,
+        clip.fadeInMs ?? 0,
+        clip.fadeOutMs ?? 0,
+        peak,
+        { startFactor: clip.fadeInFrom, endFactor: clip.fadeOutTo },
+      );
+      src.connect(gain);
+      const trackAuto = job.tracks.find((t) => t.id === clip.trackId)?.volumeAutomation;
+      let mixOut: AudioNode = gain;
+      if (volumeAutomationIsActive(trackAuto)) {
+        const autoGain = ctx.createGain();
+        autoGain.gain.value = 1;
+        scheduleVolumeAutomation(autoGain.gain, trackAuto, clip.startMs, clip.endMs);
+        gain.connect(autoGain);
+        mixOut = autoGain;
+      }
+      const transitions = job.transitions ?? [];
+      if (transitions.length > 0) {
+        const transGain = ctx.createGain();
+        const peers = job.tracks.flatMap((t) => t.clips);
+        scheduleTransitionAudioGain(
+          transGain.gain,
+          transitions,
+          clip.id,
+          clip.startMs,
+          clip.endMs,
+          undefined,
+          peers,
+        );
+        mixOut.connect(transGain);
+        connectTrackPan(ctx, transGain, trackPanOfJob(job, clip.trackId));
+      } else {
+        connectTrackPan(ctx, mixOut, trackPanOfJob(job, clip.trackId));
+      }
+      const rate = clampClipRate(clip.rate ?? 1);
+      src.playbackRate.value = rate;
+      const first = windows[0]!;
+      const startOne = (w: { startMs: number; endMs: number }, node: AudioBufferSourceNode) => {
+        const localMs = Math.max(0, w.startMs - clip.startMs);
+        const offsetSec = Math.max(0, (clip.sourceInMs + localMs * rate) / 1000);
+        const sourceDurSec = Math.max(0.01, ((w.endMs - w.startMs) * rate) / 1000);
+        node.start(Math.max(0, w.startMs / 1000), offsetSec, sourceDurSec);
+      };
+      startOne(first, src);
+      for (let i = 1; i < windows.length; i++) {
+        const extra = ctx.createBufferSource();
+        extra.buffer = decoded;
+        extra.playbackRate.value = rate;
+        extra.connect(gain);
+        startOne(windows[i]!, extra);
+      }
+      added += 1;
+    } catch {
+      /* skip unreadable audio; video-only is still success */
+    }
+  }
+  if (!added) return null;
+  return ctx.startRendering();
+}
+
+function stripAdts(data: Uint8Array): Uint8Array {
+  if (data.length >= 7 && data[0] === 0xff && (data[1]! & 0xf0) === 0xf0) {
+    const hasCrc = (data[1]! & 0x01) === 0;
+    return data.subarray(hasCrc ? 9 : 7);
+  }
+  return data;
+}
+
+function descriptionBytes(desc: AllowSharedBufferSource | undefined): Uint8Array | undefined {
+  if (!desc) return undefined;
+  if (desc instanceof ArrayBuffer) return new Uint8Array(desc);
+  if (ArrayBuffer.isView(desc)) {
+    return new Uint8Array(desc as ArrayBufferView as Uint8Array);
+  }
+  return undefined;
+}
+
+export async function encodeAac(
+  buffer: AudioBuffer,
+  probe: AacProbe,
+  hooks: ExportHooks = {},
+): Promise<{ samples: AacSample[]; description: Uint8Array } | null> {
+  if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") return null;
+
+  const samples: AacSample[] = [];
+  let description: Uint8Array | undefined;
+  let encoderError: Error | undefined;
+
+  const encoder = new AudioEncoder({
+    output: (chunk, meta) => {
+      const desc = descriptionBytes(meta?.decoderConfig?.description);
+      if (desc && desc.byteLength > 0) description = desc;
+      const raw = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(raw);
+      const data = stripAdts(raw);
+      if (data.byteLength === 0) return;
+      samples.push({
+        data,
+        timestampUs: chunk.timestamp,
+        durationUs: chunk.duration ?? Math.round((1024 / probe.sampleRate) * 1_000_000),
+      });
+    },
+    error: (e) => {
+      encoderError = e;
+    },
+  });
+
+  try {
+    encoder.configure({
+      codec: AAC_CODEC,
+      numberOfChannels: probe.channels,
+      sampleRate: probe.sampleRate,
+      bitrate: probe.bitrate,
+    });
+
+    const channels = Math.min(probe.channels, buffer.numberOfChannels);
+    const frameSize = 1024;
+    for (let offset = 0; offset < buffer.length; offset += frameSize) {
+      if (hooks.signal?.aborted) throw new Error("Export aborted");
+      if (encoderError) throw encoderError;
+      const frames = Math.min(frameSize, buffer.length - offset);
+      const planar = new Float32Array(frames * channels);
+      for (let c = 0; c < channels; c++) {
+        planar.set(buffer.getChannelData(c).subarray(offset, offset + frames), c * frames);
+      }
+      const audioData = new AudioData({
+        format: "f32-planar",
+        sampleRate: buffer.sampleRate,
+        numberOfFrames: frames,
+        numberOfChannels: channels,
+        timestamp: Math.round((offset / buffer.sampleRate) * 1_000_000),
+        data: planar,
+      });
+      encoder.encode(audioData);
+      audioData.close();
+    }
+
+    await encoder.flush();
+    encoder.close();
+  } catch {
+    try {
+      encoder.close();
+    } catch {
+      /* already closed */
+    }
+    return null;
+  }
+
+  if (!description || samples.length === 0) return null;
+  return { samples, description };
+}
