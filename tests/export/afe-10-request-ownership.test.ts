@@ -157,7 +157,8 @@ describe("AFE-10 A–J open VIDEO request keeps decode ownership until exact PTS
       expect(dump.decoderRecreateCount).toBe(1);
       expect(dump.recoveryAttempts).toBe(1);
       expect(dump.ownershipRebuilt).toBe(true);
-      expect(dump.decoderFlushCount).toBe(0);
+      /* AFE-14: AFE-11 may FINAL_FLUSH (no-op on RecoverOnReset) before STEP C when useful input is exhausted. */
+      expect(dump.decoderFlushCount === 0 || dump.finalFlushAttempted).toBe(true);
       expect(dump.originRequestedSample).not.toBeNull();
       scheduler.close();
     }

@@ -353,34 +353,44 @@ export function decodeWindowBNeed(prefetch: number): number {
 /**
  * WebCodecs decodeQueue HIGH_WATER (AFE-14 hysteresis).
  *
- * AFE-12 used min(CAP, max(RECOVERY_FILL 40, maxReorder+lookahead+bFrameNeed))
- * which forced HIGH_WATER=40 on the human 720p30 shape. After recreate with
- * gopStart==0 and no earlier I-frame, WebView2 still died at ~458333 µs
- * with a 40-deep queue. The 40 floor is gone.
- *
  * Formula:
  *   L           = min(WINDOW_LOOKAHEAD 6, streamLookaheadSamples(maxReorder, prefetch))
  *   B           = prefetch
- *   HIGH_WATER  = min(CAP 48, maxReorder + L + B)
- *   LOW_WATER   = min(HIGH_WATER - 1, max(L, B))     // LOW < HIGH
+ *   RAW         = maxReorder + L + B
+ *   HIGH_FIRST  = min(CAP 48, max(RECOVERY_FILL 40, RAW))
+ *                 first fill only — AFE-10 held sample 38 until ~36–44 submits
+ *   HIGH_RECOVER= min(CAP 48, RAW)
+ *                 after recreate the 40 floor is gone. Human 720p30
+ *                 (reorder 10, prefetch 4, L 6) → HIGH 20 < 40.
+ *   LOW_WATER   = min(HIGH - 1, max(L, B))            // LOW < HIGH
  *
- * Human 720p30: maxReorder=10, prefetch=4, L=6, B=4 → HIGH=20 < 40, LOW=6.
- * Typical prefetch=4, maxReorder=2 → L=6, B=4 → HIGH=12, LOW=6.
- * CAP remains 48 as a hard safety (never near decodeQueue 125).
- * No global PREFETCH bump. RECOVERY_FILL is historical only.
+ * WebView2 died at lastDecodedTs 458333 with a 40-deep *post-recreate* queue
+ * (gopStart 0, no earlier I). Tight HIGH applies after recreate only.
+ * First-fill RECOVERY_FILL stays so AFE-10/11 can still reach lastRequired
+ * and FINAL_FLUSH on QueueHeld / HoldUntilSubmitted(36). No PREFETCH bump.
  */
-export function decodeQueueHighWater(maxReorderSamples: number, prefetch: number): number {
+export function decodeQueueHighWater(
+  maxReorderSamples: number,
+  prefetch: number,
+  opts?: { afterRecreate?: boolean },
+): number {
   const reorder = Math.max(0, maxReorderSamples | 0);
   const pref = Math.max(1, prefetch | 0);
   const look = decodeWindowLookahead(reorder, pref);
   const bNeed = decodeWindowBNeed(pref);
   const raw = Math.max(1, reorder + look + bNeed);
-  return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, raw);
+  const tight = Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, raw);
+  if (opts?.afterRecreate) return tight;
+  return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, Math.max(AFE_DECODE_QUEUE_RECOVERY_FILL, raw));
 }
 
 /** Resume target after HIGH_WATER pause. Always strictly below HIGH_WATER. */
-export function decodeQueueLowWater(maxReorderSamples: number, prefetch: number): number {
-  const high = decodeQueueHighWater(maxReorderSamples, prefetch);
+export function decodeQueueLowWater(
+  maxReorderSamples: number,
+  prefetch: number,
+  opts?: { afterRecreate?: boolean },
+): number {
+  const high = decodeQueueHighWater(maxReorderSamples, prefetch, opts);
   const look = decodeWindowLookahead(maxReorderSamples, prefetch);
   const bNeed = decodeWindowBNeed(prefetch);
   return Math.max(0, Math.min(high - 1, Math.max(look, bNeed)));

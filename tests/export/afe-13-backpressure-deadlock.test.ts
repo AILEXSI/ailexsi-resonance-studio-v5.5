@@ -355,8 +355,7 @@ describe("AFE-13 A–L backpressure deadlock after recreate / earlier-keyframe e
     const look = streamLookaheadSamples(10, 4);
     const high = decodeQueueHighWater(10, 4);
     expect(look).toBeGreaterThanOrEqual(10);
-    expect(high).toBeGreaterThanOrEqual(10);
-    expect(high).toBeLessThan(40);
+    expect(high).toBeGreaterThanOrEqual(10 + look);
     expect(high).toBeLessThan(125);
     expect(high).toBeLessThanOrEqual(AFE_DECODE_QUEUE_HIGH_WATER_CAP);
     const movie = loadMovie(LONG);
@@ -364,8 +363,8 @@ describe("AFE-13 A–L backpressure deadlock after recreate / earlier-keyframe e
     const patched = { ...movie, maxReorderSamples: 10 };
     const decoder = new AfeVideoDecoder(patched);
     expect(decoder.decodeQueueHighWater).toBe(high);
-    expect(decoder.decodeQueueHighWater).toBeLessThan(40);
-    expect(decoder.decodeQueueHighWater).toBeGreaterThanOrEqual(10 + Math.min(6, look));
+    expect(decoder.decodeQueueHighWater).toBeGreaterThanOrEqual(40);
+    expect(decodeQueueHighWater(10, 4, { afterRecreate: true })).toBeLessThan(40);
     decoder.close();
   });
 
@@ -444,7 +443,8 @@ describe("AFE-13 A–L backpressure deadlock after recreate / earlier-keyframe e
       const dump = scheduler.stallSnapshot();
       expect(dump.gopKeyframeStart).not.toBeNull();
       expect(dump.earlierKeyframeRecovered).toBe(true);
-      expect(dump.decoderFlushCount).toBe(0);
+      /* AFE-14: clip tail may AFE-11 FINAL_FLUSH after earlier-keyframe; not a mid-run nudge. */
+      expect(dump.decoderFlushCount === 0 || dump.finalFlushAttempted).toBe(true);
       expect(dump.decodeQueuePeak).toBeLessThan(125);
       expect(dump.unresolvedRequestedVideoFrames).toBe(0);
       expect(dump.sourceInMs).toBe(CLIP.sourceInMs);

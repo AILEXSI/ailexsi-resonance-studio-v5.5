@@ -169,14 +169,18 @@ export class AfeVideoDecoder {
     return this.decoder?.decodeQueueSize ?? 0;
   }
 
-  /** Derived HIGH_WATER — maxReorder + window-lookahead + B-need, never near 125. */
+  /** Derived HIGH_WATER — tight after recreate, RECOVERY_FILL first fill. */
   get decodeQueueHighWater(): number {
-    return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint);
+    return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint, {
+      afterRecreate: this.recreateCount >= 1,
+    });
   }
 
   /** Resume target after HIGH_WATER pause. Always < HIGH_WATER. */
   get decodeQueueLowWater(): number {
-    return decodeQueueLowWater(this.movie.maxReorderSamples, this.prefetchHint);
+    return decodeQueueLowWater(this.movie.maxReorderSamples, this.prefetchHint, {
+      afterRecreate: this.recreateCount >= 1,
+    });
   }
 
   get coldStartChunks(): readonly ChunkFingerprint[] {

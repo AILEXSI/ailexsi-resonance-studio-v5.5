@@ -955,19 +955,21 @@ STAGE 1 fingerprints every submitted sample (index / PTS / DTS / duration / key 
 
 STAGE 2 stall dump adds `postRecreate*`, `packetParity`, `configParity`, `firstSubmittedAfterRecreate`, `earlierKeyframeAvailable` so a Windows dump answers: correct stream then stop, or AFE fed something different?
 
-STAGE 3 (only because parity holds by the same `makeChunk` / `decoderConfigOf` path): replace `min(48, max(40, …))` with LOW < HIGH << 40 hysteresis.
+STAGE 3 (only because parity holds by the same `makeChunk` / `decoderConfigOf` path): LOW < HIGH << 40 hysteresis **after recreate**. First-fill keeps the AFE-12 RECOVERY_FILL 40 so AFE-10/11 can still reach lastRequired and FINAL_FLUSH (QueueHeld / HoldUntilSubmitted(36)). The 40 floor is what killed WebView2 *after* recreate.
 
 ## Fix
 
 1. Packet/config fingerprints + first-chunk-after-recreate check. Mismatch → typed `AFE_DECODE_FAILED`.
 2. Output liveness trace after recreate (`postRecreateSubmitted/Outputs/LastDecodedTs/OutputTimestamps`).
-3. Decode window (no RECOVERY_FILL floor, no PREFETCH bump):
+3. Decode window (no PREFETCH bump):
    - `L = min(WINDOW_LOOKAHEAD 6, streamLookaheadSamples(maxReorder, prefetch))`
    - `B = prefetch`
-   - `HIGH_WATER = min(CAP 48, maxReorder + L + B)`
-   - `LOW_WATER  = min(HIGH_WATER - 1, max(L, B))`
-   - Human 720p30: reorder 10, prefetch 4, L 6 → HIGH 20 < 40, LOW 6.
-4. Resume only at LOW_WATER or exact frame ready — not refill on every dequeue.
+   - `RAW = maxReorder + L + B`
+   - `HIGH_FIRST   = min(CAP 48, max(RECOVERY_FILL 40, RAW))` — first fill only
+   - `HIGH_RECOVER = min(CAP 48, RAW)` — after recreate; 40 floor gone
+   - `LOW_WATER    = min(HIGH - 1, max(L, B))`  // LOW < HIGH
+   - Human 720p30 after recreate: reorder 10, prefetch 4, L 6 → HIGH 20 < 40, LOW 6.
+4. Progressive pump toward lastRequired before STEP C recreate; AFE-11 FINAL_FLUSH when useful input is exhausted (before recreate, and again if still unresolved). Resume only at LOW_WATER or exact frame ready — not refill on every dequeue.
 5. NO-OUTPUT INVARIANT: no output progress + queue≥HIGH_WATER ⇒ no more `decode()`; bounded typed stall.
 6. `gopStart==0` → `earlierKeyframeAvailable=false`. Do not repeat the AFE-13 escape loop.
 7. No software decode. No mid-run flush. FINAL_FLUSH AFE-11 intact. Exact PTS.

@@ -387,52 +387,38 @@ export class AfeScheduler {
         this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
       }
-      if (!frame && !recovered) {
-        await recoverGop(idx);
-        recovered = true;
-        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
-      }
-      if (!frame && this.decoder.isFrozenAtHighWaterAfterRecreate()) {
-        if (await tryEarlierKeyframe()) {
+      const progressiveTowardRequired = async () => {
+        while (
+          !frame &&
+          !this.decoder.isFrozenAtHighWaterAfterRecreate() &&
+          hasFurtherUsefulInput({
+            nextDecode: this.nextDecode,
+            sampleCount: this.movie.sampleCount,
+            lastRequiredDecodeSample: lastRequired,
+          })
+        ) {
+          this.decoder.markRecoveryRebuilding([idx]);
+          this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
+          const sliceStart = this.nextDecode;
+          const sliceEnd = progressivePumpSliceEnd({
+            nextDecode: this.nextDecode,
+            lastRequiredDecodeSample: lastRequired,
+            sampleCount: this.movie.sampleCount,
+            sliceSamples,
+          });
+          this.decoder.setStallPhase("PUMP_LOOKAHEAD");
+          this.decoder.setPumpSlice(sliceStart, sliceEnd);
+          const before = this.nextDecode;
+          await pumpThrough(sliceEnd, idx, budgetEnd);
+          this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
+          this.decoder.assertOpenedOwnership(extra);
           frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
-        } else {
-          return throwStall(idx);
+          if (this.nextDecode === before) break;
+          if (nowMs() >= budgetEnd) break;
         }
-      }
-      while (
-        !frame &&
-        !this.decoder.isFrozenAtHighWaterAfterRecreate() &&
-        hasFurtherUsefulInput({
-          nextDecode: this.nextDecode,
-          sampleCount: this.movie.sampleCount,
-          lastRequiredDecodeSample: lastRequired,
-        })
-      ) {
-        this.decoder.markRecoveryRebuilding([idx]);
-        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
-        const sliceStart = this.nextDecode;
-        const sliceEnd = progressivePumpSliceEnd({
-          nextDecode: this.nextDecode,
-          lastRequiredDecodeSample: lastRequired,
-          sampleCount: this.movie.sampleCount,
-          sliceSamples,
-        });
-        this.decoder.setStallPhase("PUMP_LOOKAHEAD");
-        this.decoder.setPumpSlice(sliceStart, sliceEnd);
-        await pumpThrough(sliceEnd, idx, budgetEnd);
-        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
-        this.decoder.assertOpenedOwnership(extra);
-        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
-        if (nowMs() >= budgetEnd) break;
-      }
-      if (!frame && this.decoder.isFrozenAtHighWaterAfterRecreate()) {
-        if (await tryEarlierKeyframe()) {
-          frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
-        } else {
-          return throwStall(idx);
-        }
-      }
-      if (!frame) {
+      };
+
+      const tryFinalFlush = async () => {
         this.decoder.clearRecoveryRebuilding([idx]);
         const flushSnap = this.decoder.snapshot(extra);
         const canFlush = mayFinalFlush({
@@ -445,22 +431,38 @@ export class AfeScheduler {
           recoveryRebuilding: false,
           transactionComplete: flushSnap.transactionComplete,
         });
-        if (canFlush && !flushSnap.finalFlushAttempted) {
-          this.decoder.armFinalFlush([idx]);
-          this.decoder.assertOpenedOwnership(extra);
-          this.decoder.setStallPhase("FINAL_FLUSH");
-          await this.decoder.flushTail(signal);
-          frame = this.decoder.takeReady(idx);
-          if (!frame) {
-            const remain = Math.max(16, budgetEnd - nowMs());
-            frame = await this.decoder.awaitReady(idx, signal, extra, {
-              allowSkip: false,
-              throwOnTimeout: false,
-              timeoutMs: remain,
-            });
-          }
+        if (!canFlush || flushSnap.finalFlushAttempted) return;
+        this.decoder.armFinalFlush([idx]);
+        this.decoder.assertOpenedOwnership(extra);
+        this.decoder.setStallPhase("FINAL_FLUSH");
+        await this.decoder.flushTail(signal);
+        frame = this.decoder.takeReady(idx);
+        if (!frame) {
+          const remain = Math.max(16, budgetEnd - nowMs());
+          frame = await this.decoder.awaitReady(idx, signal, extra, {
+            allowSkip: false,
+            throwOnTimeout: false,
+            timeoutMs: remain,
+          });
+        }
+      };
+
+      /* First-fill HIGH admits AFE-10 ~36 submits before any STEP C recreate. */
+      if (!frame) await progressiveTowardRequired();
+      if (!frame) await tryFinalFlush();
+      if (!frame && !recovered) {
+        await recoverGop(idx);
+        recovered = true;
+        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+        if (!frame) await progressiveTowardRequired();
+      }
+      if (!frame && this.decoder.isFrozenAtHighWaterAfterRecreate()) {
+        if (await tryEarlierKeyframe()) {
+          frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+          if (!frame) await progressiveTowardRequired();
         }
       }
+      if (!frame) await tryFinalFlush();
       if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
       if (frame) {
         this.decoder.markEncoded(idx);

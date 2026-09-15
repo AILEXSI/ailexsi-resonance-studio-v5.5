@@ -385,14 +385,14 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     expect(result.equal).toBe(false);
     expect(result.mismatchIndex).toBe(2);
     expect(result.field).toBe("ptsUs");
-    expect(decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch)).toBeLessThan(40);
+    expect(decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch, { afterRecreate: true })).toBeLessThan(40);
     expect(AFE_DECODE_QUEUE_RECOVERY_FILL).toBe(40);
     expect(firstChunkAfterRecreateCheck(movie!, 0, { index: 1, key: false, ptsUs: 0, dtsUs: 0 }).ok).toBe(
       false,
     );
   });
 
-  it("I. HIGH_WATER < 40 for human shape (reorder10 prefetch4 lookahead6); LOW < HIGH", () => {
+  it("I. HIGH_WATER < 40 for human shape (reorder10 prefetch4 lookahead6); LOW < HIGH", async () => {
     expect(AFE_DECODE_WINDOW_LOOKAHEAD).toBe(6);
     expect(HUMAN.lookahead).toBe(6);
     expect(getAfeSequentialPrefetch()).toBe(4);
@@ -400,8 +400,10 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     const B = decodeWindowBNeed(HUMAN.prefetch);
     expect(L).toBe(6);
     expect(B).toBe(4);
-    const high = decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch);
-    const low = decodeQueueLowWater(HUMAN.maxReorder, HUMAN.prefetch);
+    const highFirst = decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch);
+    const high = decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch, { afterRecreate: true });
+    const low = decodeQueueLowWater(HUMAN.maxReorder, HUMAN.prefetch, { afterRecreate: true });
+    expect(highFirst).toBe(AFE_DECODE_QUEUE_RECOVERY_FILL);
     expect(high).toBe(HUMAN.maxReorder + L + B);
     expect(high).toBe(20);
     expect(high).toBeLessThan(40);
@@ -412,12 +414,16 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     expect(streamLookaheadSamples(10, 4)).toBeGreaterThanOrEqual(6);
     const movie = loadMovie(LONG);
     if (!movie) return;
+    restore = installNeverEmitDecoder();
     const patched = { ...movie, maxReorderSamples: 10 };
     const decoder = new AfeVideoDecoder(patched);
+    expect(decoder.decodeQueueHighWater).toBe(40);
+    await decoder.ensure();
+    await decoder.recreate();
     expect(decoder.decodeQueueHighWater).toBe(20);
     expect(decoder.decodeQueueLowWater).toBe(6);
     decoder.close();
-  });
+  }, 10_000);
 
   it("J. resume only at LOW_WATER or exact frame ready — not refill on every dequeue", async () => {
     const high = decodeQueueHighWater(10, 4);
