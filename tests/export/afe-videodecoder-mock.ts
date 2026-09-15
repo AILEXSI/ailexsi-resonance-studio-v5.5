@@ -1137,3 +1137,97 @@ export function installControllableQueueDecoder(): () => void {
   ControllableQueueDecoder.last = null;
   return installDecoderCtor(ControllableQueueDecoder);
 }
+
+/**
+ * AFE-15: first flush leaves `leaveOnFirstFlush` chunks in decodeQueue
+ * (human: queue=2 after FINAL_FLUSH). Second flush emits the rest.
+ * Optional skipPts never appears unless emitSkippedOnSecondFlush.
+ */
+export class FlushLeavesQueueDecoder {
+  static last: FlushLeavesQueueDecoder | null = null;
+  static leaveOnFirstFlush = 2;
+  static skipPts = new Set<number>();
+  static emitSkippedOnSecondFlush = true;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  emitted = 0;
+  flushCount = 0;
+  closed = false;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+    FlushLeavesQueueDecoder.last = this;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+  }
+
+  private emitOne(ts: number): void {
+    if (FlushLeavesQueueDecoder.skipPts.has(ts) && this.flushCount < 2) return;
+    if (FlushLeavesQueueDecoder.skipPts.has(ts) && !FlushLeavesQueueDecoder.emitSkippedOnSecondFlush) return;
+    this.output(new FakeVideoFrame(ts));
+  }
+
+  async flush(): Promise<void> {
+    this.flushCount += 1;
+    if (this.flushCount === 1) {
+      const keep = Math.max(0, FlushLeavesQueueDecoder.leaveOnFirstFlush);
+      const stop = Math.max(this.emitted, this.submitted.length - keep);
+      while (this.emitted < stop) {
+        this.emitOne(this.submitted[this.emitted++]!);
+      }
+      this.decodeQueueSize = this.submitted.length - this.emitted;
+      for (const fn of this.listeners) fn();
+      return;
+    }
+    while (this.emitted < this.submitted.length) {
+      this.emitOne(this.submitted[this.emitted++]!);
+    }
+    this.decodeQueueSize = 0;
+    for (const fn of this.listeners) fn();
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.emitted = 0;
+    this.decodeQueueSize = 0;
+    this.flushCount = 0;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installFlushLeavesQueueDecoder(opts?: {
+  leaveOnFirstFlush?: number;
+  skipPts?: Iterable<number>;
+  emitSkippedOnSecondFlush?: boolean;
+}): () => void {
+  FlushLeavesQueueDecoder.last = null;
+  FlushLeavesQueueDecoder.leaveOnFirstFlush = opts?.leaveOnFirstFlush ?? 2;
+  FlushLeavesQueueDecoder.skipPts = new Set(opts?.skipPts ?? []);
+  FlushLeavesQueueDecoder.emitSkippedOnSecondFlush = opts?.emitSkippedOnSecondFlush ?? true;
+  return installDecoderCtor(FlushLeavesQueueDecoder);
+}

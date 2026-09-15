@@ -29,13 +29,17 @@ import {
   maySubmitEncoded,
   nowMs,
   originFromStall,
-  requestOwnershipHolds,
   usefulInputExhausted,
   requestedPtsIsPending,
   streamLookaheadSamples,
+  exactRequestIdentityHolds,
+  mayGenuineFinalDrain,
   type AfeStallPhase,
   type AfeStallSnapshot,
+  type PtsIdentityAction,
+  type PtsIdentityEvent,
   type RequestOwnershipState,
+  type SampleFate,
   type SampleRole,
   type SubmitPhaseTrace,
 } from "./stall";
@@ -50,7 +54,10 @@ type OpenedRequestOwnership = {
   ptsUs: number | null;
   transitions: RequestOwnershipState[];
   waiterActive: boolean;
+  /** Live: currently in PtsIndexMap / exact pending / ready. */
   ptsRegistered: boolean;
+  /** Sticky: inserted at least once. Not live identity. */
+  ptsEverRegistered: boolean;
   recoveryRebuilding: boolean;
   rebuilt: boolean;
 };
@@ -145,6 +152,13 @@ export class AfeVideoDecoder {
   private packetParityCompared = 0;
   private packetParityMismatchIndex: number | null = null;
   private packetParityMismatchField: string | null = null;
+  private readonly identityEvents: PtsIdentityEvent[] = [];
+  private readonly outputTimestamps: number[] = [];
+  private readonly tailOutputTimestamps: number[] = [];
+  private targetPtsUs: number | null = null;
+  private targetPtsOutputCount = 0;
+  private targetPtsLastSeenTs: number | null = null;
+  private tailDrainReplayed = false;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -259,6 +273,7 @@ export class AfeVideoDecoder {
         transitions: ["OPEN_REQUEST"],
         waiterActive: false,
         ptsRegistered: false,
+        ptsEverRegistered: false,
         recoveryRebuilding: false,
         rebuilt: false,
       };
@@ -328,7 +343,12 @@ export class AfeVideoDecoder {
     this.requestedIndexes.add(index);
     this.protectSample(index);
     if (this.isResolvedRequested(index)) return;
-    this.ensureOwnership(index, ptsUs);
+    const rec = this.ensureOwnership(index, ptsUs);
+    if (ptsUs != null) {
+      rec.ptsUs = ptsUs;
+      this.targetPtsUs = ptsUs;
+    }
+    this.noteIdentity(index, "OPEN_REQUEST", rec.ptsUs);
   }
 
   markResolvedRequested(index: number): void {
@@ -348,6 +368,123 @@ export class AfeVideoDecoder {
 
   ownershipTrace(index: number): RequestOwnershipState[] {
     return [...(this.ownership.get(index)?.transitions ?? [])];
+  }
+
+  identityTrace(index?: number): PtsIdentityEvent[] {
+    if (index == null) return [...this.identityEvents];
+    return this.identityEvents.filter((e) => e.index === index);
+  }
+
+  tailOutputTrace(): number[] {
+    return [...this.tailOutputTimestamps];
+  }
+
+  outputTrace(): number[] {
+    return [...this.outputTimestamps];
+  }
+
+  hasTargetPtsBeenSeen(ptsUs?: number | null): boolean {
+    const pts = ptsUs ?? this.targetPtsUs;
+    return pts != null && this.targetPtsOutputCount > 0 && this.targetPtsLastSeenTs === pts
+      ? true
+      : pts != null && this.outputTimestamps.includes(pts);
+  }
+
+  ptsEverRegisteredFor(index: number): boolean {
+    return this.ownership.get(index)?.ptsEverRegistered === true;
+  }
+
+  ptsCurrentlyRegisteredFor(index: number): boolean {
+    return this.streamPts.hasIndex(index) || this.streamReady.has(index);
+  }
+
+  /**
+   * Re-bind live exact identity. FINAL_FLUSH_ARMED is not a substitute.
+   * Until RESOLVED/ERROR/ABORT the request must sit in PtsIndexMap,
+   * streamReady, an exact waiter, or an active recovery rebuild.
+   */
+  /** Test hook: inject a WebCodecs output with an exact timestamp. */
+  deliverOutputForTest(timestamp: number): void {
+    const Frame = (globalThis as unknown as { VideoFrame: new (ts: number) => VideoFrame }).VideoFrame;
+    this.onOutput(new Frame(timestamp), this.currentTransactionId);
+  }
+
+  /** Test / audit hook: drop live map identity without resolving the request. */
+  dropLivePtsIdentity(index: number): boolean {
+    const rec = this.ownership.get(index);
+    const pts = rec?.ptsUs ?? null;
+    const left = this.streamPts.deleteIndex(index);
+    if (left) this.noteIdentity(index, "PTS_LEAVE_DELETE", pts);
+    this.syncPtsCurrent(index);
+    return left;
+  }
+
+  retainExactIdentity(index: number, ptsUs?: number | null): boolean {
+    if (!this.openedRequested.has(index) || this.isResolvedRequested(index)) return false;
+    const ok = this.confirmPtsRegistered(index, ptsUs);
+    this.noteIdentity(index, "RETAIN", ptsUs ?? this.ownership.get(index)?.ptsUs ?? null);
+    return ok;
+  }
+
+  private recordOutputTimestamp(timestamp: number): void {
+    if (this.outputTimestamps.length < 48) this.outputTimestamps.push(timestamp);
+    else {
+      this.outputTimestamps.shift();
+      this.outputTimestamps.push(timestamp);
+    }
+    if (this.finalFlushArmed || this.stallPhase === "FINAL_FLUSH") {
+      if (this.tailOutputTimestamps.length < 24) this.tailOutputTimestamps.push(timestamp);
+    }
+    if (this.targetPtsUs != null && timestamp === this.targetPtsUs) {
+      this.targetPtsOutputCount += 1;
+      this.targetPtsLastSeenTs = timestamp;
+    } else {
+      const opened = this.openedUnresolvedByPts(timestamp);
+      if (opened != null) {
+        this.targetPtsUs = timestamp;
+        this.targetPtsOutputCount += 1;
+        this.targetPtsLastSeenTs = timestamp;
+      }
+    }
+  }
+
+  private noteIdentity(index: number, action: PtsIdentityAction, ptsUs?: number | null, fate?: SampleFate): void {
+    const rec = this.ownership.get(index);
+    const pts = ptsUs ?? rec?.ptsUs ?? null;
+    this.identityEvents.push({
+      index,
+      ptsUs: pts,
+      action,
+      fate: fate ?? this.streamPts.fateOf(index),
+      streamPtsPending: this.streamPts.pendingCount(),
+      streamReady: this.streamReady.has(index),
+      waiter: this.streamWaiter?.index === index,
+    });
+    if (this.identityEvents.length > 64) this.identityEvents.shift();
+  }
+
+  private syncPtsCurrent(index: number): void {
+    const rec = this.ownership.get(index);
+    if (!rec) return;
+    rec.ptsRegistered = this.ptsCurrentlyRegisteredFor(index);
+    if (rec.ptsRegistered) rec.ptsEverRegistered = true;
+  }
+
+  private openedUnresolvedByPts(timestamp: number): number | undefined {
+    for (const index of this.openedRequested) {
+      if (this.isResolvedRequested(index)) continue;
+      const rec = this.ownership.get(index);
+      const pts = rec?.ptsUs ?? (this.movie.samples[index] ? this.chunkTimestampUs(this.movie.samples[index]!) : null);
+      if (pts === timestamp) return index;
+    }
+    return undefined;
+  }
+
+  private mustKeepOpened(index: number): boolean {
+    if (this.protectedIndexes.has(index)) return true;
+    if (this.openedRequested.has(index) && !this.isResolvedRequested(index)) return true;
+    if (this.streamWaiter?.index === index) return true;
+    return false;
   }
 
   setPumpSlice(start: number, end: number): void {
@@ -603,7 +740,7 @@ export class AfeVideoDecoder {
     for (const index of ids) {
       const rec = this.ensureOwnership(index);
       rec.recoveryRebuilding = false;
-      rec.waiterActive = false;
+      this.retainExactIdentity(index, rec.ptsUs);
       this.noteOwnership(index, "FINAL_FLUSH_ARMED");
     }
   }
@@ -645,16 +782,22 @@ export class AfeVideoDecoder {
     const sample = this.movie.samples[index];
     const pts = ptsUs ?? (sample ? this.chunkTimestampUs(sample) : this.ownership.get(index)?.ptsUs ?? null);
     const rec = this.ensureOwnership(index, pts);
+    if (pts != null) rec.ptsUs = pts;
     if (this.streamReady.has(index) || this.isResolvedRequested(index)) {
       rec.ptsRegistered = true;
+      rec.ptsEverRegistered = true;
       this.noteOwnership(index, "PTS_REGISTERED");
       return true;
     }
     if (pts != null && !this.streamPts.hasIndex(index)) {
       this.streamPts.push(pts, index);
+      this.noteIdentity(index, "PTS_INSERT", pts);
     }
-    rec.ptsRegistered = this.streamPts.hasIndex(index) || (pts != null && this.hasPendingPts(pts));
-    if (rec.ptsRegistered) this.noteOwnership(index, "PTS_REGISTERED");
+    rec.ptsRegistered = this.streamPts.hasIndex(index);
+    if (rec.ptsRegistered) {
+      rec.ptsEverRegistered = true;
+      this.noteOwnership(index, "PTS_REGISTERED");
+    }
     return rec.ptsRegistered;
   }
 
@@ -662,19 +805,28 @@ export class AfeVideoDecoder {
     const unresolved = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
     if (unresolved.length === 0) return;
     const waiter = this.streamWaiter?.index ?? null;
-    const pending = this.streamPts.pendingCount();
     const rebuilding = unresolved.some((i) => this.ownership.get(i)?.recoveryRebuilding);
-    const ptsRegistered = unresolved.some((i) => this.ownership.get(i)?.ptsRegistered);
-    const flushArmed = this.finalFlushArmed || this.stallPhase === "FINAL_FLUSH";
+    const live = unresolved.some((i) =>
+      exactRequestIdentityHolds({
+        unresolvedRequestedVideoFrames: 1,
+        streamWaiterIndex: waiter === i ? waiter : this.streamWaiter?.index === i ? i : null,
+        pendingPts: this.streamPts.hasIndex(i) ? this.streamPts.pendingTimestamps() : [],
+        requestedPtsUs: this.ownership.get(i)?.ptsUs ?? extra?.requestedPtsUs ?? null,
+        ptsCurrentlyRegistered: this.ptsCurrentlyRegisteredFor(i),
+        streamReadyExact: this.streamReady.has(i),
+        recoveryRebuilding: this.ownership.get(i)?.recoveryRebuilding === true,
+      }),
+    );
     if (
-      requestOwnershipHolds({
+      live ||
+      exactRequestIdentityHolds({
         unresolvedRequestedVideoFrames: unresolved.length,
         streamWaiterIndex: waiter,
-        pendingPtsCount: pending,
-        ptsRegistered,
+        pendingPts: this.streamPts.pendingTimestamps(),
+        requestedPtsUs: extra?.requestedPtsUs ?? this.ownership.get(unresolved[0]!)?.ptsUs ?? null,
+        ptsCurrentlyRegistered: unresolved.some((i) => this.ptsCurrentlyRegisteredFor(i)),
+        streamReadyExact: unresolved.some((i) => this.streamReady.has(i)),
         recoveryRebuilding: rebuilding,
-        finalFlushArmed: flushArmed,
-        finalFlushInProgress: this.stallPhase === "FINAL_FLUSH",
       })
     ) {
       return;
@@ -759,13 +911,40 @@ export class AfeVideoDecoder {
           nextDecode: (lastSubmitted ?? -1) + 1,
           sampleCount: this.movie.sampleCount,
         }));
-    const ptsRegistered =
-      extra?.ptsRegistered ??
+    const ptsCurrently =
+      extra?.ptsCurrentlyRegistered ??
       (focus != null
-        ? this.streamPts.hasIndex(focus) ||
-          this.hasPendingPts(extra?.requestedPtsUs ?? rec?.ptsUs) ||
-          rec?.ptsRegistered === true
-        : this.streamPts.pendingCount() > 0);
+        ? this.ptsCurrentlyRegisteredFor(focus)
+        : unresolvedRecs.some((i) => this.ptsCurrentlyRegisteredFor(i)));
+    const ptsEver =
+      extra?.ptsEverRegistered ??
+      (focus != null
+        ? rec?.ptsEverRegistered === true || ptsCurrently
+        : unresolvedRecs.some((i) => this.ownership.get(i)?.ptsEverRegistered === true) || ptsCurrently);
+    const ptsRegistered = extra?.ptsRegistered ?? ptsCurrently;
+    const targetPts = extra?.targetPtsUs ?? extra?.requestedPtsUs ?? rec?.ptsUs ?? this.targetPtsUs;
+    const targetSeen = extra?.targetPtsSeen ?? (targetPts != null && this.outputTimestamps.includes(targetPts));
+    const identityHolds =
+      extra?.exactIdentityHolds ??
+      (focus != null
+        ? exactRequestIdentityHolds({
+            unresolvedRequestedVideoFrames: unresolved > 0 ? 1 : 0,
+            streamWaiterIndex: waiter === focus ? waiter : null,
+            pendingPts: this.streamPts.pendingTimestamps(),
+            requestedPtsUs: targetPts,
+            ptsCurrentlyRegistered: ptsCurrently,
+            streamReadyExact: this.streamReady.has(focus),
+            recoveryRebuilding: rec?.recoveryRebuilding === true,
+          })
+        : exactRequestIdentityHolds({
+            unresolvedRequestedVideoFrames: unresolved,
+            streamWaiterIndex: waiter,
+            pendingPts: this.streamPts.pendingTimestamps(),
+            requestedPtsUs: targetPts,
+            ptsCurrentlyRegistered: ptsCurrently,
+            streamReadyExact: unresolvedRecs.some((i) => this.streamReady.has(i)),
+            recoveryRebuilding: rebuilding,
+          }));
     const invariantOk = requestedEncodedInvariantHolds({
       unresolvedRequestedVideoFrames: unresolved,
       videoFramesRequested: req,
@@ -869,6 +1048,15 @@ export class AfeVideoDecoder {
       postRecreateOutputs: extra?.postRecreateOutputs ?? this.postRecreateOutputs,
       postRecreateLastDecodedTs:
         extra?.postRecreateLastDecodedTs ?? this.postRecreateLastDecodedTs,
+      ptsEverRegistered: extra?.ptsEverRegistered ?? ptsEver,
+      ptsCurrentlyRegistered: extra?.ptsCurrentlyRegistered ?? ptsCurrently,
+      targetPtsUs: extra?.targetPtsUs ?? targetPts,
+      targetPtsSeen: extra?.targetPtsSeen ?? targetSeen,
+      targetPtsOutputCount: extra?.targetPtsOutputCount ?? this.targetPtsOutputCount,
+      targetPtsLastSeenTs: extra?.targetPtsLastSeenTs ?? this.targetPtsLastSeenTs,
+      tailOutputTimestamps: extra?.tailOutputTimestamps ?? [...this.tailOutputTimestamps],
+      tailOutputCount: extra?.tailOutputCount ?? this.tailOutputTimestamps.length,
+      exactIdentityHolds: extra?.exactIdentityHolds ?? identityHolds,
     });
   }
 
@@ -1082,6 +1270,15 @@ export class AfeVideoDecoder {
   ): void {
     this.closeStreamFrames();
     this.streamPts.clear();
+    if (!bounds?.keepResolved) {
+      this.identityEvents.length = 0;
+      this.outputTimestamps.length = 0;
+      this.tailOutputTimestamps.length = 0;
+      this.targetPtsUs = null;
+      this.targetPtsOutputCount = 0;
+      this.targetPtsLastSeenTs = null;
+      this.tailDrainReplayed = false;
+    }
     this.streamMode = true;
     this.streamNeeded = needed;
     this.streamDecodeStart = decodeStart;
@@ -1354,18 +1551,19 @@ export class AfeVideoDecoder {
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
         this.noteWaiterCleared(index);
         const rec = this.ownership.get(index);
-        const pending = this.streamPts.pendingCount();
-        const usefulDone = this.usefulInputIsExhausted();
-        const flushOwns = this.finalFlushArmed || this.stallPhase === "FINAL_FLUSH";
-        if (
-          this.openedRequested.has(index) &&
-          !this.isResolvedRequested(index) &&
-          pending === 0 &&
-          !rec?.recoveryRebuilding &&
-          !rec?.ptsRegistered &&
-          !usefulDone &&
-          !flushOwns
-        ) {
+        if (this.openedRequested.has(index) && !this.isResolvedRequested(index)) {
+          this.retainExactIdentity(index, rec?.ptsUs);
+        }
+        const live = exactRequestIdentityHolds({
+          unresolvedRequestedVideoFrames: 1,
+          streamWaiterIndex: null,
+          pendingPts: this.streamPts.pendingTimestamps(),
+          requestedPtsUs: rec?.ptsUs ?? extra?.requestedPtsUs ?? null,
+          ptsCurrentlyRegistered: this.ptsCurrentlyRegisteredFor(index),
+          streamReadyExact: this.streamReady.has(index),
+          recoveryRebuilding: rec?.recoveryRebuilding === true,
+        });
+        if (this.openedRequested.has(index) && !this.isResolvedRequested(index) && !live) {
           this.noteOwnership(index, "OWNERSHIP_LOST");
           const err = new AfeError("AFE_REQUEST_OWNERSHIP_LOST", formatStallMessage(dumpStall()), false);
           this.lastError = err;
@@ -1426,6 +1624,7 @@ export class AfeVideoDecoder {
     if (role === "SPECULATIVE") this.speculativeSubmitted += 1;
     if (role === "REQUESTED") this.protectSample(sample.index);
     this.streamPts.push(timestamp, sample.index);
+    this.noteIdentity(sample.index, "PTS_INSERT", timestamp);
     this.lastSubmittedSample = sample.index;
     if (this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit) {
       this.submitsWithoutOutputProgress += 1;
@@ -1527,6 +1726,9 @@ export class AfeVideoDecoder {
     }
     this.armFinalFlush();
     await this.settleOutputs(signal, false);
+    for (const index of [...this.openedRequested].filter((i) => !this.isResolvedRequested(i))) {
+      this.retainExactIdentity(index);
+    }
   }
 
   /**
@@ -1636,6 +1838,76 @@ export class AfeVideoDecoder {
       if (isAfeError(e)) throw e;
       throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
     }
+    if (this.finalFlushArmed) await this.drainHeldTail(signal);
+  }
+
+  /**
+   * CASE B: flush resolved but hardware still holds frames (human decodeQueue=2).
+   * Wait for remaining outputs; optional ONE extra flush. Not GOP recreate.
+   */
+  private async drainHeldTail(signal?: AbortSignal): Promise<void> {
+    const dec = this.decoder;
+    if (!dec) return;
+    const unresolved = () => this.unresolvedRequestedCount();
+    const targetReady = () =>
+      [...this.openedRequested].some((i) => !this.isResolvedRequested(i) && this.streamReady.has(i));
+    const waitDequeue = () =>
+      new Promise<void>((resolve) => {
+        const done = () => {
+          dec.removeEventListener("dequeue", done);
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(done, 16);
+        dec.addEventListener("dequeue", done);
+      });
+    const waitStart = nowMs();
+    while (
+      dec.decodeQueueSize > 0 &&
+      unresolved() > 0 &&
+      !targetReady() &&
+      nowMs() - waitStart < AFE_SETTLE_DRAIN_MS
+    ) {
+      throwIfAborted(signal);
+      await waitDequeue();
+    }
+    const snap = this.snapshot();
+    const needReplay =
+      !this.tailDrainReplayed &&
+      mayGenuineFinalDrain({
+        unresolvedRequestedVideoFrames: unresolved(),
+        usefulInputExhausted: snap.usefulInputExhausted,
+        finalFlushAttempted: true,
+        targetPtsSeen: snap.targetPtsSeen,
+        decodeQueueSize: this.decodeQueueSize,
+        lastDecodedTimestamp: this.lastVideoFrameTimestamp,
+        targetPtsUs: snap.targetPtsUs,
+        recoveryRebuilding: snap.recoveryRebuilding,
+        transactionComplete: snap.transactionComplete,
+      });
+    if (!needReplay) return;
+    this.tailDrainReplayed = true;
+    this.stallPhase = "FINAL_FLUSH";
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    this.flushCount += 1;
+    try {
+      await Promise.race([
+        dec.flush(),
+        new Promise<never>((_, reject) => {
+          flushTimer = setTimeout(() => {
+            const dump = this.snapshot({ stalledMs: AFE_FLUSH_WATCHDOG_MS });
+            reject(new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false));
+          }, AFE_FLUSH_WATCHDOG_MS);
+        }),
+      ]);
+    } finally {
+      if (flushTimer) clearTimeout(flushTimer);
+    }
+    const drainStart = nowMs();
+    while (dec.decodeQueueSize > 0 && unresolved() > 0 && nowMs() - drainStart < AFE_SETTLE_DRAIN_MS) {
+      throwIfAborted(signal);
+      await waitDequeue();
+    }
   }
 
   close(): void {
@@ -1647,6 +1919,7 @@ export class AfeVideoDecoder {
   }
 
   private isNeeded(index: number): boolean {
+    if (this.mustKeepOpened(index)) return true;
     if (this.protectedIndexes.has(index)) return true;
     if (!this.streamNeeded) return true;
     const i = index - this.streamDecodeStart;
@@ -1717,6 +1990,8 @@ export class AfeVideoDecoder {
     }
     this.streamPts.mark(index, "READY");
     this.streamReady.set(index, frame);
+    this.noteIdentity(index, "READY", this.ownership.get(index)?.ptsUs ?? frame.timestamp);
+    this.syncPtsCurrent(index);
     afePerfMax("inFlightPeak", this.pendingOutputCount);
     return true;
   }
@@ -1749,6 +2024,7 @@ export class AfeVideoDecoder {
     const openedUnresolved = [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
     if (openedUnresolved.length > 0) {
       /* Keep exact-PTS ownership. An unmatched neighbor must not wipe PtsIndexMap / waiter. */
+      for (const index of openedUnresolved) this.retainExactIdentity(index);
       return;
     }
     const err = new AfeError(
@@ -1783,15 +2059,29 @@ export class AfeVideoDecoder {
       }
     }
     this.notifyCapacityOutput();
+    this.recordOutputTimestamp(frame.timestamp);
     if (this.streamMode) {
       const idx = this.matchStreamIndex(frame.timestamp);
       if (idx != null) {
-        if (!this.isNeeded(idx)) {
+        this.noteIdentity(idx, "PTS_LEAVE_TAKE_EXACT", frame.timestamp);
+        this.syncPtsCurrent(idx);
+        if (!this.isNeeded(idx) && !this.mustKeepOpened(idx)) {
           frame.close();
           this.streamPts.mark(idx, this.protectedIndexes.has(idx) ? "ERROR" : "DISCARDED_NOT_NEEDED");
+          this.noteIdentity(idx, "FATE", frame.timestamp, this.protectedIndexes.has(idx) ? "ERROR" : "DISCARDED_NOT_NEEDED");
           return;
         }
+        if (this.mustKeepOpened(idx) && !this.isNeeded(idx)) {
+          /* CASE A bookkeeping: opened exact request must keep the frame. */
+        }
+        this.noteIdentity(idx, "RESOLVE_STREAM", frame.timestamp);
         this.resolveStream(idx, frame);
+        return;
+      }
+      const rematch = this.openedUnresolvedByPts(frame.timestamp);
+      if (rematch != null) {
+        this.noteIdentity(rematch, "REMATCH_EXACT_PTS", frame.timestamp);
+        this.resolveStream(rematch, frame);
         return;
       }
       this.failUnmatched(frame, frame.timestamp);

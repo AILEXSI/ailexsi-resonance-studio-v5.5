@@ -161,7 +161,7 @@ describe("AFE-11 A–J FINAL_FLUSH when useful input is exhausted for an open re
     ).toBe(false);
   });
 
-  it("C. unresolved>0 holds iff waiter OR ptsRegistered/pending OR recovery OR FINAL_FLUSH armed", () => {
+  it("C. unresolved>0 holds iff waiter OR ptsRegistered/pending OR recovery (FINAL_FLUSH_ARMED is not identity)", () => {
     expect(
       requestOwnershipHolds({
         unresolvedRequestedVideoFrames: 1,
@@ -213,7 +213,7 @@ describe("AFE-11 A–J FINAL_FLUSH when useful input is exhausted for an open re
         recoveryRebuilding: false,
         finalFlushArmed: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       requestOwnershipHolds({
         unresolvedRequestedVideoFrames: 1,
@@ -221,6 +221,16 @@ describe("AFE-11 A–J FINAL_FLUSH when useful input is exhausted for an open re
         pendingPtsCount: 0,
         recoveryRebuilding: false,
         finalFlushInProgress: true,
+      }),
+    ).toBe(false);
+    expect(
+      requestOwnershipHolds({
+        unresolvedRequestedVideoFrames: 1,
+        streamWaiterIndex: null,
+        pendingPtsCount: 0,
+        ptsRegistered: true,
+        recoveryRebuilding: false,
+        finalFlushArmed: true,
       }),
     ).toBe(true);
   });
