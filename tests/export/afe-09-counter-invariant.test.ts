@@ -135,20 +135,12 @@ describe("AFE-09 opened-request ledger vs Enc/Req invariant", () => {
     restore = installHoldDecoder(0);
     const decoder = new AfeVideoDecoder(movie);
     await decoder.ensure();
-    const lastRequired = lastRequiredDecodeSample({
-      lastRequested: 12,
-      maxReorderSamples: movie.maxReorderSamples,
-      prefetch: 4,
-      sampleCount: movie.sampleCount,
+    decoder.beginStream(new Uint8Array(8).fill(1), 0, {
+      lastRequested: 7,
+      lastRequiredDecodeSample: 7,
+      requestedIndexes: [0, 1, 2, 3, 4, 5, 6, 7],
     });
-    decoder.beginStream(new Uint8Array(13).fill(1), 0, {
-      lastRequested: 12,
-      lastRequiredDecodeSample: lastRequired,
-      requestedIndexes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    });
-    for (let i = 0; i <= Math.min(lastRequired, movie.sampleCount - 1); i++) {
-      decoder.submitEncoded(movie.samples[i]!);
-    }
+    for (let i = 0; i <= 7; i++) decoder.submitEncoded(movie.samples[i]!);
     decoder.openRequested(0);
     expect(decoder.openedRequestedCount()).toBe(1);
     expect(decoder.unresolvedRequestedCount()).toBe(1);

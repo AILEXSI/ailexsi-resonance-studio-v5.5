@@ -231,7 +231,7 @@ export class AfeVideoDecoder {
         unresolvedRequestedVideoFrames: unresolved,
         streamWaiterIndex: waiter,
         requestedVideoFrameCount: opened,
-        resolvedRequestedVideoFrames: extra?.resolvedRequestedVideoFrames ?? this.resolvedRequestedCount(),
+        resolvedRequestedVideoFrames: this.resolvedRequestedCount(),
         openedRequestedVideoFrames: opened,
         videoFramesRequested: req,
         videoFramesDecoded: dec,
@@ -431,9 +431,15 @@ export class AfeVideoDecoder {
   endStream(): void {
     this.streamMode = false;
     this.streamNeeded = null;
-    this.closeStreamFrames();
     const unresolvedRequested: number[] = [];
     const cancelled: number[] = [];
+    const leftoverReady = [...this.streamReady.keys()];
+    this.closeStreamFrames();
+    for (const index of leftoverReady) {
+      if (this.openedRequested.has(index) && !this.isResolvedRequested(index)) continue;
+      this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
+      cancelled.push(index);
+    }
     for (const index of this.streamPts.unresolved()) {
       const openedUnresolved = this.openedRequested.has(index) && !this.isResolvedRequested(index);
       if (openedUnresolved) {
