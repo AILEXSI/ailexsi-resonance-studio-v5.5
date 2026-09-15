@@ -553,3 +553,75 @@ export function installStaleAfterResetDecoder(): () => void {
   StaleAfterResetDecoder.instances = 0;
   return installDecoderCtor(StaleAfterResetDecoder);
 }
+
+/**
+ * AFE-08: emit the first `emitLimit` submitted timestamps immediately,
+ * hold the rest in decodeQueue, and hang on flush(). Models the Windows
+ * shape — requested VIDEO is done; speculative queue must be cancelled.
+ */
+export class EmitThenHoldHangFlushDecoder {
+  static emitLimit = 12;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  emitted = 0;
+  closed = false;
+  resetCount = 0;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    if (this.emitted < EmitThenHoldHangFlushDecoder.emitLimit) {
+      this.output(new FakeVideoFrame(chunk.timestamp));
+      this.emitted += 1;
+      this.decodeQueueSize = this.submitted.length - this.emitted;
+      for (const fn of this.listeners) fn();
+      return;
+    }
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+  }
+
+  async flush(): Promise<void> {
+    return new Promise(() => {
+      /* hang — speculative drain must not wait here */
+    });
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.emitted = 0;
+    this.decodeQueueSize = 0;
+    this.resetCount += 1;
+  }
+
+  close(): void {
+    this.closed = true;
+    this.decodeQueueSize = 0;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installEmitThenHoldHangFlushDecoder(emitLimit: number): () => void {
+  EmitThenHoldHangFlushDecoder.emitLimit = emitLimit;
+  return installDecoderCtor(EmitThenHoldHangFlushDecoder);
+}

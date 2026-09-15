@@ -171,8 +171,8 @@ describe("AFE-05 B-frame submit-ahead (deadlock math)", () => {
     expect(text).toContain("stallPhase");
   });
 
-  it("pump-more end is N+maxReorder+prefetch or next GOP, not EOF", async () => {
-    const { pumpMoreSubmitEnd } = await import("../../src/core/frame-engine");
+  it("pump-more end is N+maxReorder+prefetch or in-window next GOP, not EOF", async () => {
+    const { lastRequiredDecodeSample, pumpMoreSubmitEnd } = await import("../../src/core/frame-engine");
     const end = pumpMoreSubmitEnd({
       requested: 10,
       nextDecode: 12,
@@ -180,8 +180,18 @@ describe("AFE-05 B-frame submit-ahead (deadlock math)", () => {
       prefetch: 4,
       maxReorderSamples: 3,
       nextRefOrGop: 30,
+      lastRequested: 80,
     });
     expect(end).toBe(30);
     expect(end).toBeLessThan(200);
+    const eofBound = lastRequiredDecodeSample({
+      lastRequested: 36,
+      maxReorderSamples: 2,
+      prefetch: 4,
+      sampleCount: 140,
+      nextRefOrGop: null,
+    });
+    expect(eofBound).toBeLessThan(140);
+    expect(eofBound).toBeLessThanOrEqual(36 + 2 + 4 + streamLookaheadSamples(2, 4));
   });
 });

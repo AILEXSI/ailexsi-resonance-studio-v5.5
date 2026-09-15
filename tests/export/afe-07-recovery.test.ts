@@ -360,6 +360,7 @@ describe("AFE-07 A–M recovery / exact-frame delivery", () => {
       prefetch: 4,
       maxReorderSamples: 2,
       nextRefOrGop: 30,
+      lastRequested: 80,
     });
     expect(end).toBeGreaterThanOrEqual(10);
     expect(end).toBeLessThan(120);

@@ -6,6 +6,7 @@ import {
   formatStallMessage,
   hostSafeSourceName,
   isAfeError,
+  isExportTransactionComplete,
   nowMs,
   type AfeDumpPictureKind,
   type AfeStallSnapshot,
@@ -535,6 +536,21 @@ export async function exportWithWebCodecs(
                   ...stallFields,
                   stalledMs: exportStallMs,
                 });
+              if (isExportTransactionComplete(dump)) {
+                console.info("[AFE-08] TRANSACTION COMPLETE", {
+                  cancelledSpeculativeSamples: dump.cancelledSpeculativeSamples,
+                  decodeQueueBeforeCancel: dump.decodeQueueBeforeCancel,
+                  decoderResetForTransactionEnd: dump.decoderResetForTransactionEnd,
+                  lastRequestedSample: dump.lastRequestedSample,
+                  lastRequiredDecodeSample: dump.lastRequiredDecodeSample,
+                  lastSubmittedSample: dump.lastSubmittedSample,
+                  speculativeSamplesSubmitted: dump.speculativeSamplesSubmitted,
+                  videoFramesRequested: dump.videoFramesRequested,
+                  videoFramesDecoded: dump.videoFramesDecoded,
+                  videoFramesEncoded: dump.videoFramesEncoded,
+                });
+                return;
+              }
               console.error("[AFE-07] DECODE STALL", dump);
               reject(new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false));
             }, exportStallMs);
@@ -615,6 +631,14 @@ export async function exportWithWebCodecs(
               lastProgressUpdateMs: lastProgressAt,
               stalledMs: AFE_DECODE_STALL_MS,
             });
+          if (isExportTransactionComplete(dump)) {
+            console.info("[AFE-08] TRANSACTION COMPLETE", {
+              cancelledSpeculativeSamples: dump.cancelledSpeculativeSamples,
+              decodeQueueBeforeCancel: dump.decodeQueueBeforeCancel,
+              decoderResetForTransactionEnd: dump.decoderResetForTransactionEnd,
+            });
+            break;
+          }
           console.error("[AFE-07] DECODE STALL", dump);
           throw new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
         }

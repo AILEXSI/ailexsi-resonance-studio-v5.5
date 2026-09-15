@@ -24,6 +24,9 @@ export const AFE_FLUSH_WATCHDOG_MS = AFE_DECODE_STALL_MS;
 
 export type SampleFate = "PENDING" | "READY" | "RESOLVED" | "DISCARDED_NOT_NEEDED" | "ERROR" | "ABORTED";
 
+/** Decode-order sample class for AFE-08 submit / cancel. */
+export type SampleRole = "REQUESTED" | "REFERENCE_REQUIRED" | "SPECULATIVE";
+
 /** Requested VIDEO cannot be DISCARDED_NOT_NEEDED. */
 export const REQUESTED_VIDEO_FATES: readonly SampleFate[] = ["READY", "RESOLVED", "ERROR", "ABORTED"];
 
@@ -91,6 +94,14 @@ export type AfeStallSnapshot = {
   originClipLabel: string | null;
   originSourceName: string | null;
   originPictureKind: AfeDumpPictureKind | null;
+  lastRequestedSample: number | null;
+  lastRequiredDecodeSample: number | null;
+  speculativeSamplesSubmitted: number;
+  cancelledSpeculativeSamples: number;
+  decodeQueueBeforeCancel: number | null;
+  decoderResetForTransactionEnd: boolean;
+  unresolvedRequestedVideoFrames: number;
+  transactionComplete: boolean;
 };
 
 export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
@@ -147,6 +158,14 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     originClipLabel: null,
     originSourceName: null,
     originPictureKind: null,
+    lastRequestedSample: null,
+    lastRequiredDecodeSample: null,
+    speculativeSamplesSubmitted: 0,
+    cancelledSpeculativeSamples: 0,
+    decodeQueueBeforeCancel: null,
+    decoderResetForTransactionEnd: false,
+    unresolvedRequestedVideoFrames: 0,
+    transactionComplete: false,
     ...partial,
   };
 }
@@ -221,20 +240,78 @@ export type PumpMoreArgs = {
   sampleCount: number;
   prefetch: number;
   maxReorderSamples: number;
-  /** Next I / ref after the requested sample, or last sample if none. */
-  nextRefOrGop: number;
+  /**
+   * Next I / ref after the requested sample. Null = none (do not substitute EOF).
+   * A far GOP past lastRequired is speculative and is ignored.
+   */
+  nextRefOrGop: number | null;
+  /** Last VIDEO sample this transaction actually requested. */
+  lastRequested?: number;
 };
 
 /**
+ * Inclusive decode-order ceiling: last requested + B-reorder + prefetch.
+ * Next GOP is a required ref only when it sits inside that window.
+ * EOF is never a substitute for a missing keyframe.
+ */
+export function lastRequiredDecodeSample(args: {
+  lastRequested: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  sampleCount: number;
+  nextRefOrGop?: number | null;
+}): number {
+  if (args.sampleCount <= 0) return -1;
+  const hi = args.sampleCount - 1;
+  const last = Math.max(0, args.lastRequested | 0);
+  const look = streamLookaheadSamples(args.maxReorderSamples, args.prefetch);
+  const structural = last + Math.max(0, args.maxReorderSamples | 0) + Math.max(1, args.prefetch | 0);
+  let bound = Math.max(last, structural, last + look);
+  const ref = args.nextRefOrGop;
+  if (ref != null && ref > last && ref <= bound) {
+    bound = Math.max(bound, ref);
+  }
+  return Math.min(hi, bound);
+}
+
+export function classifySampleRole(
+  index: number,
+  args: {
+    requestedIndexes: ReadonlySet<number> | readonly number[];
+    decodeStart: number;
+    lastRequiredDecodeSample: number;
+  },
+): SampleRole {
+  const requested = args.requestedIndexes instanceof Set
+    ? args.requestedIndexes
+    : new Set(args.requestedIndexes);
+  if (requested.has(index)) return "REQUESTED";
+  if (index >= args.decodeStart && index <= args.lastRequiredDecodeSample) return "REFERENCE_REQUIRED";
+  return "SPECULATIVE";
+}
+
+/**
  * STEP B — structure-bounded extra submit. Not a lookahead raise.
- * End = min(EOF, max(N+maxReorder+prefetch, next ref/GOP)).
+ * End = min(EOF, lastRequired, max(N+maxReorder+prefetch, in-window next ref)).
  */
 export function pumpMoreSubmitEnd(args: PumpMoreArgs): number {
   const { requested, nextDecode, sampleCount, prefetch, maxReorderSamples, nextRefOrGop } = args;
   if (sampleCount <= 0) return -1;
   const hi = sampleCount - 1;
+  const lastReq = args.lastRequested ?? requested;
   const structural = requested + Math.max(0, maxReorderSamples | 0) + Math.max(1, prefetch | 0);
-  const bound = Math.min(hi, Math.max(structural, nextRefOrGop | 0, requested));
+  const lastBound = lastRequiredDecodeSample({
+    lastRequested: lastReq,
+    maxReorderSamples,
+    prefetch,
+    sampleCount,
+    nextRefOrGop,
+  });
+  let cand = Math.max(structural, requested);
+  if (nextRefOrGop != null && nextRefOrGop >= 0) {
+    cand = Math.max(cand, Math.min(nextRefOrGop, lastBound));
+  }
+  const bound = Math.min(hi, cand, lastBound);
   return Math.max(nextDecode - 1, bound);
 }
 
@@ -248,6 +325,71 @@ export function isTrueTransactionTail(args: {
   if (args.sampleCount <= 0) return true;
   if (args.nextDecode >= args.sampleCount) return true;
   return args.requested === args.lastRequested;
+}
+
+export function hasFurtherUsefulInput(args: {
+  nextDecode: number;
+  sampleCount: number;
+  lastRequiredDecodeSample: number;
+}): boolean {
+  if (args.sampleCount <= 0) return false;
+  return args.nextDecode <= args.lastRequiredDecodeSample && args.nextDecode < args.sampleCount;
+}
+
+/**
+ * FINAL_FLUSH only when requested VIDEO is still unresolved and no further
+ * useful input can be submitted. All RESOLVED/ENCODED → flush forbidden.
+ */
+export function mayFinalFlush(args: {
+  unresolvedRequestedVideoFrames: number;
+  nextDecode: number;
+  sampleCount: number;
+  lastRequiredDecodeSample: number;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames <= 0) return false;
+  return !hasFurtherUsefulInput(args);
+}
+
+export function isTransactionComplete(args: {
+  unresolvedRequestedVideoFrames: number;
+  streamWaiterIndex: number | null;
+  requestedVideoFrameCount?: number | null;
+  resolvedRequestedVideoFrames?: number | null;
+  videoFramesRequested?: number | null;
+  videoFramesDecoded?: number | null;
+  videoFramesEncoded?: number | null;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames > 0) return false;
+  if (args.streamWaiterIndex != null) return false;
+  const want = args.requestedVideoFrameCount;
+  const got = args.resolvedRequestedVideoFrames;
+  if (want != null && want > 0 && got != null && got < want) return false;
+  const req = args.videoFramesRequested;
+  const dec = args.videoFramesDecoded;
+  const enc = args.videoFramesEncoded;
+  if (req != null && dec != null && enc != null && (req !== dec || dec !== enc)) return false;
+  return true;
+}
+
+/**
+ * Windows AFE-08 shape: TRANSACTION_END + null request + Req==Enc
+ * is transaction complete, not AFE_DECODE_STALL.
+ */
+export function isExportTransactionComplete(dump: Partial<AfeStallSnapshot>): boolean {
+  const req = dump.videoFramesRequested;
+  const dec = dump.videoFramesDecoded;
+  const enc = dump.videoFramesEncoded;
+  const nullRequest = dump.sourceSampleRequested == null && dump.requestedPtsUs == null;
+  if (dump.stallPhase === "TRANSACTION_END" && nullRequest && req != null && req === dec && req === enc) {
+    return true;
+  }
+  return isTransactionComplete({
+    unresolvedRequestedVideoFrames: dump.unresolvedRequestedVideoFrames ?? 0,
+    streamWaiterIndex: dump.streamWaiterIndex ?? null,
+    videoFramesRequested: req,
+    videoFramesDecoded: dec,
+    videoFramesEncoded: enc,
+  });
 }
 
 export function originFromStall(partial: Partial<AfeStallSnapshot>): Partial<AfeStallSnapshot> {
@@ -313,6 +455,14 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `videoReq ${d.videoFramesRequested}`,
     `videoDec ${d.videoFramesDecoded}`,
     `videoEnc ${d.videoFramesEncoded}`,
+    `lastRequested ${d.lastRequestedSample}`,
+    `lastRequiredDecode ${d.lastRequiredDecodeSample}`,
+    `speculativeSubmitted ${d.speculativeSamplesSubmitted}`,
+    `cancelledSpeculativeSamples ${d.cancelledSpeculativeSamples}`,
+    `decodeQueueBeforeCancel ${d.decodeQueueBeforeCancel}`,
+    `decoderResetForTransactionEnd ${d.decoderResetForTransactionEnd}`,
+    `unresolvedRequested ${d.unresolvedRequestedVideoFrames}`,
+    `transactionComplete ${d.transactionComplete}`,
     `stalledMs ${d.stalledMs}`,
   ].join("; ");
 }
