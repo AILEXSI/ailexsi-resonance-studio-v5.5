@@ -1067,3 +1067,73 @@ export function installRecoverThenFreezeAtHighWaterDecoder(opts?: {
   RecoverThenFreezeAtHighWaterDecoder.holdPtsOnFirstInstance = opts?.holdPtsOnFirstInstance ?? null;
   return installDecoderCtor(RecoverThenFreezeAtHighWaterDecoder);
 }
+
+/**
+ * AFE-14: queue grows on decode(); tests drain to a floor via dequeue events.
+ * Proves resume-only-at-LOW_WATER (not refill on every dequeue).
+ */
+export class ControllableQueueDecoder {
+  static last: ControllableQueueDecoder | null = null;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  closed = false;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+    ControllableQueueDecoder.last = this;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    this.decodeQueueSize += 1;
+  }
+
+  drain(n = 1, emit = false): void {
+    const count = Math.min(n, this.decodeQueueSize);
+    for (let i = 0; i < count; i++) {
+      this.decodeQueueSize -= 1;
+      if (emit) {
+        const ts = this.submitted[this.submitted.length - this.decodeQueueSize - 1] ?? 0;
+        this.output(new FakeVideoFrame(ts));
+      }
+    }
+    for (const fn of this.listeners) fn();
+  }
+
+  async flush(): Promise<void> {
+    /* */
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.decodeQueueSize = 0;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installControllableQueueDecoder(): () => void {
+  ControllableQueueDecoder.last = null;
+  return installDecoderCtor(ControllableQueueDecoder);
+}

@@ -15,6 +15,25 @@ export {
 } from "./mp4-reader";
 export type { ParsedBox, ParsedCtts } from "./mp4-reader";
 export { parseAvcC, decoderConfigOf } from "./avc-config";
+export {
+  chunkFingerprintMismatchField,
+  chunkFingerprintsEqual,
+  compactHash,
+  compactHashString,
+  comparePacketParity,
+  expectedRecoveryChunks,
+  fingerprintDecoderConfig,
+  fingerprintMovieConfig,
+  fingerprintSampleChunk,
+  firstChunkAfterRecreateCheck,
+  recoveryMatchesColdPrefix,
+} from "./parity";
+export type {
+  ChunkFingerprint,
+  DecoderConfigFingerprint,
+  FirstChunkAfterRecreate,
+  PacketParityResult,
+} from "./parity";
 export { buildSampleTable } from "./sample-table";
 export { DecodedFrameCache } from "./cache";
 export { AfeVideoDecoder } from "./decoder";
@@ -39,6 +58,7 @@ export {
   AFE_DECODE_STALL_MS,
   AFE_DECODE_QUEUE_HIGH_WATER_CAP,
   AFE_DECODE_QUEUE_RECOVERY_FILL,
+  AFE_DECODE_WINDOW_LOOKAHEAD,
   AFE_POST_RECREATE_OUTPUT_BUDGET_MS,
   AFE_FLUSH_WATCHDOG_MS,
   AFE_SETTLE_DRAIN_MS,
@@ -47,6 +67,9 @@ export {
   AFE_WAIT_EXACT_PTS_MS,
   classifySampleRole,
   decodeQueueHighWater,
+  decodeQueueLowWater,
+  decodeWindowBNeed,
+  decodeWindowLookahead,
   emptyStallSnapshot,
   formatStallMessage,
   hasFurtherUsefulInput,
@@ -59,6 +82,7 @@ export {
   legacyPumpSubmitEnd,
   mayFinalFlush,
   maySubmitEncoded,
+  mayResumeDecode,
   mayEarlierKeyframeRecover,
   noMoreSubmissionRequired,
   frozenHighWaterDeadlock,

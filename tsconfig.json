@@ -39,6 +39,7 @@
     "tests/export/afe-10-request-ownership.test.ts",
     "tests/export/afe-11-final-flush.test.ts",
     "tests/export/afe-12-decode-backpressure.test.ts",
-    "tests/export/afe-13-backpressure-deadlock.test.ts"
+    "tests/export/afe-13-backpressure-deadlock.test.ts",
+    "tests/export/afe-14-packet-parity-window.test.ts"
   ]
 }

@@ -3,18 +3,29 @@ import { AfeError, abortedError, isAfeError, throwIfAborted } from "./errors";
 import { AFE_MAX_REORDER_READY, PtsIndexMap } from "./frame-match";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMarkDecoded, afePerfMax, afePerfProbeInstalled } from "./perf";
 import {
+  type ChunkFingerprint,
+  type DecoderConfigFingerprint,
+  fingerprintDecoderConfig,
+  fingerprintSampleChunk,
+  firstChunkAfterRecreateCheck,
+  expectedRecoveryChunks,
+  recoveryMatchesColdPrefix,
+} from "./parity";
+import {
   AFE_DECODE_STALL_MS,
   AFE_FLUSH_WATCHDOG_MS,
   AFE_POST_RECREATE_OUTPUT_BUDGET_MS,
   AFE_SETTLE_DRAIN_MS,
   classifySampleRole,
   decodeQueueHighWater,
+  decodeQueueLowWater,
   emptyStallSnapshot,
   formatStallMessage,
   isTransactionComplete,
   lastRequiredDecodeSample,
   requestedEncodedInvariantHolds,
   mayFinalFlush,
+  mayResumeDecode,
   maySubmitEncoded,
   nowMs,
   originFromStall,
@@ -30,7 +41,7 @@ import {
 } from "./stall";
 import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
 import type { AfeMovie, AfeSample } from "./types";
-import { sampleBytes } from "./mp4-reader";
+import { earlierKeyframeOrigin, sampleBytes } from "./mp4-reader";
 
 type FrameWaiter = { resolve: (frame: VideoFrame) => void; reject: (e: Error) => void };
 
@@ -115,6 +126,25 @@ export class AfeVideoDecoder {
   private frozenAfterRecreate = false;
   private earlierKeyframeRecovered = false;
   private earlierKeyframeRecoverCount = 0;
+  private windowPaused = false;
+  private coldConfig: DecoderConfigFingerprint | null = null;
+  private recoveryConfig: DecoderConfigFingerprint | null = null;
+  private lastConfig: DecoderConfigFingerprint | null = null;
+  private coldChunks: ChunkFingerprint[] = [];
+  private recoveryChunks: ChunkFingerprint[] = [];
+  private awaitingFirstAfterRecreate = false;
+  private firstSubmittedAfterRecreate: number | null = null;
+  private firstSubmittedAfterRecreateKey: boolean | null = null;
+  private firstSubmittedAfterRecreatePts: number | null = null;
+  private firstSubmittedAfterRecreateDts: number | null = null;
+  private postRecreateSubmitted = 0;
+  private postRecreateOutputs = 0;
+  private postRecreateLastDecodedTs: number | null = null;
+  private postRecreateOutputTimestamps: number[] = [];
+  private packetParityEqual: boolean | null = null;
+  private packetParityCompared = 0;
+  private packetParityMismatchIndex: number | null = null;
+  private packetParityMismatchField: string | null = null;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -139,9 +169,30 @@ export class AfeVideoDecoder {
     return this.decoder?.decodeQueueSize ?? 0;
   }
 
-  /** Derived HIGH_WATER — maxReorder + lookahead + B-frame need, never near 125. */
+  /** Derived HIGH_WATER — tight after recreate, RECOVERY_FILL first fill. */
   get decodeQueueHighWater(): number {
-    return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint);
+    return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint, {
+      afterRecreate: this.recreateCount >= 1,
+    });
+  }
+
+  /** Resume target after HIGH_WATER pause. Always < HIGH_WATER. */
+  get decodeQueueLowWater(): number {
+    return decodeQueueLowWater(this.movie.maxReorderSamples, this.prefetchHint, {
+      afterRecreate: this.recreateCount >= 1,
+    });
+  }
+
+  get coldStartChunks(): readonly ChunkFingerprint[] {
+    return this.coldChunks;
+  }
+
+  get recoveryStartChunks(): readonly ChunkFingerprint[] {
+    return this.recoveryChunks;
+  }
+
+  get lastDecoderConfigFingerprint(): DecoderConfigFingerprint | null {
+    return this.lastConfig;
   }
 
   isStreamReady(index: number): boolean {
@@ -332,14 +383,13 @@ export class AfeVideoDecoder {
 
   /**
    * Pause when decodeQueueSize >= HIGH_WATER and there is no output progress.
-   * Resumes on dequeue, VideoFrame output, or exact-PTS resolve.
+   * AFE-14: resume only at LOW_WATER or exact-PTS ready — not on every dequeue.
    * No busy loop. No arbitrary sleep. No mid-run flush.
    *
    * Returns false when the caller must not submit more. Before the first
    * recreate, that is a stop-for-STEP-C signal (do not 3s-stall). After
    * recreate, a still-stuck HIGH_WATER queue returns false after a short
-   * output-progress budget so the scheduler can walk back one earlier
-   * keyframe (or typed-stall). Do not sit the 3s mystery stall.
+   * output-progress budget. gopStart==0 does not re-loop AFE-13 escape.
    */
   async waitForDecodeCapacity(
     signal?: AbortSignal,
@@ -347,16 +397,34 @@ export class AfeVideoDecoder {
   ): Promise<boolean> {
     throwIfAborted(signal);
     const high = this.decodeQueueHighWater;
+    const low = this.decodeQueueLowWater;
     this.noteQueuePeak();
     const requested = opts?.requested;
-    if (requested != null && this.streamReady.has(requested)) return true;
+    const exactReady = requested != null && this.streamReady.has(requested);
+    if (exactReady) {
+      this.windowPaused = false;
+      this.noMoreSubmission = false;
+      this.backpressureBlocked = false;
+      this.frozenAfterRecreate = false;
+      return true;
+    }
     if (requested != null) this.ensureRebuildOwnership(requested);
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
     if (
+      mayResumeDecode({
+        decodeQueueSize: this.decodeQueueSize,
+        highWater: high,
+        lowWater: low,
+        exactReady: false,
+        paused: this.windowPaused,
+      }) &&
       maySubmitEncoded({
         decodeQueueSize: this.decodeQueueSize,
         highWater: high,
         outputProgressed,
+        lowWater: low,
+        paused: this.windowPaused,
+        exactReady: false,
       })
     ) {
       this.noMoreSubmission = false;
@@ -364,6 +432,7 @@ export class AfeVideoDecoder {
       this.frozenAfterRecreate = false;
       return true;
     }
+    this.windowPaused = true;
     this.noMoreSubmission = true;
     this.backpressureWaitCount += 1;
     this.backpressureBlocked = true;
@@ -373,9 +442,18 @@ export class AfeVideoDecoder {
     const short = nowMs() + AFE_POST_RECREATE_OUTPUT_BUDGET_MS;
     const deadline = Math.min(short, opts?.budgetEnd ?? short);
     const dec = this.decoder;
-    while (this.decodeQueueSize >= high) {
+    while (
+      !mayResumeDecode({
+        decodeQueueSize: this.decodeQueueSize,
+        highWater: high,
+        lowWater: low,
+        exactReady: requested != null && this.streamReady.has(requested),
+        paused: true,
+      })
+    ) {
       throwIfAborted(signal);
       if (requested != null && this.streamReady.has(requested)) {
+        this.windowPaused = false;
         this.backpressureBlocked = false;
         this.noMoreSubmission = false;
         this.frozenAfterRecreate = false;
@@ -389,23 +467,42 @@ export class AfeVideoDecoder {
           this.frozenAfterRecreate = true;
           return false;
         }
-        this.backpressureBlocked = false;
-        return this.decodeQueueSize < high;
+        const resume = mayResumeDecode({
+          decodeQueueSize: this.decodeQueueSize,
+          highWater: high,
+          lowWater: low,
+          exactReady: false,
+          paused: true,
+        });
+        this.backpressureBlocked = !resume;
+        if (resume) this.windowPaused = false;
+        return resume;
       }
       const reason = await this.waitCapacitySignal(dec, signal, remain);
       if (reason === "exact" || (requested != null && this.streamReady.has(requested))) {
+        this.windowPaused = false;
         this.backpressureBlocked = false;
         this.noMoreSubmission = false;
         this.frozenAfterRecreate = false;
         return true;
       }
-      if (this.lastVideoFrameTimestamp !== tsAtPause || this.decodeQueueSize < high) {
+      if (
+        mayResumeDecode({
+          decodeQueueSize: this.decodeQueueSize,
+          highWater: high,
+          lowWater: low,
+          exactReady: false,
+          paused: true,
+        })
+      ) {
+        this.windowPaused = false;
         this.noMoreSubmission = false;
         this.frozenAfterRecreate = false;
-        this.backpressureBlocked = this.decodeQueueSize >= high;
-        if (this.decodeQueueSize < high) return true;
+        this.backpressureBlocked = false;
+        return true;
       }
     }
+    this.windowPaused = false;
     this.backpressureBlocked = false;
     this.noMoreSubmission = false;
     this.frozenAfterRecreate = false;
@@ -745,7 +842,117 @@ export class AfeVideoDecoder {
       gopKeyframeStart: extra?.gopKeyframeStart ?? this.gopKeyframeStart,
       frozenAtHighWater: extra?.frozenAtHighWater ?? this.isFrozenAtHighWaterAfterRecreate(),
       earlierKeyframeRecovered: extra?.earlierKeyframeRecovered ?? this.earlierKeyframeRecovered,
+      decodeQueueLowWater: extra?.decodeQueueLowWater ?? this.decodeQueueLowWater,
+      earlierKeyframeAvailable:
+        extra?.earlierKeyframeAvailable ?? this.earlierKeyframeIsAvailable(),
+      firstSubmittedAfterRecreate:
+        extra?.firstSubmittedAfterRecreate ?? this.firstSubmittedAfterRecreate,
+      firstSubmittedAfterRecreateKey:
+        extra?.firstSubmittedAfterRecreateKey ?? this.firstSubmittedAfterRecreateKey,
+      firstSubmittedAfterRecreatePts:
+        extra?.firstSubmittedAfterRecreatePts ?? this.firstSubmittedAfterRecreatePts,
+      firstSubmittedAfterRecreateDts:
+        extra?.firstSubmittedAfterRecreateDts ?? this.firstSubmittedAfterRecreateDts,
+      packetParity: extra?.packetParity ?? this.packetParityEqual,
+      packetParityCompared: extra?.packetParityCompared ?? this.packetParityCompared,
+      packetParityMismatchIndex:
+        extra?.packetParityMismatchIndex ?? this.packetParityMismatchIndex,
+      packetParityMismatchField:
+        extra?.packetParityMismatchField ?? this.packetParityMismatchField,
+      configParity: extra?.configParity ?? this.configParityValue(),
+      configParityHashCold: extra?.configParityHashCold ?? this.coldConfig?.hash ?? null,
+      configParityHashRecovery:
+        extra?.configParityHashRecovery ?? this.recoveryConfig?.hash ?? null,
+      postRecreateOutputTimestamps:
+        extra?.postRecreateOutputTimestamps ?? [...this.postRecreateOutputTimestamps],
+      postRecreateSubmitted: extra?.postRecreateSubmitted ?? this.postRecreateSubmitted,
+      postRecreateOutputs: extra?.postRecreateOutputs ?? this.postRecreateOutputs,
+      postRecreateLastDecodedTs:
+        extra?.postRecreateLastDecodedTs ?? this.postRecreateLastDecodedTs,
     });
+  }
+
+  earlierKeyframeIsAvailable(): boolean {
+    const gop = this.gopKeyframeStart;
+    if (gop == null || gop <= 0) return false;
+    return earlierKeyframeOrigin(this.movie, gop) != null;
+  }
+
+  private configParityValue(): boolean | null {
+    if (this.recreateCount < 1 || !this.coldConfig || !this.recoveryConfig) return null;
+    return this.coldConfig.hash === this.recoveryConfig.hash;
+  }
+
+  private noteConfigured(config: VideoDecoderConfig): void {
+    const fp = fingerprintDecoderConfig(config);
+    this.lastConfig = fp;
+    if (this.recreateCount < 1) this.coldConfig = fp;
+    else this.recoveryConfig = fp;
+  }
+
+  private refreshPacketParity(): void {
+    if (this.recreateCount < 1 || this.recoveryChunks.length === 0) {
+      this.packetParityEqual = null;
+      return;
+    }
+    const origin = this.gopKeyframeStart ?? 0;
+    const configHash =
+      this.recoveryConfig?.hash ?? this.lastConfig?.hash ?? this.coldConfig?.hash ?? "";
+    const expected = expectedRecoveryChunks(this.movie, origin, this.recoveryChunks.length, configHash);
+    const vsExpected = recoveryMatchesColdPrefix(expected, this.recoveryChunks);
+    let result = vsExpected;
+    if (this.coldChunks.length > 0 && this.coldChunks[0]!.index === origin) {
+      const vsCold = recoveryMatchesColdPrefix(this.coldChunks, this.recoveryChunks);
+      if (!vsCold.equal) result = vsCold;
+    }
+    this.packetParityEqual = result.equal;
+    this.packetParityCompared = result.compared;
+    this.packetParityMismatchIndex = result.mismatchIndex;
+    this.packetParityMismatchField = result.field;
+  }
+
+  private assertFirstChunkAfterRecreate(fp: ChunkFingerprint): void {
+    const origin = this.gopKeyframeStart ?? 0;
+    const check = firstChunkAfterRecreateCheck(this.movie, origin, fp);
+    this.firstSubmittedAfterRecreate = fp.index;
+    this.firstSubmittedAfterRecreateKey = fp.key;
+    this.firstSubmittedAfterRecreatePts = fp.ptsUs;
+    this.firstSubmittedAfterRecreateDts = fp.dtsUs;
+    this.awaitingFirstAfterRecreate = false;
+    if (check.ok) return;
+    throw new AfeError(
+      "AFE_DECODE_FAILED",
+      `first chunk after recreate invalid: ${check.reason}; gopStart ${check.gopStart} sample ${fp.index} key ${fp.key} PTS ${fp.ptsUs} DTS ${fp.dtsUs} expected PTS ${check.expectedPtsUs} DTS ${check.expectedDtsUs}`,
+      false,
+    );
+  }
+
+  private assertConfigParity(): void {
+    if (this.recreateCount < 1 || !this.coldConfig || !this.recoveryConfig) return;
+    if (this.coldConfig.hash === this.recoveryConfig.hash) return;
+    throw new AfeError(
+      "AFE_DECODE_FAILED",
+      `config parity mismatch: cold ${this.coldConfig.hash} != recovery ${this.recoveryConfig.hash}`,
+      false,
+    );
+  }
+
+  private beginPostRecreateTrace(): void {
+    this.awaitingFirstAfterRecreate = true;
+    this.firstSubmittedAfterRecreate = null;
+    this.firstSubmittedAfterRecreateKey = null;
+    this.firstSubmittedAfterRecreatePts = null;
+    this.firstSubmittedAfterRecreateDts = null;
+    this.postRecreateSubmitted = 0;
+    this.postRecreateOutputs = 0;
+    this.postRecreateLastDecodedTs = null;
+    this.postRecreateOutputTimestamps = [];
+    this.recoveryChunks = [];
+    this.packetParityEqual = null;
+    this.packetParityCompared = 0;
+    this.packetParityMismatchIndex = null;
+    this.packetParityMismatchField = null;
+    this.windowPaused = false;
   }
 
   async ensure(signal?: AbortSignal): Promise<void> {
@@ -773,6 +980,7 @@ export class AfeVideoDecoder {
       this.decoder.configure(config);
       this.configured = true;
       this.needsKeyframe = true;
+      this.noteConfigured(config);
       if (!afePerfProbeInstalled()) afePerfCount("decoderConfigures");
     } catch (e) {
       this.teardown();
@@ -797,8 +1005,10 @@ export class AfeVideoDecoder {
         this.decoder.reset();
         this.resetCount += 1;
         if (!afePerfProbeInstalled()) afePerfCount("decoderResets");
-        this.decoder.configure(decoderConfigOf(this.movie.avc));
+        const resetConfig = decoderConfigOf(this.movie.avc);
+        this.decoder.configure(resetConfig);
         this.needsKeyframe = true;
+        this.noteConfigured(resetConfig);
         if (!afePerfProbeInstalled()) afePerfCount("decoderConfigures");
       } catch (e) {
         this.teardown();
@@ -839,6 +1049,7 @@ export class AfeVideoDecoder {
     this.backpressureBlocked = false;
     this.noMoreSubmission = false;
     this.frozenAfterRecreate = false;
+    this.beginPostRecreateTrace();
     if (this.decoder) {
       try {
         this.decoder.close();
@@ -901,10 +1112,17 @@ export class AfeVideoDecoder {
     this.submitPhaseTraces = [];
     this.openSubmitPhase = null;
     this.frozenAfterRecreate = false;
+    this.windowPaused = false;
     if (!bounds?.keepResolved) {
       this.gopKeyframeStart = null;
       this.earlierKeyframeRecovered = false;
       this.earlierKeyframeRecoverCount = 0;
+      this.coldChunks = [];
+      this.recoveryChunks = [];
+      this.packetParityEqual = null;
+      this.packetParityCompared = 0;
+      this.packetParityMismatchIndex = null;
+      this.packetParityMismatchField = null;
     }
     if (bounds) {
       this.lastRequestedSample = bounds.lastRequested;
@@ -1183,6 +1401,25 @@ export class AfeVideoDecoder {
     throwIfAborted(signal);
     if (!this.decoder) throw new AfeError("AFE_DECODE_FAILED", "decoder missing");
     if (this.lastError) throw this.lastError;
+    const configHash = this.lastConfig?.hash ?? fingerprintDecoderConfig(decoderConfigOf(this.movie.avc)).hash;
+    const fp = fingerprintSampleChunk(this.movie, sample, configHash);
+    if (this.recreateCount >= 1) this.assertConfigParity();
+    if (this.awaitingFirstAfterRecreate) {
+      this.assertFirstChunkAfterRecreate(fp);
+    }
+    if (this.recreateCount < 1) this.coldChunks.push(fp);
+    else {
+      this.recoveryChunks.push(fp);
+      this.postRecreateSubmitted += 1;
+      this.refreshPacketParity();
+      if (this.packetParityEqual === false) {
+        throw new AfeError(
+          "AFE_DECODE_FAILED",
+          `packet parity mismatch at ${this.packetParityMismatchIndex}:${this.packetParityMismatchField ?? "?"}; ColdStartChunk(N) != RecoveryChunk(N)`,
+          false,
+        );
+      }
+    }
     const { timestamp, chunk } = this.makeChunk(sample);
     const role = this.classifySubmitted(sample.index);
     this.sampleRoles.set(sample.index, role);
@@ -1538,6 +1775,13 @@ export class AfeVideoDecoder {
     this.lastVideoFrameTimestamp = frame.timestamp;
     this.lastOutputProgressTimestamp = frame.timestamp;
     this.frozenAfterRecreate = false;
+    if (this.recreateCount > 0) {
+      this.postRecreateOutputs += 1;
+      this.postRecreateLastDecodedTs = frame.timestamp;
+      if (this.postRecreateOutputTimestamps.length < 24) {
+        this.postRecreateOutputTimestamps.push(frame.timestamp);
+      }
+    }
     this.notifyCapacityOutput();
     if (this.streamMode) {
       const idx = this.matchStreamIndex(frame.timestamp);

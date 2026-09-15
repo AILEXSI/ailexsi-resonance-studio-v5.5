@@ -940,3 +940,41 @@ Producer paused at HIGH_WATER waiting for output that never comes. `FINAL_FLUSH`
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest `… - Kopie.mp4` sample 68 PTS 2875000 / sourceInMs ~1529 / sourceOutMs 6042 / fps 30 → Req==Dec==Enc, unresolved 0, `gopStart` set, decodeQueue never ~125, exact frame, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-14 — post-recreate liveness: packet/config parity + bounded decode window (V5.5)
+
+Windows AFE-13 (720p30): HIGH_WATER holds (`decodeQueuePeak` 40). New stall: sample 34 PTS 1458333, `lastDecodedTs` 458333 (~frame 11), `gopStart` 0, `frozenAtHighWater` yes, `earlierKeyframeRecovered` no, submitted 55, Req/Dec/Enc 42/41/41, unresolved 1, lastRequested 68 lastRequired 92, FINAL_FLUSH no, ownershipRebuilt yes. No earlier I-frame — AFE-13 walk-back cannot fire.
+
+## Cause (instrument first — do not assume)
+
+Two hypotheses, proven in this order:
+
+- **A.** Recreated decoder gets a different packet / config / decode sequence than a cold start from the same origin.
+- **B.** Packet/config identical; WebView2 loses liveness because the queue window is still too deep (HIGH floored at 40).
+
+STAGE 1 fingerprints every submitted sample (index / PTS / DTS / duration / key / payload hash) and the decoder config (codec / size / description hash / `optimizeForLatency`). Compact hashes only. PARITY INVARIANT: `ColdStartChunk(N) == RecoveryChunk(N)`. First chunk after recreate from `gopStart` 0 must be sample 0 keyframe with expected PTS/DTS — else typed `AFE_DECODE_FAILED`. A mismatch is a typed failure; HIGH_WATER is not lowered to hide it.
+
+STAGE 2 stall dump adds `postRecreate*`, `packetParity`, `configParity`, `firstSubmittedAfterRecreate`, `earlierKeyframeAvailable` so a Windows dump answers: correct stream then stop, or AFE fed something different?
+
+STAGE 3 (only because parity holds by the same `makeChunk` / `decoderConfigOf` path): LOW < HIGH << 40 hysteresis **after recreate**. First-fill keeps the AFE-12 RECOVERY_FILL 40 so AFE-10/11 can still reach lastRequired and FINAL_FLUSH (QueueHeld / HoldUntilSubmitted(36)). The 40 floor is what killed WebView2 *after* recreate.
+
+## Fix
+
+1. Packet/config fingerprints + first-chunk-after-recreate check. Mismatch → typed `AFE_DECODE_FAILED`.
+2. Output liveness trace after recreate (`postRecreateSubmitted/Outputs/LastDecodedTs/OutputTimestamps`).
+3. Decode window (no PREFETCH bump):
+   - `L = min(WINDOW_LOOKAHEAD 6, streamLookaheadSamples(maxReorder, prefetch))`
+   - `B = prefetch`
+   - `RAW = maxReorder + L + B`
+   - `HIGH_FIRST   = min(CAP 48, max(RECOVERY_FILL 40, RAW))` — first fill only
+   - `HIGH_RECOVER = min(CAP 48, RAW)` — after recreate; 40 floor gone
+   - `LOW_WATER    = min(HIGH - 1, max(L, B))`  // LOW < HIGH
+   - Human 720p30 after recreate: reorder 10, prefetch 4, L 6 → HIGH 20 < 40, LOW 6.
+4. Progressive pump toward lastRequired before STEP C recreate; AFE-11 FINAL_FLUSH when useful input is exhausted (before recreate, and again if still unresolved). Resume only at LOW_WATER or exact frame ready — not refill on every dequeue.
+5. NO-OUTPUT INVARIANT: no output progress + queue≥HIGH_WATER ⇒ no more `decode()`; bounded typed stall.
+6. `gopStart==0` → `earlierKeyframeAvailable=false`. Do not repeat the AFE-13 escape loop.
+7. No software decode. No mid-run flush. FINAL_FLUSH AFE-11 intact. Exact PTS.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest 720p30 sample 34 PTS 1458333 / lastDecoded 458333 / gopStart 0 → Req==Dec==Enc, unresolved 0, `packetParity yes`, `configParity yes`, first submit sample 0 key, HIGH < 40, exact frame, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+
