@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  decodeOrigin,
   isMonotonicRun,
+  isOpenGopAtKey,
   isPresentationRun,
   parseIsoBmff,
   planDecodeSpan,
@@ -118,6 +120,22 @@ describe("AFE-05 harder B-frame fixtures (long GOP / consecutive B / open-closed
       expect(end).toBe(idx);
     } else {
       expect(end).toBeGreaterThan(idx);
+    }
+  });
+
+  it("open GOP decode origin walks back to the previous keyframe", () => {
+    const open = load("afe-bframe-30-g30-2s-opengop");
+    const closed = load("afe-bframe-30-g30-2s-closedgop") ?? load("afe-bframe-30-g30-2s");
+    expect(open).not.toBeNull();
+    expect(closed).not.toBeNull();
+    const keys = open!.movie.keyframeIndices.filter((k) => k > 0);
+    expect(keys.length).toBeGreaterThan(0);
+    const second = keys[0]!;
+    expect(isOpenGopAtKey(open!.movie, second)).toBe(true);
+    expect(decodeOrigin(open!.movie, second + 1)).toBeLessThan(second);
+    const closedKey = closed!.movie.keyframeIndices.find((k) => k > 0);
+    if (closedKey != null && !isOpenGopAtKey(closed!.movie, closedKey)) {
+      expect(decodeOrigin(closed!.movie, closedKey + 1)).toBe(closedKey);
     }
   });
 

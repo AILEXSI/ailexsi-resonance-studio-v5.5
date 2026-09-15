@@ -409,12 +409,26 @@ export class AfeVideoDecoder {
 
     if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
     try {
-      await dec.flush();
+      let flushTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          dec.flush(),
+          new Promise<never>((_, reject) => {
+            flushTimer = setTimeout(() => {
+              const dump = this.snapshot({ stalledMs: AFE_DECODE_STALL_MS });
+              reject(new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false));
+            }, AFE_DECODE_STALL_MS);
+          }),
+        ]);
+      } finally {
+        if (flushTimer) clearTimeout(flushTimer);
+      }
       this.flushCount += 1;
       if (!afePerfProbeInstalled()) afePerfCount("decoderFlushes");
       this.needsKeyframe = true;
     } catch (e) {
       if (signal?.aborted) throw abortedError(signal);
+      if (isAfeError(e)) throw e;
       throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
     }
   }

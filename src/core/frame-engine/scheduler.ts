@@ -1,7 +1,7 @@
 import { DecodedFrameCache } from "./cache";
 import { AfeVideoDecoder } from "./decoder";
 import { AfeError, isAfeError, throwIfAborted } from "./errors";
-import { keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
+import { decodeOrigin, keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMax } from "./perf";
 import { isMonotonicRun, isPresentationRun, maxDecodeIndex, planDecodeSpan, planSampleIndexes, shouldSplitPresentationRun } from "./plan";
 import { pumpSubmitEnd, streamLookaheadSamples, type AfeStallSnapshot } from "./stall";
@@ -217,7 +217,7 @@ export class AfeScheduler {
         } catch (e) {
           if (!isAfeError(e) || !/key frame/i.test(e.message)) throw e;
           await this.decoder.reset(signal);
-          this.nextDecode = keyframeAtOrBefore(this.movie, idx);
+          this.nextDecode = decodeOrigin(this.movie, idx);
           this.warm = true;
           this.decoder.beginStream(span.needed, span.decodeStart);
           pump(idx);
@@ -305,7 +305,7 @@ export class AfeScheduler {
       } catch (e) {
         if (!isAfeError(e) || !/key frame/i.test(e.message)) throw e;
         await this.decoder.reset(signal);
-        this.nextDecode = keyframeAtOrBefore(this.movie, idx);
+        this.nextDecode = decodeOrigin(this.movie, idx);
         this.warm = true;
         pending.clear();
         await submitThrough(prefetch);
@@ -329,7 +329,7 @@ export class AfeScheduler {
   }
 
   private async ensureForward(start: number, signal?: AbortSignal): Promise<void> {
-    const key = keyframeAtOrBefore(this.movie, start);
+    const key = decodeOrigin(this.movie, start);
     const canContinue = this.warm && !this.decoder.needsKeyframe && this.nextDecode <= start;
     if (canContinue) return;
     await this.decoder.reset(signal);
@@ -375,7 +375,7 @@ export class AfeScheduler {
     afePerfCount("decodeSpanCalls");
     const start = Math.min(from, to);
     const end = Math.max(from, to);
-    const key = keyframeAtOrBefore(this.movie, start);
+    const key = decodeOrigin(this.movie, start);
     const canContinue = this.warm && !this.decoder.needsKeyframe && this.nextDecode <= start;
     if (!canContinue) {
       await this.decoder.reset(signal);

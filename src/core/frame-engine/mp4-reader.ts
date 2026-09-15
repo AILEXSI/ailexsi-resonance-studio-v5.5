@@ -536,3 +536,26 @@ function keyframeAtOrBeforeUnmetered(movie: AfeMovie, decodeIndex: number): numb
 export function nearestKeyframeIndex(movie: AfeMovie, decodeIndex: number): number {
   return keyframeAtOrBefore(movie, decodeIndex);
 }
+
+/** Open GOP: B-frames after this I present *before* the I (need the prior GOP). */
+export function isOpenGopAtKey(movie: AfeMovie, keyIndex: number): boolean {
+  const key = movie.samples[keyIndex];
+  if (!key?.isKeyframe) return false;
+  for (let i = keyIndex + 1; i < movie.samples.length; i++) {
+    const sample = movie.samples[i]!;
+    if (sample.isKeyframe) break;
+    if (sample.ptsTimescale < key.ptsTimescale) return true;
+  }
+  return false;
+}
+
+/**
+ * Inclusive decode-order origin for sample `index`.
+ * Closed GOP: nearest prior keyframe. Open GOP: previous keyframe so
+ * leading B-frames still have their backward reference.
+ */
+export function decodeOrigin(movie: AfeMovie, index: number): number {
+  const key = keyframeAtOrBefore(movie, index);
+  if (key <= 0 || !isOpenGopAtKey(movie, key)) return key;
+  return keyframeAtOrBefore(movie, key - 1);
+}

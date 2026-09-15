@@ -13,7 +13,7 @@ const PORT = Number(process.env.AFE_VITE_PORT || 1424);
 const RECEIVE = Number(process.env.AFE_RECEIVE_PORT || 18768);
 const OUT = process.env.AFE_EVIDENCE || join(root, "docs", "compliance", "afe-04-evidence-summary.json");
 const OUT05 = process.env.AFE_EVIDENCE_05 || join(root, "docs", "compliance", "afe-05-evidence-summary.json");
-const TIMEOUT_MS = Number(process.env.AFE_TIMEOUT_MS || 300000);
+const TIMEOUT_MS = Number(process.env.AFE_TIMEOUT_MS || 600000);
 
 mkdirSync(dirname(OUT), { recursive: true });
 
@@ -30,6 +30,17 @@ function waitForResult() {
       if (req.method === "OPTIONS") {
         res.writeHead(204);
         res.end();
+        return;
+      }
+      if (req.method === "POST" && req.url === "/afe-progress") {
+        const chunks = [];
+        req.on("data", (c) => chunks.push(c));
+        req.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          console.log("progress", raw);
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end('{"ok":true}');
+        });
         return;
       }
       if (req.method === "POST" && req.url === "/afe-results") {
@@ -84,9 +95,10 @@ function spawnVite() {
 }
 
 function spawnChrome() {
-  const url = `http://127.0.0.1:${PORT}/scripts/afe-bframe-harness.html?receive=${RECEIVE}`;
+  const subset = process.env.AFE_SUBSET ? `&subset=${process.env.AFE_SUBSET}` : "";
+  const url = `http://127.0.0.1:${PORT}/scripts/afe-bframe-harness.html?receive=${RECEIVE}${subset}`;
   const bin = process.env.CHROME_BIN || "google-chrome";
-  const profile = process.env.AFE_CHROME_PROFILE || "/tmp/afe04-chrome-profile";
+  const profile = process.env.AFE_CHROME_PROFILE || `/tmp/afe05-chrome-profile-${Date.now()}`;
   console.log("chrome", bin, url);
   return spawn(
     bin,

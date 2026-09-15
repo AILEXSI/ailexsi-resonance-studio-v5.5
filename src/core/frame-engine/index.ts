@@ -4,6 +4,8 @@ export {
   parseCtts,
   sampleIndexAtTime,
   keyframeAtOrBefore,
+  decodeOrigin,
+  isOpenGopAtKey,
   nearestKeyframeIndex,
   mapTimestampIntoTimescale,
   sampleBytes,
