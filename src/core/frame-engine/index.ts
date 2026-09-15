@@ -65,6 +65,7 @@ export {
   AFE_STALL_NUDGE_MS,
   AFE_STALL_NUDGE_WAIT_MS,
   AFE_WAIT_EXACT_PTS_MS,
+  capacityTowardRequestedRequired,
   classifySampleRole,
   decodeQueueHighWater,
   decodeQueueLowWater,

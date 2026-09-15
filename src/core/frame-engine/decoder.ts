@@ -16,11 +16,13 @@ import {
   AFE_FLUSH_WATCHDOG_MS,
   AFE_POST_RECREATE_OUTPUT_BUDGET_MS,
   AFE_SETTLE_DRAIN_MS,
+  capacityTowardRequestedRequired,
   classifySampleRole,
   decodeQueueHighWater,
   decodeQueueLowWater,
   emptyStallSnapshot,
   formatStallMessage,
+  hasFurtherUsefulInput,
   isTransactionComplete,
   lastRequiredDecodeSample,
   requestedEncodedInvariantHolds,
@@ -520,7 +522,11 @@ export class AfeVideoDecoder {
 
   /**
    * Pause when decodeQueueSize >= HIGH_WATER and there is no output progress.
-   * AFE-14: resume only at LOW_WATER or exact-PTS ready — not on every dequeue.
+   * AFE-14: resume only at LOW_WATER or exact-PTS ready — not on every dequeue
+   * when the requested sample is already submitted.
+   * AFE-16: if requested > lastSubmitted and useful input remains and
+   * queue < HIGH, do not block solely because queue > LOW_WATER. Queued
+   * input does not necessarily produce further output / the requested PTS.
    * No busy loop. No arbitrary sleep. No mid-run flush.
    *
    * Returns false when the caller must not submit more. Before the first
@@ -547,6 +553,7 @@ export class AfeVideoDecoder {
     }
     if (requested != null) this.ensureRebuildOwnership(requested);
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
+    const mustAdvance = this.mustAdvanceTowardRequested(requested, false);
     if (
       mayResumeDecode({
         decodeQueueSize: this.decodeQueueSize,
@@ -554,6 +561,7 @@ export class AfeVideoDecoder {
         lowWater: low,
         exactReady: false,
         paused: this.windowPaused,
+        mustAdvanceTowardRequested: mustAdvance,
       }) &&
       maySubmitEncoded({
         decodeQueueSize: this.decodeQueueSize,
@@ -562,6 +570,7 @@ export class AfeVideoDecoder {
         lowWater: low,
         paused: this.windowPaused,
         exactReady: false,
+        mustAdvanceTowardRequested: mustAdvance,
       })
     ) {
       this.noMoreSubmission = false;
@@ -586,6 +595,10 @@ export class AfeVideoDecoder {
         lowWater: low,
         exactReady: requested != null && this.streamReady.has(requested),
         paused: true,
+        mustAdvanceTowardRequested: this.mustAdvanceTowardRequested(
+          requested,
+          requested != null && this.streamReady.has(requested),
+        ),
       })
     ) {
       throwIfAborted(signal);
@@ -610,6 +623,7 @@ export class AfeVideoDecoder {
           lowWater: low,
           exactReady: false,
           paused: true,
+          mustAdvanceTowardRequested: this.mustAdvanceTowardRequested(requested, false),
         });
         this.backpressureBlocked = !resume;
         if (resume) this.windowPaused = false;
@@ -630,6 +644,7 @@ export class AfeVideoDecoder {
           lowWater: low,
           exactReady: false,
           paused: true,
+          mustAdvanceTowardRequested: this.mustAdvanceTowardRequested(requested, false),
         })
       ) {
         this.windowPaused = false;
@@ -644,6 +659,28 @@ export class AfeVideoDecoder {
     this.noMoreSubmission = false;
     this.frozenAfterRecreate = false;
     return true;
+  }
+
+  /**
+   * AFE-16: unresolved requested PTS beyond lastSubmitted, with unused
+   * HIGH_WATER credits and remaining useful input, must not wait on LOW_WATER.
+   */
+  private mustAdvanceTowardRequested(requested: number | undefined, exactReady: boolean): boolean {
+    if (requested == null || exactReady) return false;
+    const lastSubmitted = this.lastSubmittedSample ?? -1;
+    const lastRequired = Math.max(this.lastRequiredSample ?? requested, requested);
+    return capacityTowardRequestedRequired({
+      requestedSample: requested,
+      lastSubmittedSample: this.lastSubmittedSample,
+      decodeQueueSize: this.decodeQueueSize,
+      highWater: this.decodeQueueHighWater,
+      exactReady,
+      usefulInputRemains: hasFurtherUsefulInput({
+        nextDecode: lastSubmitted + 1,
+        sampleCount: this.movie.sampleCount,
+        lastRequiredDecodeSample: lastRequired,
+      }),
+    });
   }
 
   private waitCapacitySignal(

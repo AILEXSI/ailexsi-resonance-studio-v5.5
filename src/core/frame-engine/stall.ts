@@ -444,9 +444,34 @@ export function decodeQueueLowWater(
 }
 
 /**
+ * AFE-16 CAPACITY INVARIANT.
+ *
+ * If the exact requested frame is not ready, useful undecoded input remains,
+ * the queue is below HIGH_WATER, and lastSubmitted is still behind the
+ * requested sample, LOW_WATER hysteresis must not block submission.
+ * Queued decoder input does **not** necessarily produce the requested PTS
+ * (or any further output). Producer must spend remaining HIGH-queue credits
+ * toward the requested / dependency horizon. HIGH_WATER still caps growth.
+ */
+export function capacityTowardRequestedRequired(args: {
+  requestedSample: number;
+  lastSubmittedSample: number | null;
+  decodeQueueSize: number;
+  highWater: number;
+  exactReady: boolean;
+  usefulInputRemains: boolean;
+}): boolean {
+  if (args.exactReady) return false;
+  if (!args.usefulInputRemains) return false;
+  if (args.decodeQueueSize >= args.highWater) return false;
+  return args.requestedSample > (args.lastSubmittedSample ?? -1);
+}
+
+/**
  * Submit is allowed unless the decoder is at HIGH_WATER.
  * AFE-14: output progress alone does not refill above LOW_WATER.
  * Resume only at LOW_WATER or exact frame ready — not on every dequeue.
+ * AFE-16: LOW_WATER must not starve when capacityTowardRequestedRequired.
  */
 export function maySubmitEncoded(args: {
   decodeQueueSize: number;
@@ -455,9 +480,11 @@ export function maySubmitEncoded(args: {
   lowWater?: number;
   paused?: boolean;
   exactReady?: boolean;
+  mustAdvanceTowardRequested?: boolean;
 }): boolean {
   if (args.exactReady) return true;
   if (args.decodeQueueSize >= args.highWater) return false;
+  if (args.mustAdvanceTowardRequested) return true;
   if (args.paused && args.lowWater != null && args.decodeQueueSize > args.lowWater) return false;
   if (args.decodeQueueSize < args.highWater && !args.paused) return true;
   if (args.outputProgressed && args.lowWater == null) return true;
@@ -466,7 +493,9 @@ export function maySubmitEncoded(args: {
 
 /**
  * AFE-14: after a HIGH_WATER pause, resume only at LOW_WATER or exact ready.
- * A dequeue that leaves the queue between LOW and HIGH must not refill.
+ * A dequeue that leaves the queue between LOW and HIGH must not refill
+ * when the requested sample is already submitted.
+ * AFE-16: if mustAdvanceTowardRequested, resume whenever queue < HIGH.
  */
 export function mayResumeDecode(args: {
   decodeQueueSize: number;
@@ -474,8 +503,10 @@ export function mayResumeDecode(args: {
   lowWater: number;
   exactReady: boolean;
   paused: boolean;
+  mustAdvanceTowardRequested?: boolean;
 }): boolean {
   if (args.exactReady) return true;
+  if (args.mustAdvanceTowardRequested && args.decodeQueueSize < args.highWater) return true;
   if (!args.paused) return args.decodeQueueSize < args.highWater;
   return args.decodeQueueSize <= args.lowWater;
 }

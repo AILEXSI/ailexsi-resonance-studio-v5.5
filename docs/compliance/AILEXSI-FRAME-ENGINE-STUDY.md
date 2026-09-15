@@ -998,3 +998,22 @@ Windows AFE-14 720p30 first-fill (no recreate): sample 134 PTS 5625000, FINAL_FL
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest 720p30 sample 134 PTS 5625000 / lastDecoded 5583333 / submitted 140 / queue 2 → Req==Dec==Enc, unresolved 0, `ptsCurrentlyRegistered` honest, exact frame, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-16 — empty pump slice + LOW_WATER starvation (V5.5)
+
+Windows AFE-15: requested sample 74 PTS 3125000, lastSubmitted 59, lastDecodedTs 2000000 stuck, decodeQueue 7, LOW 6, HIGH 12, `backpressureBlocked` / `noMoreSubmission`, pumpSlice 60-65, submit trace repeatedly `PUMP_LOOKAHEAD:60-59/q7->7/ts2000000->2000000/paused`. Exporter needs 74; decoder stops receiving input after 59.
+
+## Cause
+
+`progressivePumpSliceEnd` correctly plans 60-65. `pumpThrough` calls `beginSubmitPhase(PUMP_LOOKAHEAD, nextDecode=60)` then `waitForDecodeCapacity`. AFE-14 hysteresis treats paused && queue>LOW as no-submit even when queue<HIGH. Queue 7>LOW 6 with 5 unused HIGH credits. No `decode()`. `endSubmitPhase` sets submittedTo=`lastSubmitted` 59 → empty range 60-59. `progressiveTowardRequired` sees nextDecode unchanged and breaks. Backpressure assumed queued decoder input would produce additional output and drain to LOW_WATER. That is false when the requested PTS lies beyond lastSubmitted.
+
+## Fix
+
+1. CAPACITY INVARIANT: if requestedSample>lastSubmittedSample AND useful input remains AND decodeQueueSize<HIGH_WATER AND exact requested frame not ready → backpressure MUST NOT block solely because decodeQueueSize>LOW_WATER.
+2. `capacityTowardRequestedRequired` + `mustAdvanceTowardRequested` on `maySubmitEncoded` / `mayResumeDecode` / `waitForDecodeCapacity`.
+3. LOW_WATER hysteresis remains when lastSubmitted>=requested (reduce refill churn). HIGH_WATER still hard-caps the queue.
+4. Do not raise the 3000 ms stall timeout. Do not relax exact PTS. Do not drop/nearest frames. Do not raise queue limits. No MP4 special case. No mid-run flush. No software decode.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 74 / submitted 59 / queue 7 / LOW 6 / HIGH 12 → producer uses bounded credits toward 74, no empty 60-59 pause, exact PTS, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+
