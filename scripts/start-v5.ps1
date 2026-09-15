@@ -1,18 +1,20 @@
-# AILEXSI Resonance Studio V5 — Windows app launcher helper.
+# AILEXSI Resonance Studio V5 -- Windows app launcher helper.
 # Called from repo-root Start-V5.cmd. Never cds to V4 (ResonanceStudio).
+# Status lines use single-quoted strings so Windows PowerShell does not
+# parse currency text or parentheses as expressions.
 
 param(
     [switch]$OpenOnly
 )
 
-$ErrorActionPreference = "Stop"
-$Url = "http://127.0.0.1:1421"
+$ErrorActionPreference = 'Stop'
+$Url = 'http://127.0.0.1:1421'
 $WaitSeconds = 30
 
 function Get-V5Root {
     $here = $PSScriptRoot
     if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
-    return (Resolve-Path (Join-Path $here "..")).Path
+    return (Resolve-Path (Join-Path $here '..')).Path
 }
 
 function Test-V5Serving {
@@ -54,7 +56,7 @@ function Wait-V5Ready {
 if ($OpenOnly) {
     $ready = Wait-V5Ready
     if (-not $ready) {
-        Write-Host "Hinweis: $Url hat nach ${WaitSeconds}s nicht geantwortet. Oeffne das Fenster trotzdem."
+        Write-Host ('Hinweis: ' + $Url + ' hat nach ' + $WaitSeconds + 's nicht geantwortet. Oeffne das Fenster trotzdem.')
     }
     Open-V5AppWindow
     exit 0
@@ -63,51 +65,51 @@ if ($OpenOnly) {
 $root = Get-V5Root
 Set-Location -LiteralPath $root
 try {
-    $Host.UI.RawUI.WindowTitle = "AILEXSI Resonance Studio V5"
+    $Host.UI.RawUI.WindowTitle = 'AILEXSI Resonance Studio V5'
 } catch {
     # non-interactive host
 }
 
-Write-Host "AILEXSI Resonance Studio V5"
-Write-Host "Ordner: $root"
-Write-Host ""
+Write-Host 'AILEXSI Resonance Studio V5'
+Write-Host ('Ordner: ' + $root)
+Write-Host ''
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Host "Fehler: Node.js wurde nicht gefunden (Befehl 'node')." -ForegroundColor Red
-    Write-Host "Bitte Node.js LTS selbst installieren. Dieser Starter laedt keine Installer herunter (0 EUR)."
-    Write-Host "Kein Download, kein Store, kein kostenpflichtiges Tool."
+    Write-Host 'Fehler: Node.js wurde nicht gefunden. Befehl: node' -ForegroundColor Red
+    Write-Host 'Bitte Node.js LTS selbst installieren. Dieser Starter laedt keine Installer herunter. Kosten: 0 EUR.'
+    Write-Host 'Kein Download, kein Store, kein kostenpflichtiges Tool.'
     exit 1
 }
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    Write-Host "Fehler: npm wurde nicht gefunden (Befehl 'npm')." -ForegroundColor Red
-    Write-Host "Bitte Node.js LTS (enthaelt npm) selbst installieren. Dieser Starter laedt keine Installer herunter (0 EUR)."
+    Write-Host 'Fehler: npm wurde nicht gefunden. Befehl: npm' -ForegroundColor Red
+    Write-Host 'Bitte Node.js LTS, enthaelt npm, selbst installieren. Dieser Starter laedt keine Installer herunter. Kosten: 0 EUR.'
     exit 1
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $root "node_modules"))) {
-    Write-Host "node_modules fehlt — npm install ..."
+if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules'))) {
+    Write-Host 'node_modules fehlt - npm install ...'
     & npm install
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Fehler: npm install ist fehlgeschlagen." -ForegroundColor Red
+        Write-Host 'Fehler: npm install ist fehlgeschlagen.' -ForegroundColor Red
         exit 1
     }
 }
 
 if (Test-V5Serving) {
-    Write-Host "Port 1421 antwortet bereits. Es wird kein Prozess beendet. Oeffne das App-Fenster."
+    Write-Host 'Port 1421 antwortet bereits. Es wird kein Prozess beendet. Oeffne das App-Fenster.'
     Open-V5AppWindow
-    Write-Host "Bereit: $Url"
+    Write-Host ('Bereit: ' + $Url)
     exit 10
 }
 
-Write-Host "Starte Vite (npm run dev) auf $Url ..."
-Write-Host "Konsole bleibt offen, damit Vite-Fehler sichtbar sind."
-$helper = Join-Path $PSScriptRoot "start-v5.ps1"
-Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @(
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", $helper,
-    "-OpenOnly"
+Write-Host ('Starte Vite - npm run dev - auf ' + $Url + ' ...')
+Write-Host 'Konsole bleibt offen, damit Vite-Fehler sichtbar sind.'
+$helper = Join-Path $PSScriptRoot 'start-v5.ps1'
+Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', $helper,
+    '-OpenOnly'
 ) | Out-Null
 
 & npm run dev

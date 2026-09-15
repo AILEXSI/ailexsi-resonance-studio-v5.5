@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title AILEXSI Resonance Studio V5.5 — Install / Build / Run
+title AILEXSI Resonance Studio V5.5 - Install / Build / Run
 cd /d "%~dp0"
 
 if not exist "%~dp0package.json" (
@@ -11,16 +11,16 @@ if not exist "%~dp0package.json" (
 
 where node >nul 2>&1
 if errorlevel 1 (
-  echo Fehler: Node.js wurde nicht gefunden ^(Befehl "node"^).
-  echo Bitte Node.js LTS selbst installieren. Dieser Starter laedt keine Installer herunter ^(0 EUR^).
+  echo Fehler: Node.js wurde nicht gefunden. Befehl: node
+  echo Bitte Node.js LTS selbst installieren. Dieser Starter laedt keine Installer herunter. Kosten: 0 EUR.
   pause
   exit /b 1
 )
 
 where npm >nul 2>&1
 if errorlevel 1 (
-  echo Fehler: npm wurde nicht gefunden ^(Befehl "npm"^).
-  echo Bitte Node.js LTS ^(enthaelt npm^) selbst installieren. Dieser Starter laedt keine Installer herunter ^(0 EUR^).
+  echo Fehler: npm wurde nicht gefunden. Befehl: npm
+  echo Bitte Node.js LTS, enthaelt npm, selbst installieren. Dieser Starter laedt keine Installer herunter. Kosten: 0 EUR.
   pause
   exit /b 1
 )
