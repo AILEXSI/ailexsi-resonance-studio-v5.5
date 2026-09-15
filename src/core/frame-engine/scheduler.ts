@@ -1,7 +1,7 @@
 import { DecodedFrameCache } from "./cache";
 import { AfeVideoDecoder } from "./decoder";
 import { AfeError, isAfeError, throwIfAborted } from "./errors";
-import { decodeOrigin, keyframeAtOrBefore, nextKeyframeAfter, sampleIndexAtTime } from "./mp4-reader";
+import { decodeOrigin, earlierKeyframeOrigin, nextKeyframeAfter, sampleIndexAtTime } from "./mp4-reader";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMax } from "./perf";
 import { isMonotonicRun, isPresentationRun, maxDecodeIndex, planDecodeSpan, planSampleIndexes, shouldSplitPresentationRun } from "./plan";
 import {
@@ -223,7 +223,8 @@ export class AfeScheduler {
         ...this.exportStallExtra,
         sourceSampleRequested: idx,
         requestedPtsUs: this.decoder.chunkTimestampUs(sample),
-        gopKeyframeStart: keyframeAtOrBefore(this.movie, idx),
+        gopKeyframeStart:
+          this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx),
         decodeStartSample: span.decodeStart,
       };
     };
@@ -276,13 +277,17 @@ export class AfeScheduler {
       await pumpThrough(Math.min(target, lastRequired), requested, budgetEnd);
     };
 
-    const recoverGop = async (requested: number) => {
+    const recoverGop = async (requested: number, originOverride?: number) => {
+      const origin = originOverride ?? decodeOrigin(this.movie, requested);
+      const pts = this.decoder.chunkTimestampUs(this.movie.samples[requested]!);
       this.decoder.setStallPhase("GOP_RECOVERY");
+      this.decoder.setGopKeyframeStart(origin);
       this.decoder.noteRecoveryAttempt();
-      this.decoder.bindOrigin(stallExtra(requested));
+      const extra = { ...stallExtra(requested), gopKeyframeStart: origin };
+      this.decoder.bindOrigin(extra);
       this.decoder.markRecoveryRebuilding([requested]);
       await this.decoder.recreate(signal);
-      this.nextDecode = decodeOrigin(this.movie, requested);
+      this.nextDecode = origin;
       this.warm = true;
       this.decoder.beginStream(span.needed, span.decodeStart, {
         lastRequested,
@@ -291,14 +296,17 @@ export class AfeScheduler {
         keepResolved: true,
       });
       this.decoder.setPrefetchHint(PREFETCH);
-      this.decoder.bindOrigin(stallExtra(requested));
-      this.decoder.restoreOpenedIdentity(requested, this.decoder.chunkTimestampUs(this.movie.samples[requested]!));
+      this.decoder.setGopKeyframeStart(origin);
+      this.decoder.bindOrigin(extra);
+      this.decoder.restoreOpenedIdentity(requested, pts);
       this.decoder.protectSample(requested);
+      this.decoder.confirmPtsRegistered(requested, pts);
+      this.decoder.assertOpenedOwnership(extra);
       await pump(requested);
       await pumpMore(requested);
       if (this.nextDecode <= requested) await pumpThrough(requested, requested);
-      this.decoder.confirmPtsRegistered(requested, this.decoder.chunkTimestampUs(this.movie.samples[requested]!));
-      this.decoder.assertOpenedOwnership(stallExtra(requested));
+      this.decoder.confirmPtsRegistered(requested, pts);
+      this.decoder.assertOpenedOwnership(extra);
     };
 
     const throwStall = (requested: number): never => {
@@ -327,7 +335,20 @@ export class AfeScheduler {
       this.decoder.openRequested(idx, extra.requestedPtsUs);
       const budgetEnd = nowMs() + AFE_DECODE_STALL_MS;
       let recovered = false;
+      let earlierWalked = this.decoder.earlierKeyframeRecoverUsed;
       const sliceSamples = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
+
+      const tryEarlierKeyframe = async (): Promise<boolean> => {
+        if (earlierWalked || this.decoder.earlierKeyframeRecoverUsed) return false;
+        const current = this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx);
+        const earlier = earlierKeyframeOrigin(this.movie, current);
+        if (earlier == null) return false;
+        earlierWalked = true;
+        this.decoder.noteEarlierKeyframeRecover();
+        await recoverGop(idx, earlier);
+        recovered = true;
+        return true;
+      };
 
       try {
         await pump(idx, budgetEnd);
@@ -349,6 +370,7 @@ export class AfeScheduler {
       frame = await waitExact(idx, budgetEnd);
       if (!frame) {
         this.decoder.markRecoveryRebuilding([idx]);
+        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
         await pumpMore(idx, budgetEnd);
         this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
         this.decoder.assertOpenedOwnership(extra);
@@ -359,8 +381,16 @@ export class AfeScheduler {
         recovered = true;
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
       }
+      if (!frame && this.decoder.isFrozenAtHighWaterAfterRecreate()) {
+        if (await tryEarlierKeyframe()) {
+          frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+        } else {
+          return throwStall(idx);
+        }
+      }
       while (
         !frame &&
+        !this.decoder.isFrozenAtHighWaterAfterRecreate() &&
         hasFurtherUsefulInput({
           nextDecode: this.nextDecode,
           sampleCount: this.movie.sampleCount,
@@ -368,6 +398,7 @@ export class AfeScheduler {
         })
       ) {
         this.decoder.markRecoveryRebuilding([idx]);
+        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
         const sliceStart = this.nextDecode;
         const sliceEnd = progressivePumpSliceEnd({
           nextDecode: this.nextDecode,
@@ -382,6 +413,13 @@ export class AfeScheduler {
         this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
         if (nowMs() >= budgetEnd) break;
+      }
+      if (!frame && this.decoder.isFrozenAtHighWaterAfterRecreate()) {
+        if (await tryEarlierKeyframe()) {
+          frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+        } else {
+          return throwStall(idx);
+        }
       }
       if (!frame) {
         this.decoder.clearRecoveryRebuilding([idx]);

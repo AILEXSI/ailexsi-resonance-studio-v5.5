@@ -937,3 +937,133 @@ export function installEmitThenHoldFloodDecoder(emitLimit = 12): () => void {
   EmitThenHoldFloodDecoder.emitLimit = emitLimit;
   return installDecoderCtor(EmitThenHoldFloodDecoder);
 }
+
+/**
+ * AFE-13: first instance holds (force GOP recreate). Recreated instance
+ * emits `emitBeforeFreeze` then freezes at HIGH_WATER — lastDecoded stuck,
+ * queue stays full. A later instance (`emitOnInstance`, default 2) emits
+ * all: models the earlier-keyframe walk-back escape. flush() hangs while
+ * stuck so mid-run flush cannot pretend to be a pressure release.
+ */
+export class RecoverThenFreezeAtHighWaterDecoder {
+  static instances = 0;
+  static emitBeforeFreeze = 12;
+  static emitOnInstance = 2;
+  /** If set, first instance emits other PTS and holds this one (mid-run recreate). */
+  static holdPtsOnFirstInstance: number | null = null;
+  readonly born: number;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  emitted = 0;
+  stuck = false;
+  closed = false;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+    this.born = RecoverThenFreezeAtHighWaterDecoder.instances++;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+    if (this.born === 0) {
+      const holdPts = RecoverThenFreezeAtHighWaterDecoder.holdPtsOnFirstInstance;
+      if (holdPts == null || chunk.timestamp === holdPts) return;
+      queueMicrotask(() => {
+        if (this.closed) return;
+        this.output(new FakeVideoFrame(chunk.timestamp));
+        this.emitted += 1;
+        this.decodeQueueSize = this.submitted.length - this.emitted;
+        for (const fn of this.listeners) fn();
+      });
+      return;
+    }
+    if (this.born >= RecoverThenFreezeAtHighWaterDecoder.emitOnInstance) {
+      queueMicrotask(() => this.emitAll());
+      return;
+    }
+    if (this.emitted < RecoverThenFreezeAtHighWaterDecoder.emitBeforeFreeze && !this.stuck) {
+      queueMicrotask(() => this.tryEmitLimited());
+      return;
+    }
+    this.stuck = true;
+  }
+
+  tryEmitLimited(): void {
+    if (this.closed || this.stuck) return;
+    if (this.emitted >= RecoverThenFreezeAtHighWaterDecoder.emitBeforeFreeze) {
+      this.stuck = true;
+      return;
+    }
+    if (this.emitted >= this.submitted.length) return;
+    this.output(new FakeVideoFrame(this.submitted[this.emitted++]!));
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+    for (const fn of this.listeners) fn();
+    if (this.emitted < RecoverThenFreezeAtHighWaterDecoder.emitBeforeFreeze && this.emitted < this.submitted.length) {
+      queueMicrotask(() => this.tryEmitLimited());
+    } else {
+      this.stuck = true;
+    }
+  }
+
+  emitAll(): void {
+    if (this.closed) return;
+    while (this.emitted < this.submitted.length) {
+      this.output(new FakeVideoFrame(this.submitted[this.emitted++]!));
+    }
+    this.decodeQueueSize = 0;
+    this.stuck = false;
+    for (const fn of this.listeners) fn();
+  }
+
+  async flush(): Promise<void> {
+    if (this.stuck) {
+      return new Promise(() => {
+        /* hang — frozen HIGH_WATER must not flush as pressure release */
+      });
+    }
+    this.emitAll();
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.emitted = 0;
+    this.decodeQueueSize = 0;
+    this.stuck = false;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installRecoverThenFreezeAtHighWaterDecoder(opts?: {
+  emitBeforeFreeze?: number;
+  emitOnInstance?: number;
+  holdPtsOnFirstInstance?: number | null;
+}): () => void {
+  RecoverThenFreezeAtHighWaterDecoder.instances = 0;
+  RecoverThenFreezeAtHighWaterDecoder.emitBeforeFreeze = opts?.emitBeforeFreeze ?? 12;
+  RecoverThenFreezeAtHighWaterDecoder.emitOnInstance = opts?.emitOnInstance ?? 2;
+  RecoverThenFreezeAtHighWaterDecoder.holdPtsOnFirstInstance = opts?.holdPtsOnFirstInstance ?? null;
+  return installDecoderCtor(RecoverThenFreezeAtHighWaterDecoder);
+}

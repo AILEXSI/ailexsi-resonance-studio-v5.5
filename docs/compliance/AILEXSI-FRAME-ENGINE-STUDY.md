@@ -919,3 +919,24 @@ Windows AFE-11: after recreate, AFE submitted through lastRequired while the dec
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 / CASE A 30fps and CASE B 25fps → Req==Dec==Enc, unresolved 0, decodeQueue never ~125, exact frame, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-13 — backpressure deadlock after recreate (no output progress) (V5.5)
+
+Windows AFE-12: backpressure holds (`decodeQueuePeak` 40, not 125). New stall on `… - Kopie.mp4` (`sourceInMs` ~1529 / `sourceOutMs` 6042 / fps 30 / `maxReorderSamples` 10): requested sample 68 PTS 2875000, `videoReq` 39 Dec/Enc 38 unresolved 1, submitted 92 lastRequired 144, `lastDecodedTs` 2000000 stuck, decodeQueue 40 HIGH_WATER, `backpressureBlocked` / `noMoreSubmission`, `stallPhase PUMP_LOOKAHEAD`, `ownershipState RECOVERY_REBUILDING`, waiter null, `ptsRegistered` no, `FINAL_FLUSH` no, `usefulInputExhausted` no, recovery 1/1/1, `gopStart` null.
+
+## Cause
+
+Producer paused at HIGH_WATER waiting for output that never comes. `FINAL_FLUSH` blocked because `submitted < lastRequired`. Cannot pump, cannot flush. `waitForDecodeCapacity` after recreate sat the 3s export budget then dumped without a stored open-GOP decode origin (`gopStart` null). `RECOVERY_REBUILDING` cleared PTS/waiter and then sat idle — not an active rebuild step.
+
+## Fix
+
+1. Persist open-GOP `decodeOrigin` as `gopKeyframeStart` on the decoder. Stall dumps after recreate include it. Open GOP still walks back one I-frame for leading B-refs.
+2. After recreate: HIGH_WATER + no output progress + unresolved exact request → do **not** sit 3s. Short output-progress budget (`AFE_POST_RECREATE_OUTPUT_BUDGET_MS`). Escape: **ONE** additional controlled GOP recover from an **earlier** keyframe (walk back) with ownership rebuild (PTS + waiter). No earlier I-frame → typed `AFE_DECODE_STALL`.
+3. Prefer earlier-keyframe recreate before any flush. `usefulProgressImpossible` (`noMoreSubmission` + lastDecoded unchanged + `lastSubmitted < lastRequired`) is **not** a FINAL_FLUSH trigger (AFE-06 mid-run flush ban). FINAL_FLUSH remains AFE-11 (`lastSubmitted>=lastRequired`).
+4. `maxReorderSamples=10`: HIGH_WATER = min(48, max(40, 10+lookahead+bFrameNeed)) still admits B-frame deps. Queue never ~125.
+5. During `RECOVERY_REBUILDING`: re-register PTS immediately. Do not leave waiter null + `ptsRegistered` no without an active rebuild step.
+6. AFE-12 backpressure, exact PTS, AFE-04..12 regressions preserved. No nearest / snap / VIS / BLACK / null VIDEO fallback.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest `… - Kopie.mp4` sample 68 PTS 2875000 / sourceInMs ~1529 / sourceOutMs 6042 / fps 30 → Req==Dec==Enc, unresolved 0, `gopStart` set, decodeQueue never ~125, exact frame, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+
