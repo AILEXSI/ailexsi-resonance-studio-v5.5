@@ -1,6 +1,6 @@
 # V5.5 tests
 
-Vitest under `tests/`. AFE-10 MODE A: **1054 passed / 127 files** (vitest 3.2.7). AFE-09: **1044 / 126**. AFE-08: **1037 / 125**. AFE-07: **1028 / 124**. AFE-05: **1005 / 121**. Last full count on the accepted EXE SHA `234a781` (PR #15): **831 passed / 94 files**. F branch: **841 passed / 96 files**. G branch: **862 passed / 98 files**. H tip MODE A: **887 passed / 99 files**. Test count ≠ HUMAN-PROVEN.
+Vitest under `tests/`. AFE-11 MODE A: **1064 passed / 128 files** (vitest 3.2.7). AFE-10: **1054 / 127**. AFE-09: **1044 / 126**. AFE-08: **1037 / 125**. AFE-07: **1028 / 124**. AFE-05: **1005 / 121**. Last full count on the accepted EXE SHA `234a781` (PR #15): **831 passed / 94 files**. F branch: **841 passed / 96 files**. G branch: **862 passed / 98 files**. H tip MODE A: **887 passed / 99 files**. Test count ≠ HUMAN-PROVEN.
 
 Suites by area:
 
