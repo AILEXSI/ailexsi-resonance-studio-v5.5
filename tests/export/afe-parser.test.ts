@@ -29,7 +29,10 @@ describe("AFE ISO-BMFF reader", () => {
     for (const file of manifest.files) {
       expect(existsSync(file.path)).toBe(true);
       expect(file.frames).toBe(Math.round(file.fps * file.seconds));
-      expect(file.keyframeSec[0]).toBe(0);
+      expect(file.keyframeSec.length).toBeGreaterThan(0);
+      if (!file.id.includes("opengop")) {
+        expect(file.keyframeSec[0]).toBe(0);
+      }
       const bytes = readFileSync(file.path);
       expect(String.fromCharCode(bytes[4]!, bytes[5]!, bytes[6]!, bytes[7]!)).toBe("ftyp");
     }
