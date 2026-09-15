@@ -85,20 +85,23 @@ describe("AFE-07 A–M recovery / exact-frame delivery", () => {
     if (!movie) return;
     restore = installQueueHeldDecoder();
     const scheduler = new AfeScheduler(movie, 12);
+    const out: number[] = [];
     try {
-      await expect(async () => {
-        for await (const frame of scheduler.getFramesAt(times(8))) {
-          frame?.close();
-        }
-      }).rejects.toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
+      for await (const frame of scheduler.getFramesAt(times(8))) {
+        expect(frame).not.toBeNull();
+        out.push(frame!.timestamp);
+        frame!.close();
+      }
     } finally {
       const dump = scheduler.stallSnapshot();
-      expect(dump.decoderFlushCount).toBe(0);
+      // AFE-11: useful input for the 8-frame run is exhausted → one FINAL_FLUSH, exact PTS.
+      expect(dump.decoderFlushCount).toBeGreaterThanOrEqual(1);
+      expect(dump.finalFlushAttempted).toBe(true);
       expect(dump.originRequestedSample).not.toBeNull();
       expect(dump.originRequestedPts).not.toBeNull();
-      expect(dump.stallPhase).toBeTruthy();
       scheduler.close();
     }
+    expect(out).toHaveLength(8);
   }, 15_000);
 
   it("C. pump-more unblocks without flush or recreate", async () => {
@@ -298,7 +301,8 @@ describe("AFE-07 A–M recovery / exact-frame delivery", () => {
     } finally {
       const dump = scheduler.stallSnapshot();
       expect(dump.originRequestedSample).not.toBeNull();
-      expect(dump.decoderFlushCount).toBe(0);
+      expect(dump.decoderFlushCount).toBeGreaterThanOrEqual(1);
+      expect(dump.transactionComplete).toBe(false);
       scheduler.close();
     }
   }, 15_000);

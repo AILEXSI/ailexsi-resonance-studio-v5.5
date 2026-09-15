@@ -39,6 +39,7 @@ export type RequestOwnershipState =
   | "RECOVERY_START"
   | "RECOVERY_REBUILDING"
   | "WAIT_REINSTALLED"
+  | "FINAL_FLUSH_ARMED"
   | "RESOLVED"
   | "ENCODED"
   | "ERROR"
@@ -130,6 +131,10 @@ export type AfeStallSnapshot = {
   recoveryRebuilding: boolean;
   ownershipState: RequestOwnershipState | null;
   finalFlushAttempted: boolean;
+  /** Armed or in-flight FINAL_FLUSH (ownership-holding). */
+  finalFlushArmed: boolean;
+  /** lastSubmitted >= lastRequired and no further useful input remains. */
+  usefulInputExhausted: boolean;
 };
 
 export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
@@ -203,6 +208,8 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     recoveryRebuilding: false,
     ownershipState: null,
     finalFlushAttempted: false,
+    finalFlushArmed: false,
+    usefulInputExhausted: false,
     ...partial,
   };
 }
@@ -352,7 +359,10 @@ export function pumpMoreSubmitEnd(args: PumpMoreArgs): number {
   return Math.max(nextDecode - 1, bound);
 }
 
-/** FINAL_FLUSH is legal only at the last requested sample or when input is exhausted. */
+/**
+ * Current requested sample is the last of this run, or decode reached EOF.
+ * AFE-11: FINAL_FLUSH must not require this when useful input is exhausted.
+ */
 export function isTrueTransactionTail(args: {
   requested: number;
   lastRequested: number;
@@ -373,18 +383,56 @@ export function hasFurtherUsefulInput(args: {
   return args.nextDecode <= args.lastRequiredDecodeSample && args.nextDecode < args.sampleCount;
 }
 
+/** lastSubmitted >= lastRequired and no further useful decode-order input remains. */
+export function usefulInputExhausted(args: {
+  lastSubmittedSample?: number | null;
+  lastRequiredDecodeSample: number;
+  nextDecode: number;
+  sampleCount: number;
+}): boolean {
+  if (args.sampleCount <= 0) return true;
+  const submitted = args.lastSubmittedSample ?? args.nextDecode - 1;
+  if (submitted < args.lastRequiredDecodeSample) return false;
+  return !hasFurtherUsefulInput({
+    nextDecode: args.nextDecode,
+    sampleCount: args.sampleCount,
+    lastRequiredDecodeSample: args.lastRequiredDecodeSample,
+  });
+}
+
 /**
- * FINAL_FLUSH only when requested VIDEO is still unresolved and no further
- * useful input can be submitted. All RESOLVED/ENCODED → flush forbidden.
+ * FINAL_FLUSH when unresolved requested VIDEO remains and useful input is
+ * exhausted. Do not require atTail(currentRequestedSample).
+ *
+ * All of: unresolved>0, lastSubmitted>=lastRequired, no further useful input,
+ * waiter not active, pending PTS empty, not recoveryRebuilding, not complete.
  */
 export function mayFinalFlush(args: {
   unresolvedRequestedVideoFrames: number;
   nextDecode: number;
   sampleCount: number;
   lastRequiredDecodeSample: number;
+  lastSubmittedSample?: number | null;
+  streamWaiterIndex?: number | null;
+  pendingPtsCount?: number;
+  pendingPts?: readonly number[] | null;
+  recoveryRebuilding?: boolean;
+  transactionComplete?: boolean;
 }): boolean {
   if (args.unresolvedRequestedVideoFrames <= 0) return false;
-  return !hasFurtherUsefulInput(args);
+  if (args.transactionComplete) return false;
+  if (args.recoveryRebuilding) return false;
+  if (args.streamWaiterIndex != null) return false;
+  const pending =
+    args.pendingPtsCount ??
+    (args.pendingPts != null ? args.pendingPts.length : 0);
+  if (pending > 0) return false;
+  return usefulInputExhausted({
+    lastSubmittedSample: args.lastSubmittedSample,
+    lastRequiredDecodeSample: args.lastRequiredDecodeSample,
+    nextDecode: args.nextDecode,
+    sampleCount: args.sampleCount,
+  });
 }
 
 export function isTransactionComplete(args: {
@@ -410,19 +458,25 @@ export function isTransactionComplete(args: {
 }
 
 /**
- * AFE-10: opened unresolved VIDEO must own decode. Ledger-only without a
- * waiter, pending PTS, or in-progress recovery rebuild is OWNERSHIP_LOST.
+ * AFE-11: opened unresolved VIDEO must own decode. Ledger-only without a
+ * waiter, pending/registered PTS, recovery rebuild, or armed FINAL_FLUSH
+ * is immediate OWNERSHIP_LOST (no 3s mystery stall).
  */
 export function requestOwnershipHolds(args: {
   unresolvedRequestedVideoFrames: number;
   streamWaiterIndex?: number | null;
   pendingPtsCount?: number;
   pendingPts?: readonly number[] | null;
+  ptsRegistered?: boolean;
   recoveryRebuilding?: boolean;
+  finalFlushArmed?: boolean;
+  finalFlushInProgress?: boolean;
 }): boolean {
   if (args.unresolvedRequestedVideoFrames <= 0) return true;
   if (args.streamWaiterIndex != null) return true;
   if (args.recoveryRebuilding) return true;
+  if (args.finalFlushArmed || args.finalFlushInProgress) return true;
+  if (args.ptsRegistered) return true;
   const pending =
     args.pendingPtsCount ??
     (args.pendingPts != null ? args.pendingPts.length : 0);
@@ -537,6 +591,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `lastDecodedTs ${d.lastDecodedTimestamp}`,
     `gopStart ${d.gopKeyframeStart}`,
     `submitted ${d.lastSubmittedSample}`,
+    `lastSubmittedSample ${d.lastSubmittedSample} (sample-index)`,
     `decodeStart ${d.decodeStartSample}`,
     `waiter ${d.streamWaiterIndex}`,
     `streamPts ${d.streamPtsPending}`,
@@ -578,7 +633,9 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `ownershipRebuilt ${d.ownershipRebuilt ? "yes" : "no"}`,
     `recoveryRebuilding ${d.recoveryRebuilding ? "yes" : "no"}`,
     `ownershipState ${d.ownershipState}`,
-    `FINAL_FLUSH ${d.finalFlushAttempted ? "yes" : "no"}`,
+    `FINAL_FLUSH ${d.finalFlushAttempted || d.finalFlushArmed ? "yes" : "no"}`,
+    `finalFlushArmed ${d.finalFlushArmed ? "yes" : "no"}`,
+    `usefulInputExhausted ${d.usefulInputExhausted ? "yes" : "no"}`,
     `stalledMs ${d.stalledMs}`,
   ].join("; ");
 }

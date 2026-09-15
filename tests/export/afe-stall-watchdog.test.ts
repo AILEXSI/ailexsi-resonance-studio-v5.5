@@ -66,16 +66,21 @@ describe("AFE-05 stall watchdog + B-frame wait abort", () => {
       gop: 30,
       keyframeSec: [0],
     });
+    const out: number[] = [];
     try {
-      await expect(async () => {
-        for await (const frame of scheduler.getFramesAt(times)) {
-          frame?.close();
-        }
-      }).rejects.toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
+      for await (const frame of scheduler.getFramesAt(times)) {
+        expect(frame).not.toBeNull();
+        out.push(frame!.timestamp);
+        frame!.close();
+      }
     } finally {
-      expect(scheduler.stallSnapshot().decoderFlushCount).toBe(0);
+      const dump = scheduler.stallSnapshot();
+      // AFE-11: lastRequired exhausted → one FINAL_FLUSH releases the held DPB.
+      expect(dump.decoderFlushCount).toBeGreaterThanOrEqual(1);
+      expect(dump.finalFlushAttempted).toBe(true);
       scheduler.close();
     }
+    expect(out).toHaveLength(8);
   }, 15_000);
 
   it("abort during B-frame wait rejects waiters, resets decoder, and leaves no zombie ready frames", async () => {

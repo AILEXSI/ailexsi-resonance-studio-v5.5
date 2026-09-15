@@ -16,6 +16,7 @@ import {
   nowMs,
   originFromStall,
   requestOwnershipHolds,
+  usefulInputExhausted,
   requestedPtsIsPending,
   streamLookaheadSamples,
   type AfeStallPhase,
@@ -94,6 +95,7 @@ export class AfeVideoDecoder {
   private pumpSliceStart: number | null = null;
   private pumpSliceEnd: number | null = null;
   private finalFlushAttempted = false;
+  private finalFlushArmed = false;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -275,6 +277,41 @@ export class AfeVideoDecoder {
     }
   }
 
+  armFinalFlush(indexes?: Iterable<number>): void {
+    this.finalFlushArmed = true;
+    this.finalFlushAttempted = true;
+    this.stallPhase = "FINAL_FLUSH";
+    const ids = indexes
+      ? [...indexes]
+      : [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    for (const index of ids) {
+      const rec = this.ensureOwnership(index);
+      rec.recoveryRebuilding = false;
+      rec.waiterActive = false;
+      this.noteOwnership(index, "FINAL_FLUSH_ARMED");
+    }
+  }
+
+  clearRecoveryRebuilding(indexes?: Iterable<number>): void {
+    const ids = indexes
+      ? [...indexes]
+      : [...this.openedRequested].filter((i) => !this.isResolvedRequested(i));
+    for (const index of ids) {
+      const rec = this.ownership.get(index);
+      if (rec) rec.recoveryRebuilding = false;
+    }
+  }
+
+  usefulInputIsExhausted(): boolean {
+    const lastRequired = this.lastRequiredSample ?? this.lastSubmittedSample ?? -1;
+    return usefulInputExhausted({
+      lastSubmittedSample: this.lastSubmittedSample,
+      lastRequiredDecodeSample: lastRequired,
+      nextDecode: (this.lastSubmittedSample ?? -1) + 1,
+      sampleCount: this.movie.sampleCount,
+    });
+  }
+
   confirmPtsRegistered(index: number, ptsUs?: number | null): boolean {
     const sample = this.movie.samples[index];
     const pts = ptsUs ?? (sample ? this.chunkTimestampUs(sample) : this.ownership.get(index)?.ptsUs ?? null);
@@ -298,12 +335,17 @@ export class AfeVideoDecoder {
     const waiter = this.streamWaiter?.index ?? null;
     const pending = this.streamPts.pendingCount();
     const rebuilding = unresolved.some((i) => this.ownership.get(i)?.recoveryRebuilding);
+    const ptsRegistered = unresolved.some((i) => this.ownership.get(i)?.ptsRegistered);
+    const flushArmed = this.finalFlushArmed || this.stallPhase === "FINAL_FLUSH";
     if (
       requestOwnershipHolds({
         unresolvedRequestedVideoFrames: unresolved.length,
         streamWaiterIndex: waiter,
         pendingPtsCount: pending,
+        ptsRegistered,
         recoveryRebuilding: rebuilding,
+        finalFlushArmed: flushArmed,
+        finalFlushInProgress: this.stallPhase === "FINAL_FLUSH",
       })
     ) {
       return;
@@ -376,10 +418,23 @@ export class AfeVideoDecoder {
     const rebuilding =
       extra?.recoveryRebuilding ??
       unresolvedRecs.some((i) => this.ownership.get(i)?.recoveryRebuilding === true);
+    const lastRequired = extra?.lastRequiredDecodeSample ?? this.lastRequiredSample;
+    const lastSubmitted = extra?.lastSubmittedSample ?? this.lastSubmittedSample;
+    const usefulExhausted =
+      extra?.usefulInputExhausted ??
+      (lastRequired != null &&
+        usefulInputExhausted({
+          lastSubmittedSample: lastSubmitted,
+          lastRequiredDecodeSample: lastRequired,
+          nextDecode: (lastSubmitted ?? -1) + 1,
+          sampleCount: this.movie.sampleCount,
+        }));
     const ptsRegistered =
       extra?.ptsRegistered ??
       (focus != null
-        ? this.streamPts.hasIndex(focus) || this.hasPendingPts(extra?.requestedPtsUs ?? rec?.ptsUs)
+        ? this.streamPts.hasIndex(focus) ||
+          this.hasPendingPts(extra?.requestedPtsUs ?? rec?.ptsUs) ||
+          rec?.ptsRegistered === true
         : this.streamPts.pendingCount() > 0);
     const invariantOk = requestedEncodedInvariantHolds({
       unresolvedRequestedVideoFrames: unresolved,
@@ -442,6 +497,8 @@ export class AfeVideoDecoder {
       recoveryRebuilding: extra?.recoveryRebuilding ?? rebuilding,
       ownershipState: extra?.ownershipState ?? rec?.transitions[rec.transitions.length - 1] ?? null,
       finalFlushAttempted: extra?.finalFlushAttempted ?? this.finalFlushAttempted,
+      finalFlushArmed: extra?.finalFlushArmed ?? this.finalFlushArmed,
+      usefulInputExhausted: extra?.usefulInputExhausted ?? usefulExhausted,
     });
   }
 
@@ -813,11 +870,16 @@ export class AfeVideoDecoder {
         this.noteWaiterCleared(index);
         const rec = this.ownership.get(index);
         const pending = this.streamPts.pendingCount();
+        const usefulDone = this.usefulInputIsExhausted();
+        const flushOwns = this.finalFlushArmed || this.stallPhase === "FINAL_FLUSH";
         if (
           this.openedRequested.has(index) &&
           !this.isResolvedRequested(index) &&
           pending === 0 &&
-          !rec?.recoveryRebuilding
+          !rec?.recoveryRebuilding &&
+          !rec?.ptsRegistered &&
+          !usefulDone &&
+          !flushOwns
         ) {
           this.noteOwnership(index, "OWNERSHIP_LOST");
           const err = new AfeError("AFE_REQUEST_OWNERSHIP_LOST", formatStallMessage(dumpStall()), false);
@@ -933,22 +995,26 @@ export class AfeVideoDecoder {
     await this.flushTail(signal);
   }
 
-  /** Tail / transaction-end flush only. Watchdog → AFE_DECODE_STALL. */
+  /** Tail / useful-input-exhausted flush only. Watchdog → AFE_DECODE_STALL. */
   async flushTail(signal?: AbortSignal): Promise<void> {
     const unresolved = this.unresolvedRequestedCount();
     const lastRequired = this.lastRequiredSample ?? this.lastSubmittedSample ?? 0;
-    if (
-      !mayFinalFlush({
-        unresolvedRequestedVideoFrames: unresolved,
-        nextDecode: (this.lastSubmittedSample ?? -1) + 1,
-        sampleCount: this.movie.sampleCount,
-        lastRequiredDecodeSample: lastRequired,
-      })
-    ) {
-      return;
+    const exhausted = this.usefulInputIsExhausted();
+    if (unresolved <= 0) return;
+    if (!this.finalFlushArmed && !exhausted) {
+      if (
+        !mayFinalFlush({
+          unresolvedRequestedVideoFrames: unresolved,
+          nextDecode: (this.lastSubmittedSample ?? -1) + 1,
+          sampleCount: this.movie.sampleCount,
+          lastRequiredDecodeSample: lastRequired,
+          lastSubmittedSample: this.lastSubmittedSample,
+        })
+      ) {
+        return;
+      }
     }
-    this.stallPhase = "FINAL_FLUSH";
-    this.finalFlushAttempted = true;
+    this.armFinalFlush();
     await this.settleOutputs(signal, false);
   }
 
@@ -1116,7 +1182,12 @@ export class AfeVideoDecoder {
         /* */
       }
     }
-    if (!this.streamReady.has(index) && this.streamReady.size >= this.reorderCap) {
+    const mustKeep =
+      this.protectedIndexes.has(index) ||
+      this.openedRequested.has(index) ||
+      this.isNeeded(index) ||
+      this.streamWaiter?.index === index;
+    if (!this.streamReady.has(index) && this.streamReady.size >= this.reorderCap && !mustKeep) {
       try {
         frame.close();
       } catch {

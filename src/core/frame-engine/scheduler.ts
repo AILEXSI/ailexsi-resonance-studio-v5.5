@@ -9,7 +9,6 @@ import {
   AFE_WAIT_EXACT_PTS_MS,
   formatStallMessage,
   hasFurtherUsefulInput,
-  isTrueTransactionTail,
   lastRequiredDecodeSample,
   mayFinalFlush,
   nowMs,
@@ -292,14 +291,6 @@ export class AfeScheduler {
       this.decoder.assertOpenedOwnership(stallExtra(requested));
     };
 
-    const atTail = (requested: number) =>
-      isTrueTransactionTail({
-        requested,
-        lastRequested: last,
-        nextDecode: this.nextDecode,
-        sampleCount: this.movie.sampleCount,
-      });
-
     const throwStall = (requested: number): never => {
       this.decoder.assertOpenedOwnership(stallExtra(requested));
       const dump = this.decoder.snapshot({
@@ -382,26 +373,33 @@ export class AfeScheduler {
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
         if (nowMs() >= budgetEnd) break;
       }
-      if (
-        !frame &&
-        atTail(idx) &&
-        mayFinalFlush({
+      if (!frame) {
+        this.decoder.clearRecoveryRebuilding([idx]);
+        const flushSnap = this.decoder.snapshot(extra);
+        const canFlush = mayFinalFlush({
           unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
           nextDecode: this.nextDecode,
           sampleCount: this.movie.sampleCount,
           lastRequiredDecodeSample: lastRequired,
-        })
-      ) {
-        this.decoder.setStallPhase("FINAL_FLUSH");
-        await this.decoder.flushTail(signal);
-        frame = this.decoder.takeReady(idx);
-        if (!frame) {
-          const remain = Math.max(16, budgetEnd - nowMs());
-          frame = await this.decoder.awaitReady(idx, signal, extra, {
-            allowSkip: false,
-            throwOnTimeout: false,
-            timeoutMs: remain,
-          });
+          lastSubmittedSample: this.nextDecode - 1,
+          streamWaiterIndex: flushSnap.streamWaiterIndex,
+          recoveryRebuilding: false,
+          transactionComplete: flushSnap.transactionComplete,
+        });
+        if (canFlush && !flushSnap.finalFlushAttempted) {
+          this.decoder.armFinalFlush([idx]);
+          this.decoder.assertOpenedOwnership(extra);
+          this.decoder.setStallPhase("FINAL_FLUSH");
+          await this.decoder.flushTail(signal);
+          frame = this.decoder.takeReady(idx);
+          if (!frame) {
+            const remain = Math.max(16, budgetEnd - nowMs());
+            frame = await this.decoder.awaitReady(idx, signal, extra, {
+              allowSkip: false,
+              throwOnTimeout: false,
+              timeoutMs: remain,
+            });
+          }
         }
       }
       if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);

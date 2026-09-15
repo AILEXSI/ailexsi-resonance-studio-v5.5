@@ -703,3 +703,61 @@ export function installRecoverThenNeedDecoder(need: number): () => void {
   RecoverThenNeedDecoder.need = need;
   return installDecoderCtor(RecoverThenNeedDecoder);
 }
+
+/**
+ * AFE-11: first instance holds (GOP recreate). Recreated instance never emits,
+ * including on flush — true missing exact PTS after useful input is exhausted.
+ */
+export class RecoverThenNeverEmitDecoder {
+  static instances = 0;
+  readonly born: number;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  closed = false;
+  private readonly listeners = new Set<() => void>();
+
+  constructor(_opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.born = RecoverThenNeverEmitDecoder.instances++;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    this.decodeQueueSize = this.submitted.length;
+  }
+
+  async flush(): Promise<void> {
+    this.decodeQueueSize = 0;
+    for (const fn of this.listeners) fn();
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.decodeQueueSize = 0;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installRecoverThenNeverEmitDecoder(): () => void {
+  RecoverThenNeverEmitDecoder.instances = 0;
+  return installDecoderCtor(RecoverThenNeverEmitDecoder);
+}
