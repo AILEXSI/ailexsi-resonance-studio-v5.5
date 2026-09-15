@@ -30,6 +30,7 @@ export interface OpenedFrameSource {
   close(): void;
   memoryStats(): AfeMemoryStats;
   stallSnapshot?(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot;
+  setExportStallExtra?(extra: Partial<AfeStallSnapshot>): void;
 }
 
 export interface FrameSourceBackend {

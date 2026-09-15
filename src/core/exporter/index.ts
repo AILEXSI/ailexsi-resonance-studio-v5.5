@@ -42,7 +42,14 @@ export {
   readyExportNameFromProjectAsync,
   resolveSuggestedExportFileName,
 } from "./export-name";
-export { canUseWebCodecs, webCodecsUnavailableMessage } from "./webcodecs";
+export {
+  canUseWebCodecs,
+  countExportPictureKinds,
+  exportPictureKind,
+  groupFrameRuns,
+  webCodecsUnavailableMessage,
+} from "./webcodecs";
+export type { FrameRun } from "./webcodecs";
 export { validateMp4Ftyp, looksLikeWebm, hexHeader } from "./ftyp";
 export { audioInputForMux, mp4HasAudioTrack } from "./mp4";
 export { downloadWav, encodeWavPcm, exportMixWav, readWavPcm, wavFileName } from "./wav";

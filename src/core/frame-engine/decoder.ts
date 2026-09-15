@@ -4,9 +4,13 @@ import { AFE_MAX_REORDER_READY, PtsIndexMap } from "./frame-match";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMarkDecoded, afePerfMax, afePerfProbeInstalled } from "./perf";
 import {
   AFE_DECODE_STALL_MS,
+  AFE_SETTLE_DRAIN_MS,
+  AFE_STALL_NUDGE_MS,
+  AFE_STALL_NUDGE_WAIT_MS,
   emptyStallSnapshot,
   formatStallMessage,
   nowMs,
+  requestedPtsIsPending,
   streamLookaheadSamples,
   type AfeStallSnapshot,
 } from "./stall";
@@ -15,6 +19,13 @@ import type { AfeMovie, AfeSample } from "./types";
 import { sampleBytes } from "./mp4-reader";
 
 type FrameWaiter = { resolve: (frame: VideoFrame) => void; reject: (e: Error) => void };
+
+export type AwaitReadyHooks = {
+  /** After the one nudge flush, resubmit from the keyframe if WebCodecs demands it. */
+  onNeedsKeyframe?: () => void | Promise<void>;
+  /** Yield null when later presentation indexes are already ready (Shape R hole). */
+  allowSkip?: boolean;
+};
 
 export class AfeVideoDecoder {
   private decoder: VideoDecoder | null = null;
@@ -79,6 +90,17 @@ export class AfeVideoDecoder {
 
   unresolvedSamples(): number[] {
     return this.streamPts.unresolved();
+  }
+
+  hasPendingPts(ptsUs: number | null | undefined): boolean {
+    return requestedPtsIsPending(this.streamPts.pendingTimestamps(), ptsUs ?? null);
+  }
+
+  hasLaterReady(index: number): boolean {
+    for (const ready of this.streamReady.keys()) {
+      if (ready > index) return true;
+    }
+    return false;
   }
 
   snapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
@@ -207,33 +229,131 @@ export class AfeVideoDecoder {
   }
 
   waitReady(index: number, signal?: AbortSignal, extra?: Partial<AfeStallSnapshot>): Promise<VideoFrame> {
+    return this.awaitReady(index, signal, extra, { allowSkip: false }).then((frame) => {
+      if (frame) return frame;
+      const dump = this.snapshot({
+        sourceSampleRequested: index,
+        stalledMs: AFE_DECODE_STALL_MS,
+        ...extra,
+      });
+      throw new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
+    });
+  }
+
+  /**
+   * Wait for exact PTS of `index`. After ~200ms with no progress and the
+   * requested PTS still pending, releaseHeld() once (flush if still waiting).
+   * Shape Q and Shape R both nudge — decodeQueue==0 is not a skip reason.
+   * If later indexes are already ready, allowSkip yields null instead of aborting.
+   */
+  awaitReady(
+    index: number,
+    signal?: AbortSignal,
+    extra?: Partial<AfeStallSnapshot>,
+    hooks?: AwaitReadyHooks,
+  ): Promise<VideoFrame | null> {
     const hit = this.takeReady(index);
     if (hit) return Promise.resolve(hit);
     throwIfAborted(signal);
     if (this.lastError) return Promise.reject(this.lastError);
     if (this.closed) return Promise.reject(new AfeError("AFE_DECODE_FAILED", "decoder closed", false));
-    return new Promise<VideoFrame>((resolve, reject) => {
+    return new Promise<VideoFrame | null>((resolve, reject) => {
       const started = nowMs();
       let settled = false;
+      let nudged = false;
+      let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
+      let afterNudgeTimer: ReturnType<typeof setTimeout> | undefined;
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        clearTimeout(stallTimer);
+        if (nudgeTimer) clearTimeout(nudgeTimer);
+        if (afterNudgeTimer) clearTimeout(afterNudgeTimer);
         signal?.removeEventListener("abort", onAbort);
         fn();
       };
-      const timer = setTimeout(() => {
-        const dump = this.snapshot({
+      const dumpStall = () =>
+        this.snapshot({
           sourceSampleRequested: index,
           stalledMs: Math.max(AFE_DECODE_STALL_MS, nowMs() - started),
           ...extra,
         });
-        const err = new AfeError("AFE_DECODE_STALL", formatStallMessage(dump), false);
+      const throwStall = () => {
+        const err = new AfeError("AFE_DECODE_STALL", formatStallMessage(dumpStall()), false);
         this.lastError = err;
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
         this.streamPts.failPending("ERROR");
         finish(() => reject(err));
-      }, AFE_DECODE_STALL_MS);
+      };
+      const trySkip = (): boolean => {
+        if (!hooks?.allowSkip) return false;
+        if (this.streamReady.has(index)) return false;
+        if (!this.hasLaterReady(index)) return false;
+        if (this.streamWaiter?.index === index) this.streamWaiter = null;
+        if (this.streamPts.hasIndex(index)) {
+          this.streamPts.deleteIndex(index);
+          this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
+        }
+        finish(() => resolve(null));
+        return true;
+      };
+      const requestedInPending = (): boolean => {
+        if (extra?.requestedPtsUs != null) return this.hasPendingPts(extra.requestedPtsUs);
+        return this.streamPts.hasIndex(index);
+      };
+      const afterNudge = () => {
+        if (settled) return;
+        const got = this.takeReady(index);
+        if (got) {
+          finish(() => resolve(got));
+          return;
+        }
+        if (trySkip()) return;
+      };
+      const runNudge = async () => {
+        if (settled || nudged) return;
+        if (!requestedInPending()) return;
+        nudged = true;
+        try {
+          await this.releaseHeld(signal);
+        } catch (e) {
+          if (settled) return;
+          if (signal?.aborted) {
+            finish(() => reject(abortedError(signal)));
+            return;
+          }
+          finish(() => reject(e instanceof Error ? e : new AfeError("AFE_DECODE_FAILED", String(e))));
+          return;
+        }
+        if (settled) return;
+        const flushed = this.takeReady(index);
+        if (flushed) {
+          finish(() => resolve(flushed));
+          return;
+        }
+        if (this.needsKeyframe && hooks?.onNeedsKeyframe) {
+          try {
+            await hooks.onNeedsKeyframe();
+          } catch (e) {
+            if (settled) return;
+            if (!(isAfeError(e) && /key frame/i.test(e.message))) {
+              finish(() => reject(e instanceof Error ? e : new AfeError("AFE_DECODE_FAILED", String(e))));
+              return;
+            }
+          }
+        }
+        if (settled) return;
+        const afterKey = this.takeReady(index);
+        if (afterKey) {
+          finish(() => resolve(afterKey));
+          return;
+        }
+        afterNudgeTimer = setTimeout(afterNudge, AFE_STALL_NUDGE_WAIT_MS);
+      };
+      const stallTimer = setTimeout(throwStall, AFE_DECODE_STALL_MS);
+      nudgeTimer = setTimeout(() => {
+        void runNudge();
+      }, AFE_STALL_NUDGE_MS);
       const onAbort = () => {
         if (this.streamWaiter?.index === index) this.streamWaiter = null;
         this.rejectWaiters(abortedError(signal));
@@ -385,7 +505,8 @@ export class AfeVideoDecoder {
         dec.addEventListener("dequeue", done);
       });
 
-    while (dec.decodeQueueSize > 0) {
+    const drainStart = nowMs();
+    while (dec.decodeQueueSize > 0 && nowMs() - drainStart < AFE_SETTLE_DRAIN_MS) {
       throwIfAborted(signal);
       await waitDequeue();
     }
@@ -410,6 +531,8 @@ export class AfeVideoDecoder {
     if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
     try {
       let flushTimer: ReturnType<typeof setTimeout> | undefined;
+      this.flushCount += 1;
+      if (!afePerfProbeInstalled()) afePerfCount("decoderFlushes");
       try {
         await Promise.race([
           dec.flush(),
@@ -423,8 +546,6 @@ export class AfeVideoDecoder {
       } finally {
         if (flushTimer) clearTimeout(flushTimer);
       }
-      this.flushCount += 1;
-      if (!afePerfProbeInstalled()) afePerfCount("decoderFlushes");
       this.needsKeyframe = true;
     } catch (e) {
       if (signal?.aborted) throw abortedError(signal);

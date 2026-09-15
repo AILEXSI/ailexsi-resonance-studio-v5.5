@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  AFE_DECODE_STALL_MS,
   AfeError,
   AfeScheduler,
   parseIsoBmff,
@@ -53,7 +52,7 @@ describe("AFE-05 stall watchdog + B-frame wait abort", () => {
     for (let i = 1; i < out.length; i++) expect(out[i]!).toBeGreaterThan(out[i - 1]!);
   }, 15_000);
 
-  it("fail-closed AFE_DECODE_STALL when decoder needs more than lookahead (no silent hang)", async () => {
+  it("nudge flush unblocks hold-for-N+k (AFE-06 Shape Q; does not raise lookahead)", async () => {
     const movie = loadMovie();
     if (!movie) return;
     restore = installHoldDecoder(40);
@@ -67,18 +66,18 @@ describe("AFE-05 stall watchdog + B-frame wait abort", () => {
       gop: 30,
       keyframeSec: [0],
     });
-    const started = Date.now();
+    const out: number[] = [];
     try {
-      await expect(async () => {
-        for await (const frame of scheduler.getFramesAt(times)) {
-          frame?.close();
-        }
-      }).rejects.toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
+      for await (const frame of scheduler.getFramesAt(times)) {
+        expect(frame).not.toBeNull();
+        out.push(frame!.timestamp);
+        frame!.close();
+      }
     } finally {
+      expect(scheduler.stallSnapshot().decoderFlushCount).toBeGreaterThanOrEqual(1);
       scheduler.close();
     }
-    expect(Date.now() - started).toBeGreaterThanOrEqual(AFE_DECODE_STALL_MS - 50);
-    expect(Date.now() - started).toBeLessThan(AFE_DECODE_STALL_MS + 2000);
+    expect(out).toHaveLength(8);
   }, 15_000);
 
   it("abort during B-frame wait rejects waiters, resets decoder, and leaves no zombie ready frames", async () => {

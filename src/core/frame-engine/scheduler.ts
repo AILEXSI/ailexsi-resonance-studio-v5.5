@@ -82,6 +82,7 @@ export class AfeScheduler {
   private nextDecode = 0;
   private warm = false;
   private closed = false;
+  private exportStallExtra: Partial<AfeStallSnapshot> = {};
 
   constructor(
     private readonly movie: AfeMovie,
@@ -97,10 +98,15 @@ export class AfeScheduler {
 
   stallSnapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
     return this.decoder.snapshot({
-      decodeStartSample: extra?.decodeStartSample ?? null,
-      gopKeyframeStart: extra?.gopKeyframeStart ?? null,
+      decodeStartSample: extra?.decodeStartSample ?? this.exportStallExtra.decodeStartSample ?? null,
+      gopKeyframeStart: extra?.gopKeyframeStart ?? this.exportStallExtra.gopKeyframeStart ?? null,
+      ...this.exportStallExtra,
       ...extra,
     });
+  }
+
+  setExportStallExtra(extra: Partial<AfeStallSnapshot>): void {
+    this.exportStallExtra = { ...this.exportStallExtra, ...extra };
   }
 
   close(): void {
@@ -237,12 +243,24 @@ export class AfeScheduler {
           }
           if (!frame) {
             const sample = this.movie.samples[idx]!;
-            frame = await this.decoder.waitReady(idx, signal, {
-              sourceSampleRequested: idx,
-              requestedPtsUs: this.decoder.chunkTimestampUs(sample),
-              gopKeyframeStart: keyframeAtOrBefore(this.movie, idx),
-              decodeStartSample: span.decodeStart,
-            });
+            frame = await this.decoder.awaitReady(
+              idx,
+              signal,
+              {
+                ...this.exportStallExtra,
+                sourceSampleRequested: idx,
+                requestedPtsUs: this.decoder.chunkTimestampUs(sample),
+                gopKeyframeStart: keyframeAtOrBefore(this.movie, idx),
+                decodeStartSample: span.decodeStart,
+              },
+              {
+                allowSkip: true,
+                onNeedsKeyframe: () => {
+                  this.nextDecode = keyframeAtOrBefore(this.movie, idx);
+                  pump(idx);
+                },
+              },
+            );
           }
           if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
         }
@@ -250,7 +268,11 @@ export class AfeScheduler {
           await this.decoder.releaseHeld(signal);
           frame = frame ?? this.decoder.takeReady(idx);
         }
-        if (!frame) throw new AfeError("AFE_DECODE_FAILED", `no output for sample ${idx}`);
+        if (!frame) {
+          afePerfCount("streamPathFrames");
+          yield null;
+          continue;
+        }
         const nextIdx = k + 1 < end ? indexes[k + 1] : undefined;
         if (nextIdx === idx) {
           this.cache.put(idx, frame.clone());

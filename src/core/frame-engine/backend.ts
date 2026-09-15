@@ -97,6 +97,10 @@ class AilexsiOpened implements OpenedFrameSource {
   stallSnapshot(extra?: Parameters<AfeScheduler["stallSnapshot"]>[0]) {
     return this.scheduler.stallSnapshot(extra);
   }
+
+  setExportStallExtra(extra: Parameters<AfeScheduler["setExportStallExtra"]>[0]) {
+    this.scheduler.setExportStallExtra(extra);
+  }
 }
 
 /** Preview / test helper only. Export never opens this path. */

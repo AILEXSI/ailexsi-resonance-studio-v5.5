@@ -117,6 +117,16 @@ describe("AFE-05 B-frame submit-ahead (deadlock math)", () => {
       exportFrameIndex: 42,
       exportTimestampSec: 1.4,
       sourceClipId: "c1",
+      sourceClipLabel: "V1-stills.mp4",
+      sourceUrlName: "V1-stills.mp4",
+      sourceInMs: 0,
+      sourceOutMs: 120000,
+      timelineMs: 70000,
+      pictureKind: "video",
+      fps: 30,
+      visFrames: 12,
+      afeFrames: 36,
+      blackFrames: 0,
       sourceSampleRequested: 17,
       requestedPtsUs: 566667,
       decodeStartSample: 0,
@@ -146,6 +156,16 @@ describe("AFE-05 B-frame submit-ahead (deadlock math)", () => {
     expect(text).toContain("decodeQueue 2");
     expect(text).toContain("gopStart 0");
     expect(text).toContain("exportFrame 42");
-    expect(text).toContain("clip c1");
+    expect(text).toContain("clip V1-stills.mp4");
+    expect(text).toContain("clipId c1");
+    expect(text).toContain("source V1-stills.mp4");
+    expect(text).toContain("sourceInMs 0");
+    expect(text).toContain("sourceOutMs 120000");
+    expect(text).toContain("timelineMs 70000");
+    expect(text).toContain("picture video");
+    expect(text).toContain("fps 30");
+    expect(text).toContain("visFrames 12");
+    expect(text).toContain("afeFrames 36");
+    expect(text).toContain("blackFrames 0");
   });
 });
