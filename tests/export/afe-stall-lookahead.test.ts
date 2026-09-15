@@ -167,5 +167,21 @@ describe("AFE-05 B-frame submit-ahead (deadlock math)", () => {
     expect(text).toContain("visFrames 12");
     expect(text).toContain("afeFrames 36");
     expect(text).toContain("blackFrames 0");
+    expect(text).toContain("originSample");
+    expect(text).toContain("stallPhase");
+  });
+
+  it("pump-more end is N+maxReorder+prefetch or next GOP, not EOF", async () => {
+    const { pumpMoreSubmitEnd } = await import("../../src/core/frame-engine");
+    const end = pumpMoreSubmitEnd({
+      requested: 10,
+      nextDecode: 12,
+      sampleCount: 200,
+      prefetch: 4,
+      maxReorderSamples: 3,
+      nextRefOrGop: 30,
+    });
+    expect(end).toBe(30);
+    expect(end).toBeLessThan(200);
   });
 });

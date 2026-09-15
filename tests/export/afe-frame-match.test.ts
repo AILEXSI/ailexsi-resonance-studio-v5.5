@@ -53,13 +53,15 @@ describe("AFE PTS-keyed frame match (no FIFO identity, no nearest)", () => {
     expect(AFE_MAX_REORDER_READY).toBe(64);
   });
 
-  it("every submitted sample is RESOLVED, DISCARDED_NOT_NEEDED, ERROR, or ABORTED", () => {
+  it("every submitted sample is READY, RESOLVED, DISCARDED_NOT_NEEDED, ERROR, or ABORTED", () => {
     const map = new PtsIndexMap();
     map.push(0, 0);
     map.push(1000, 2);
     map.push(2000, 1);
     map.push(2000, 3);
     expect(map.takeExact(0)).toBe(0);
+    map.mark(0, "READY");
+    expect(map.fateOf(0)).toBe("READY");
     map.mark(0, "RESOLVED");
     expect(map.takeExact(1000)).toBe(2);
     map.mark(2, "DISCARDED_NOT_NEEDED");

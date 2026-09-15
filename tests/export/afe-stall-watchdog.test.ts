@@ -52,7 +52,7 @@ describe("AFE-05 stall watchdog + B-frame wait abort", () => {
     for (let i = 1; i < out.length; i++) expect(out[i]!).toBeGreaterThan(out[i - 1]!);
   }, 15_000);
 
-  it("nudge flush unblocks hold-for-N+k (AFE-06 Shape Q; does not raise lookahead)", async () => {
+  it("hold-for-N+k larger than structure bound fail-closes without mid-run flush", async () => {
     const movie = loadMovie();
     if (!movie) return;
     restore = installHoldDecoder(40);
@@ -66,18 +66,16 @@ describe("AFE-05 stall watchdog + B-frame wait abort", () => {
       gop: 30,
       keyframeSec: [0],
     });
-    const out: number[] = [];
     try {
-      for await (const frame of scheduler.getFramesAt(times)) {
-        expect(frame).not.toBeNull();
-        out.push(frame!.timestamp);
-        frame!.close();
-      }
+      await expect(async () => {
+        for await (const frame of scheduler.getFramesAt(times)) {
+          frame?.close();
+        }
+      }).rejects.toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
     } finally {
-      expect(scheduler.stallSnapshot().decoderFlushCount).toBeGreaterThanOrEqual(1);
+      expect(scheduler.stallSnapshot().decoderFlushCount).toBe(0);
       scheduler.close();
     }
-    expect(out).toHaveLength(8);
   }, 15_000);
 
   it("abort during B-frame wait rejects waiters, resets decoder, and leaves no zombie ready frames", async () => {

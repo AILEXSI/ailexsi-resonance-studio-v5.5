@@ -73,6 +73,14 @@ export interface ExportProgress {
   visFrames?: number;
   afeFrames?: number;
   blackFrames?: number;
+  videoFramesRequested?: number;
+  videoFramesDecoded?: number;
+  videoFramesEncoded?: number;
+  visFramesEncoded?: number;
+  blackFramesEncoded?: number;
+  recoveryAttempts?: number;
+  decoderFlushes?: number;
+  decoderResets?: number;
 }
 
 export type ExportAudioKind = "aac" | "wav" | "none";
@@ -88,6 +96,11 @@ export interface ExportResult {
   blob?: Blob;
   brands?: string[];
   audio?: ExportAudioKind;
+  videoFramesRequested?: number;
+  videoFramesDecoded?: number;
+  videoFramesEncoded?: number;
+  visFramesEncoded?: number;
+  blackFramesEncoded?: number;
 }
 
 export interface ExportHooks {
