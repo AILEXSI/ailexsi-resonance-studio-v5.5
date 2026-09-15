@@ -11,6 +11,7 @@ import {
   formatStallMessage,
   isTransactionComplete,
   lastRequiredDecodeSample,
+  requestedEncodedInvariantHolds,
   mayFinalFlush,
   nowMs,
   originFromStall,
@@ -66,6 +67,8 @@ export class AfeVideoDecoder {
   private origin: Partial<AfeStallSnapshot> = {};
   private protectedIndexes = new Set<number>();
   private requestedIndexes = new Set<number>();
+  /** Planned presentation indexes the export has actually asked for. */
+  private openedRequested = new Set<number>();
   private resolvedRequested = new Set<number>();
   private lastRequestedSample: number | null = null;
   private lastRequiredSample: number | null = null;
@@ -127,22 +130,45 @@ export class AfeVideoDecoder {
     return this.sampleRoles.get(index);
   }
 
+  /**
+   * Opened presentation samples not yet resolved. Planned-but-unasked indexes
+   * and GOP-resubmitted already-resolved samples do not count.
+   */
   unresolvedRequestedCount(): number {
     let n = 0;
-    for (const index of this.requestedIndexes) {
-      const fate = this.streamPts.fateOf(index);
-      if (fate === "PENDING" || fate === "READY") n += 1;
-      else if (fate == null && (this.streamPts.hasIndex(index) || this.streamReady.has(index))) n += 1;
+    for (const index of this.openedRequested) {
+      if (this.isResolvedRequested(index)) continue;
+      n += 1;
     }
     return n;
   }
 
+  openedRequestedCount(): number {
+    return this.openedRequested.size;
+  }
+
   resolvedRequestedCount(): number {
     let n = 0;
-    for (const index of this.requestedIndexes) {
-      if (this.resolvedRequested.has(index) || this.streamPts.fateOf(index) === "RESOLVED") n += 1;
+    for (const index of this.openedRequested) {
+      if (this.isResolvedRequested(index)) n += 1;
     }
     return n;
+  }
+
+  /** Export actually asked for this presentation sample (exact-PTS waiter / yield). */
+  openRequested(index: number): void {
+    this.openedRequested.add(index);
+    this.requestedIndexes.add(index);
+    this.protectSample(index);
+  }
+
+  markResolvedRequested(index: number): void {
+    this.openedRequested.add(index);
+    this.resolvedRequested.add(index);
+  }
+
+  private isResolvedRequested(index: number): boolean {
+    return this.resolvedRequested.has(index) || this.streamPts.fateOf(index) === "RESOLVED";
   }
 
   allSubmittedTerminal(): boolean {
@@ -190,15 +216,27 @@ export class AfeVideoDecoder {
     const origin = originFromStall({ ...this.origin, ...extra });
     const unresolved = extra?.unresolvedRequestedVideoFrames ?? this.unresolvedRequestedCount();
     const waiter = extra?.streamWaiterIndex ?? this.streamWaiter?.index ?? null;
-    const complete = isTransactionComplete({
+    const req = extra?.videoFramesRequested ?? this.origin.videoFramesRequested ?? null;
+    const dec = extra?.videoFramesDecoded ?? this.origin.videoFramesDecoded ?? null;
+    const enc = extra?.videoFramesEncoded ?? this.origin.videoFramesEncoded ?? null;
+    const opened = extra?.openedRequestedVideoFrames ?? this.openedRequested.size;
+    const invariantOk = requestedEncodedInvariantHolds({
       unresolvedRequestedVideoFrames: unresolved,
-      streamWaiterIndex: waiter,
-      requestedVideoFrameCount: this.requestedIndexes.size,
-      resolvedRequestedVideoFrames: this.resolvedRequestedCount(),
-      videoFramesRequested: extra?.videoFramesRequested ?? this.origin.videoFramesRequested ?? null,
-      videoFramesDecoded: extra?.videoFramesDecoded ?? this.origin.videoFramesDecoded ?? null,
-      videoFramesEncoded: extra?.videoFramesEncoded ?? this.origin.videoFramesEncoded ?? null,
+      videoFramesRequested: req,
+      videoFramesEncoded: enc,
     });
+    const complete =
+      invariantOk &&
+      isTransactionComplete({
+        unresolvedRequestedVideoFrames: unresolved,
+        streamWaiterIndex: waiter,
+        requestedVideoFrameCount: opened,
+        resolvedRequestedVideoFrames: this.resolvedRequestedCount(),
+        openedRequestedVideoFrames: opened,
+        videoFramesRequested: req,
+        videoFramesDecoded: dec,
+        videoFramesEncoded: enc,
+      });
     return emptyStallSnapshot({
       decodeStartSample: this.streamMode ? this.streamDecodeStart : null,
       lastSubmittedSample: this.lastSubmittedSample,
@@ -232,6 +270,7 @@ export class AfeVideoDecoder {
       decodeQueueBeforeCancel: extra?.decodeQueueBeforeCancel ?? this.decodeQueueBeforeCancel,
       decoderResetForTransactionEnd:
         extra?.decoderResetForTransactionEnd ?? this.decoderResetForTransactionEnd,
+      openedRequestedVideoFrames: extra?.openedRequestedVideoFrames ?? opened,
       unresolvedRequestedVideoFrames: extra?.unresolvedRequestedVideoFrames ?? unresolved,
       transactionComplete: extra?.transactionComplete ?? complete,
     });
@@ -353,7 +392,10 @@ export class AfeVideoDecoder {
     this.streamDecodeStartBound = decodeStart;
     this.requestedIndexes.clear();
     this.sampleRoles.clear();
-    if (!bounds?.keepResolved) this.resolvedRequested.clear();
+    if (!bounds?.keepResolved) {
+      this.resolvedRequested.clear();
+      this.openedRequested.clear();
+    }
     this.speculativeSubmitted = 0;
     this.cancelledSpeculativeSamples = 0;
     this.decodeQueueBeforeCancel = null;
@@ -387,15 +429,20 @@ export class AfeVideoDecoder {
    * Never flush decodeQueueSize>0 speculative samples.
    */
   endStream(): void {
-    this.stallPhase = "TRANSACTION_END";
     this.streamMode = false;
     this.streamNeeded = null;
-    this.closeStreamFrames();
     const unresolvedRequested: number[] = [];
     const cancelled: number[] = [];
+    const leftoverReady = [...this.streamReady.keys()];
+    this.closeStreamFrames();
+    for (const index of leftoverReady) {
+      if (this.openedRequested.has(index) && !this.isResolvedRequested(index)) continue;
+      this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
+      cancelled.push(index);
+    }
     for (const index of this.streamPts.unresolved()) {
-      const role = this.roleOf(index) ?? this.classifySubmitted(index);
-      if (role === "REQUESTED" || (this.protectedIndexes.has(index) && this.requestedIndexes.has(index))) {
+      const openedUnresolved = this.openedRequested.has(index) && !this.isResolvedRequested(index);
+      if (openedUnresolved) {
         this.streamPts.mark(index, "ERROR");
         unresolvedRequested.push(index);
         continue;
@@ -403,22 +450,33 @@ export class AfeVideoDecoder {
       this.streamPts.mark(index, "DISCARDED_NOT_NEEDED");
       cancelled.push(index);
     }
+    for (const index of this.openedRequested) {
+      if (this.isResolvedRequested(index)) continue;
+      if (!unresolvedRequested.includes(index)) unresolvedRequested.push(index);
+    }
     this.streamPts.failPending("ERROR");
     this.cancelledSpeculativeSamples = cancelled.length;
     this.decodeQueueBeforeCancel = this.decodeQueueSize;
     const waiter = this.streamWaiter;
+    const openedUnresolved = unresolvedRequested.length;
     const complete =
-      unresolvedRequested.length === 0 &&
+      openedUnresolved === 0 &&
       waiter == null &&
       isTransactionComplete({
         unresolvedRequestedVideoFrames: 0,
         streamWaiterIndex: null,
+        openedRequestedVideoFrames: this.openedRequested.size,
+        requestedVideoFrameCount: this.openedRequested.size,
+        resolvedRequestedVideoFrames: this.resolvedRequestedCount(),
       });
-    if (waiter) {
+    if (waiter && openedUnresolved > 0) {
+      /* Keep the exact-PTS waiter identity for the stall dump. */
+    } else if (waiter) {
       this.streamWaiter = null;
       waiter.reject(new AfeError("AFE_DECODE_FAILED", "stream ended", false));
     }
-    if (complete || unresolvedRequested.length === 0) {
+    if (complete || openedUnresolved === 0) {
+      this.stallPhase = "TRANSACTION_END";
       this.abandonSpeculativeDecoder();
     }
     this.protectedIndexes.clear();
@@ -475,11 +533,12 @@ export class AfeVideoDecoder {
   }
 
   takeReady(index: number): VideoFrame | null {
+    this.openRequested(index);
     const frame = this.streamReady.get(index);
     if (!frame) return null;
     this.streamReady.delete(index);
     this.streamPts.mark(index, "RESOLVED");
-    if (this.requestedIndexes.has(index)) this.resolvedRequested.add(index);
+    this.markResolvedRequested(index);
     this.lastSampleResolved = index;
     return frame;
   }
@@ -508,7 +567,7 @@ export class AfeVideoDecoder {
     hooks?: AwaitReadyHooks,
   ): Promise<VideoFrame | null> {
     this.bindOrigin({ sourceSampleRequested: index, ...extra });
-    this.protectSample(index);
+    this.openRequested(index);
     if (!this.stallPhase) this.stallPhase = "WAIT_EXACT_PTS";
     const hit = this.takeReady(index);
     if (hit) return Promise.resolve(hit);
@@ -835,7 +894,7 @@ export class AfeVideoDecoder {
   private resolveStream(index: number, frame: VideoFrame): boolean {
     if (this.streamWaiter?.index === index) {
       this.streamPts.mark(index, "RESOLVED");
-      if (this.requestedIndexes.has(index)) this.resolvedRequested.add(index);
+      this.markResolvedRequested(index);
       this.lastSampleResolved = index;
       const w = this.streamWaiter;
       this.streamWaiter = null;

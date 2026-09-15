@@ -286,13 +286,13 @@ describe("AFE-08 A–I transaction end must not drain speculative decode", () =>
     expect(isExportTransactionComplete(dump)).toBe(true);
     const text = formatStallMessage(dump);
     expect(text).toContain("stallPhase TRANSACTION_END");
-    expect(text).toContain("videoReq 37");
-    expect(text).toContain("videoEnc 37");
+    expect(text).toContain("videoReq 37 (frame-count)");
+    expect(text).toContain("videoEnc 37 (frame-count)");
     expect(text).toContain("cancelledSpeculativeSamples 101");
     expect(text).toContain("decodeQueueBeforeCancel 124");
     expect(text).toContain("decoderResetForTransactionEnd true");
-    expect(text).toContain("lastRequested 36");
-    expect(text).toContain("lastRequiredDecode 42");
+    expect(text).toContain("lastRequestedSample 36 (sample-index)");
+    expect(text).toContain("lastRequiredDecodeSample 42 (sample-index)");
     expect(text).toContain("speculativeSubmitted 104");
     expect(text).toContain("transactionComplete true");
     expect(text).not.toMatch(/nearest|snap|neighbor|paintFallback|allowSkip/i);

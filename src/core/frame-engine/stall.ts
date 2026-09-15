@@ -100,6 +100,8 @@ export type AfeStallSnapshot = {
   cancelledSpeculativeSamples: number;
   decodeQueueBeforeCancel: number | null;
   decoderResetForTransactionEnd: boolean;
+  /** Presentation samples the export actually asked for (not the planned run set). */
+  openedRequestedVideoFrames: number;
   unresolvedRequestedVideoFrames: number;
   transactionComplete: boolean;
 };
@@ -164,6 +166,7 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     cancelledSpeculativeSamples: 0,
     decodeQueueBeforeCancel: null,
     decoderResetForTransactionEnd: false,
+    openedRequestedVideoFrames: 0,
     unresolvedRequestedVideoFrames: 0,
     transactionComplete: false,
     ...partial,
@@ -355,19 +358,39 @@ export function isTransactionComplete(args: {
   streamWaiterIndex: number | null;
   requestedVideoFrameCount?: number | null;
   resolvedRequestedVideoFrames?: number | null;
+  openedRequestedVideoFrames?: number | null;
   videoFramesRequested?: number | null;
   videoFramesDecoded?: number | null;
   videoFramesEncoded?: number | null;
 }): boolean {
-  if (args.unresolvedRequestedVideoFrames > 0) return false;
   if (args.streamWaiterIndex != null) return false;
-  const want = args.requestedVideoFrameCount;
+  if (args.unresolvedRequestedVideoFrames > 0) return false;
+  const opened = args.openedRequestedVideoFrames ?? args.requestedVideoFrameCount;
   const got = args.resolvedRequestedVideoFrames;
-  if (want != null && want > 0 && got != null && got < want) return false;
+  if (opened != null && opened > 0 && got != null && got < opened) return false;
   const req = args.videoFramesRequested;
   const dec = args.videoFramesDecoded;
   const enc = args.videoFramesEncoded;
   if (req != null && dec != null && enc != null && (req !== dec || dec !== enc)) return false;
+  return true;
+}
+
+/**
+ * One ledger: opened VIDEO presentation samples still open vs Enc/Req.
+ * `unresolvedRequested>0` with `Enc>=Req` is the AFE-09 contradiction — fail closed.
+ */
+export function requestedEncodedInvariantHolds(args: {
+  unresolvedRequestedVideoFrames: number;
+  videoFramesRequested?: number | null;
+  videoFramesEncoded?: number | null;
+}): boolean {
+  const unresolved = args.unresolvedRequestedVideoFrames;
+  const req = args.videoFramesRequested;
+  const enc = args.videoFramesEncoded;
+  if (unresolved < 0) return false;
+  if (req == null || enc == null) return true;
+  if (!Number.isFinite(req) || !Number.isFinite(enc) || req < 0 || enc < 0) return false;
+  if (unresolved > 0 && enc >= req) return false;
   return true;
 }
 
@@ -383,6 +406,13 @@ export function isExportTransactionComplete(dump: Partial<AfeStallSnapshot>): bo
   if (req !== dec || dec !== enc) return false;
   if (dump.streamWaiterIndex != null) return false;
   if ((dump.unresolvedRequestedVideoFrames ?? 0) > 0) return false;
+  if (!requestedEncodedInvariantHolds({
+    unresolvedRequestedVideoFrames: dump.unresolvedRequestedVideoFrames ?? 0,
+    videoFramesRequested: req,
+    videoFramesEncoded: enc,
+  })) {
+    return false;
+  }
   const nullRequest = dump.sourceSampleRequested == null && dump.requestedPtsUs == null;
   if (dump.stallPhase === "TRANSACTION_END" && (nullRequest || dump.transactionComplete === true)) {
     return true;
@@ -390,8 +420,9 @@ export function isExportTransactionComplete(dump: Partial<AfeStallSnapshot>): bo
   return isTransactionComplete({
     unresolvedRequestedVideoFrames: dump.unresolvedRequestedVideoFrames ?? 0,
     streamWaiterIndex: dump.streamWaiterIndex ?? null,
-    requestedVideoFrameCount: dump.lastRequestedSample != null ? 1 : null,
-    resolvedRequestedVideoFrames: dump.transactionComplete ? 1 : 0,
+    requestedVideoFrameCount: dump.openedRequestedVideoFrames ?? (dump.lastRequestedSample != null ? 1 : null),
+    resolvedRequestedVideoFrames: dump.transactionComplete ? (dump.openedRequestedVideoFrames ?? 1) : 0,
+    openedRequestedVideoFrames: dump.openedRequestedVideoFrames,
     videoFramesRequested: req,
     videoFramesDecoded: dec,
     videoFramesEncoded: enc,
@@ -458,15 +489,16 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `visFrames ${d.visFrames}`,
     `afeFrames ${d.afeFrames}`,
     `blackFrames ${d.blackFrames}`,
-    `videoReq ${d.videoFramesRequested}`,
-    `videoDec ${d.videoFramesDecoded}`,
-    `videoEnc ${d.videoFramesEncoded}`,
-    `lastRequested ${d.lastRequestedSample}`,
-    `lastRequiredDecode ${d.lastRequiredDecodeSample}`,
+    `videoReq ${d.videoFramesRequested} (frame-count)`,
+    `videoDec ${d.videoFramesDecoded} (frame-count)`,
+    `videoEnc ${d.videoFramesEncoded} (frame-count)`,
+    `lastRequestedSample ${d.lastRequestedSample} (sample-index)`,
+    `lastRequiredDecodeSample ${d.lastRequiredDecodeSample} (sample-index)`,
     `speculativeSubmitted ${d.speculativeSamplesSubmitted}`,
     `cancelledSpeculativeSamples ${d.cancelledSpeculativeSamples}`,
     `decodeQueueBeforeCancel ${d.decodeQueueBeforeCancel}`,
     `decoderResetForTransactionEnd ${d.decoderResetForTransactionEnd}`,
+    `openedRequested ${d.openedRequestedVideoFrames} (presentation asked)`,
     `unresolvedRequested ${d.unresolvedRequestedVideoFrames}`,
     `transactionComplete ${d.transactionComplete}`,
     `stalledMs ${d.stalledMs}`,
