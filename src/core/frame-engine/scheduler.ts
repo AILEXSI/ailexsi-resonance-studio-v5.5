@@ -234,8 +234,9 @@ export class AfeScheduler {
       try {
         while (this.nextDecode <= target) {
           if (this.decoder.isStreamReady(requested)) return;
-          await this.decoder.waitForDecodeCapacity(signal, { budgetEnd, requested });
+          const canSubmit = await this.decoder.waitForDecodeCapacity(signal, { budgetEnd, requested });
           if (this.decoder.isStreamReady(requested)) return;
+          if (!canSubmit) return;
           const sample = this.movie.samples[this.nextDecode];
           if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${this.nextDecode}`);
           this.decoder.submitEncoded(sample, signal);

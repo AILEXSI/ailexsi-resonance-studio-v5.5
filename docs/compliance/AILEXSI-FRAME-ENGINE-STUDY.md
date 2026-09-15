@@ -898,3 +898,24 @@ Windows AFE-10: ownership rebuilt, pump reached `lastRequired=96`, sample 38 PTS
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 → Req==Dec==Enc, unresolved 0, exact frame, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-12 — WebCodecs decodeQueue backpressure / queue progress (V5.5)
+
+Windows AFE-11: after recreate, AFE submitted through lastRequired while the decoder produced only to ~458333. CASE A 30fps: sample 38 PTS 1625000, Req47 Dec/Enc46, unresolved1, submitted140 lastRequired140, decodeQueue125, lastDecodedTs458333, pending includes 1625000, streamPts131 streamReady10 reorderCap10, FINAL_FLUSH yes. CASE B 25fps: sample140 PTS5875000, Req145 Dec/Enc144, submitted140 decodeQueue125, lastDecodedTs458333, pending[] streamPts0 cancelledSpeculative130. 30fps streamReady==reorderCap; 25fps streamReady==0 — not retained VideoFrames alone.
+
+## Cause
+
+`pumpThrough` called `VideoDecoder.decode()` in a tight loop with no `decodeQueueSize` gate. Progressive slices waited only for exact PTS (120ms), not decoder capacity. Unbounded `submitEncoded` reaches submitted140 / queue>=125 / lastDecoded stuck with `backpressureWaits` 0. FINAL_FLUSH then hung on a 125-deep hardware queue.
+
+## Fix
+
+1. TRACE (stall dump only): per-submit-phase `submitPhases` + aggregate `decodeQueueHighWater`, `decodeQueuePeak`, `submitsWithoutOutputProgress`, `backpressureWaits`, `backpressureBlocked`, `noMoreSubmission`, `lastOutputProgressTs`.
+2. `waitForDecodeCapacity` — HIGH_WATER pause on `decodeQueueSize`. Resume on dequeue / output / exact resolve. No busy loop, no arbitrary sleep, no mid-run flush.
+3. HIGH_WATER = min(CAP 48, max(RECOVERY_FILL 40, maxReorder + lookahead + bFrameNeed)) where bFrameNeed = lookahead + prefetch. Never near 125. No global PREFETCH bump.
+4. INVARIANT: no output progress + queue>=HIGH_WATER ⇒ NO_MORE_SUBMISSION until progress or typed stall. Before first recreate, HIGH_WATER stop hands off to STEP C GOP recover. After recreate, still-stuck HIGH_WATER is typed `AFE_DECODE_STALL`.
+5. After recreate: origin/keyframe, exact request, PTS ownership, decode-order pump, respect backpressure, stop on exact PTS. FINAL_FLUSH only per AFE-11 (unlikely to begin with queue~125).
+6. CANCEL: AFE-08 rules; backpressure does not reset an unresolved exact request. No VIDEO fallback.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 / CASE A 30fps and CASE B 25fps → Req==Dec==Enc, unresolved 0, decodeQueue never ~125, exact frame, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+

@@ -150,16 +150,18 @@ describe("AFE-12 A–L WebCodecs decodeQueue backpressure / queue progress", () 
     decoder.beginSubmitPhase("PUMP_LOOKAHEAD", 0);
     const high = decoder.decodeQueueHighWater;
     let submitted = -1;
-    let stalled = false;
-    try {
-      for (let i = 0; i <= 140; i++) {
-        await decoder.waitForDecodeCapacity(undefined, { requested: 38, budgetEnd: nowMs() + 200 });
-        decoder.submitEncoded(movie.samples[i]!);
-        submitted = i;
+    let blocked = false;
+    for (let i = 0; i <= 140; i++) {
+      const canSubmit = await decoder.waitForDecodeCapacity(undefined, {
+        requested: 38,
+        budgetEnd: nowMs() + 200,
+      });
+      if (!canSubmit) {
+        blocked = true;
+        break;
       }
-    } catch (e) {
-      expect(e).toMatchObject({ name: "AfeError", code: "AFE_DECODE_STALL" });
-      stalled = true;
+      decoder.submitEncoded(movie.samples[i]!);
+      submitted = i;
     }
     decoder.endSubmitPhase();
     const dump = decoder.snapshot();
@@ -168,7 +170,7 @@ describe("AFE-12 A–L WebCodecs decodeQueue backpressure / queue progress", () 
     expect(dump.decodeQueueSize).toBeLessThan(125);
     expect(submitted).toBeLessThan(140);
     expect(submitted).toBeGreaterThanOrEqual(high - 1);
-    expect(dump.noMoreSubmission === true || stalled).toBe(true);
+    expect(blocked || dump.noMoreSubmission).toBe(true);
     expect(dump.lastSubmittedSample).toBeLessThan(140);
     decoder.close();
   }, 10_000);

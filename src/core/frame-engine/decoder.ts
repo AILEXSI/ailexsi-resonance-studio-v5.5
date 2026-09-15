@@ -15,7 +15,6 @@ import {
   requestedEncodedInvariantHolds,
   mayFinalFlush,
   maySubmitEncoded,
-  noMoreSubmissionRequired,
   nowMs,
   originFromStall,
   requestOwnershipHolds,
@@ -304,16 +303,20 @@ export class AfeVideoDecoder {
    * Pause when decodeQueueSize >= HIGH_WATER and there is no output progress.
    * Resumes on dequeue, VideoFrame output, or exact-PTS resolve.
    * No busy loop. No arbitrary sleep. No mid-run flush.
+   *
+   * Returns false when the caller must not submit more. Before the first
+   * recreate, that is a stop-for-STEP-C signal (do not 3s-stall). After
+   * recreate, a still-stuck HIGH_WATER queue is a typed AFE_DECODE_STALL.
    */
   async waitForDecodeCapacity(
     signal?: AbortSignal,
     opts?: { budgetEnd?: number; requested?: number },
-  ): Promise<void> {
+  ): Promise<boolean> {
     throwIfAborted(signal);
     const high = this.decodeQueueHighWater;
     this.noteQueuePeak();
     const requested = opts?.requested;
-    if (requested != null && this.streamReady.has(requested)) return;
+    if (requested != null && this.streamReady.has(requested)) return true;
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
     if (
       maySubmitEncoded({
@@ -324,20 +327,13 @@ export class AfeVideoDecoder {
     ) {
       this.noMoreSubmission = false;
       this.backpressureBlocked = false;
-      return;
+      return true;
     }
-    if (
-      noMoreSubmissionRequired({
-        decodeQueueSize: this.decodeQueueSize,
-        highWater: high,
-        outputProgressed: false,
-      })
-    ) {
-      this.noMoreSubmission = true;
-    }
+    this.noMoreSubmission = true;
     this.backpressureWaitCount += 1;
     this.backpressureBlocked = true;
     if (this.openSubmitPhase) this.openSubmitPhase.pausedForCapacity = true;
+    if (this.recreateCount === 0) return false;
     const tsAtPause = this.lastVideoFrameTimestamp;
     const deadline = opts?.budgetEnd ?? nowMs() + AFE_DECODE_STALL_MS;
     const dec = this.decoder;
@@ -346,7 +342,7 @@ export class AfeVideoDecoder {
       if (requested != null && this.streamReady.has(requested)) {
         this.backpressureBlocked = false;
         this.noMoreSubmission = false;
-        return;
+        return true;
       }
       if (this.lastError) throw this.lastError;
       const remain = deadline - nowMs();
@@ -362,22 +358,23 @@ export class AfeVideoDecoder {
           throw err;
         }
         this.backpressureBlocked = false;
-        return;
+        return this.decodeQueueSize < high;
       }
       const reason = await this.waitCapacitySignal(dec, signal, remain);
       if (reason === "exact" || (requested != null && this.streamReady.has(requested))) {
         this.backpressureBlocked = false;
         this.noMoreSubmission = false;
-        return;
+        return true;
       }
       if (this.lastVideoFrameTimestamp !== tsAtPause || this.decodeQueueSize < high) {
         this.noMoreSubmission = false;
         this.backpressureBlocked = this.decodeQueueSize >= high;
-        if (this.decodeQueueSize < high) return;
+        if (this.decodeQueueSize < high) return true;
       }
     }
     this.backpressureBlocked = false;
     this.noMoreSubmission = false;
+    return true;
   }
 
   private waitCapacitySignal(
