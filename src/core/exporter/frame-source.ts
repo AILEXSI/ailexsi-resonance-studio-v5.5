@@ -28,6 +28,7 @@ export type OpenedDecoder = {
   ): AsyncIterable<DrawableFrame | null>;
   close(): void;
   stallSnapshot(extra?: Partial<AfeStallSnapshot>): AfeStallSnapshot | null;
+  setExportStallExtra(extra: Partial<AfeStallSnapshot>): void;
 };
 
 let frameSourceBackend: FrameSourceBackendId = "ailexsi";
@@ -75,6 +76,9 @@ function wrapOpened(source: OpenedFrameSource): OpenedDecoder {
     },
     stallSnapshot(extra?: Partial<AfeStallSnapshot>) {
       return source.stallSnapshot?.(extra) ?? null;
+    },
+    setExportStallExtra(extra: Partial<AfeStallSnapshot>) {
+      source.setExportStallExtra?.(extra);
     },
   };
 }

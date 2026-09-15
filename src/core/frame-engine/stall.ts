@@ -7,13 +7,31 @@
  */
 
 export const AFE_DECODE_STALL_MS = 3000;
+/** No-progress window before one releaseHeld() nudge. Do not raise prefetch instead. */
+export const AFE_STALL_NUDGE_MS = 200;
+/** Brief wait after the single nudge before skip-or-stall. */
+export const AFE_STALL_NUDGE_WAIT_MS = 250;
+/** Cap queue-drain spin so Shape Q (held decodeQueue) can still reach flush(). */
+export const AFE_SETTLE_DRAIN_MS = 80;
 
 export type SampleFate = "PENDING" | "RESOLVED" | "DISCARDED_NOT_NEEDED" | "ERROR" | "ABORTED";
+
+export type AfeDumpPictureKind = "vis" | "video" | "black";
 
 export type AfeStallSnapshot = {
   exportFrameIndex: number | null;
   exportTimestampSec: number | null;
   sourceClipId: string | null;
+  sourceClipLabel: string | null;
+  sourceUrlName: string | null;
+  sourceInMs: number | null;
+  sourceOutMs: number | null;
+  timelineMs: number | null;
+  pictureKind: AfeDumpPictureKind | null;
+  fps: number | null;
+  visFrames: number | null;
+  afeFrames: number | null;
+  blackFrames: number | null;
   sourceSampleRequested: number | null;
   requestedPtsUs: number | null;
   decodeStartSample: number | null;
@@ -43,6 +61,16 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     exportFrameIndex: null,
     exportTimestampSec: null,
     sourceClipId: null,
+    sourceClipLabel: null,
+    sourceUrlName: null,
+    sourceInMs: null,
+    sourceOutMs: null,
+    timelineMs: null,
+    pictureKind: null,
+    fps: null,
+    visFrames: null,
+    afeFrames: null,
+    blackFrames: null,
     sourceSampleRequested: null,
     requestedPtsUs: null,
     decodeStartSample: null,
@@ -134,6 +162,7 @@ export function legacyPumpSubmitEnd(args: PumpSubmitArgs): number {
 }
 
 export function formatStallMessage(dump: AfeStallSnapshot): string {
+  const clip = dump.sourceClipLabel ?? dump.sourceClipId;
   return [
     `requested sample ${dump.sourceSampleRequested} PTS ${dump.requestedPtsUs}`,
     `pending PTS [${dump.pendingPts.join(",")}]`,
@@ -152,9 +181,35 @@ export function formatStallMessage(dump: AfeStallSnapshot): string {
     `resets ${dump.decoderResetCount}`,
     `encoderQ ${dump.encoderEncodeQueueSize}`,
     `exportFrame ${dump.exportFrameIndex}`,
-    `clip ${dump.sourceClipId}`,
+    `clip ${clip}`,
+    `clipId ${dump.sourceClipId}`,
+    `source ${dump.sourceUrlName}`,
+    `sourceInMs ${dump.sourceInMs}`,
+    `sourceOutMs ${dump.sourceOutMs}`,
+    `timelineMs ${dump.timelineMs}`,
+    `picture ${dump.pictureKind}`,
+    `fps ${dump.fps}`,
+    `visFrames ${dump.visFrames}`,
+    `afeFrames ${dump.afeFrames}`,
+    `blackFrames ${dump.blackFrames}`,
     `stalledMs ${dump.stalledMs}`,
   ].join("; ");
+}
+
+/** Host-safe leaf name only — no path, user folder, or query. */
+export function hostSafeSourceName(sourceUrl: string | undefined | null): string {
+  if (!sourceUrl) return "source";
+  const trimmed = sourceUrl.trim();
+  if (!trimmed) return "source";
+  const noQuery = trimmed.split("?")[0] ?? trimmed;
+  const leaf = noQuery.split(/[\\/]/).filter(Boolean).pop() ?? noQuery;
+  const cleaned = leaf.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned || "source";
+}
+
+export function requestedPtsIsPending(pendingPts: readonly number[], requestedPtsUs: number | null): boolean {
+  if (requestedPtsUs == null) return false;
+  return pendingPts.includes(requestedPtsUs);
 }
 
 export function nowMs(): number {

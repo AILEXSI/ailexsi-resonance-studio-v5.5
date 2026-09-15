@@ -15,6 +15,8 @@ export type { ParsedBox, ParsedCtts } from "./mp4-reader";
 export { parseAvcC, decoderConfigOf } from "./avc-config";
 export { buildSampleTable } from "./sample-table";
 export { DecodedFrameCache } from "./cache";
+export { AfeVideoDecoder } from "./decoder";
+export type { AwaitReadyHooks } from "./decoder";
 export { AfeScheduler, AfeDrawable, getAfeSequentialPrefetch, setAfeSequentialPrefetch } from "./scheduler";
 export {
   planSampleIndexes,
@@ -33,14 +35,19 @@ export {
 } from "./frame-match";
 export {
   AFE_DECODE_STALL_MS,
+  AFE_SETTLE_DRAIN_MS,
+  AFE_STALL_NUDGE_MS,
+  AFE_STALL_NUDGE_WAIT_MS,
   emptyStallSnapshot,
   formatStallMessage,
+  hostSafeSourceName,
   legacyPumpSubmitEnd,
   nowMs,
   pumpSubmitEnd,
+  requestedPtsIsPending,
   streamLookaheadSamples,
 } from "./stall";
-export type { AfeStallSnapshot, PumpSubmitArgs, SampleFate } from "./stall";
+export type { AfeDumpPictureKind, AfeStallSnapshot, PumpSubmitArgs, SampleFate } from "./stall";
 export {
   samplePtsToChunkTimestampUs,
   sampleDurationToChunkDurationUs,

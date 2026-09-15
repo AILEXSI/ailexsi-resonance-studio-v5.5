@@ -70,6 +70,9 @@ export interface ExportProgress {
   percent: number;
   stage: string;
   currentTimeMs?: number;
+  visFrames?: number;
+  afeFrames?: number;
+  blackFrames?: number;
 }
 
 export type ExportAudioKind = "aac" | "wav" | "none";

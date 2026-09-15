@@ -31,6 +31,7 @@
     "tests/export/afe-bframe-memory.test.ts",
     "tests/export/afe-bframe-pixels.test.ts",
     "tests/export/afe-bframe-hard.test.ts",
-    "tests/export/afe-stall-watchdog.test.ts"
+    "tests/export/afe-stall-watchdog.test.ts",
+    "tests/export/afe-stall-nudge.test.ts"
   ]
 }
