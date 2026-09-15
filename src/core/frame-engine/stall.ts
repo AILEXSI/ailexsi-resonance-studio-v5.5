@@ -22,6 +22,19 @@ export const AFE_SETTLE_DRAIN_MS = 80;
 /** Watchdog around the one allowed FINAL_FLUSH / DECODER_DRAIN. */
 export const AFE_FLUSH_WATCHDOG_MS = AFE_DECODE_STALL_MS;
 
+/**
+ * Hard ceiling for WebCodecs decodeQueue HIGH_WATER.
+ * Windows AFE-12 flood was decodeQueue 125 — never approach that.
+ */
+export const AFE_DECODE_QUEUE_HIGH_WATER_CAP = 48;
+
+/**
+ * Minimum recovery fill that must be legal after GOP recreate.
+ * Windows AFE-10: WebView2 held sample 38 until ~36–44 decode-order submits.
+ * 40 admits that one fill. 40 is far below the Windows flood of 125.
+ */
+export const AFE_DECODE_QUEUE_RECOVERY_FILL = 40;
+
 export type SampleFate = "PENDING" | "READY" | "RESOLVED" | "DISCARDED_NOT_NEEDED" | "ERROR" | "ABORTED";
 
 /** Decode-order sample class for AFE-08 submit / cancel. */
@@ -135,6 +148,34 @@ export type AfeStallSnapshot = {
   finalFlushArmed: boolean;
   /** lastSubmitted >= lastRequired and no further useful input remains. */
   usefulInputExhausted: boolean;
+  /** AFE-12: WebCodecs decodeQueue HIGH_WATER (derived, never near 125). */
+  decodeQueueHighWater: number;
+  /** Peak decodeQueueSize observed this transaction. */
+  decodeQueuePeak: number;
+  /** Consecutive submits while lastDecodedTs stayed unchanged. */
+  submitsWithoutOutputProgress: number;
+  /** Times waitForDecodeCapacity paused at HIGH_WATER. */
+  backpressureWaitCount: number;
+  /** Currently paused at HIGH_WATER with no submit. */
+  backpressureBlocked: boolean;
+  /** INVARIANT: no output progress + queue>=HIGH_WATER → no more submit. */
+  noMoreSubmission: boolean;
+  lastOutputProgressTimestamp: number | null;
+  /** Compact per-pump traces (phase + queue + lastDecoded). */
+  submitPhaseTraces: SubmitPhaseTrace[];
+};
+
+/** One pumpThrough / recovery slice — stall dump only, no production spam. */
+export type SubmitPhaseTrace = {
+  phase: AfeStallPhase;
+  submittedFrom: number | null;
+  submittedTo: number | null;
+  decodeQueueStart: number;
+  decodeQueueEnd: number;
+  lastDecodedStart: number | null;
+  lastDecodedEnd: number | null;
+  pausedForCapacity: boolean;
+  outputProgressed: boolean;
 };
 
 export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStallSnapshot {
@@ -210,6 +251,14 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     finalFlushAttempted: false,
     finalFlushArmed: false,
     usefulInputExhausted: false,
+    decodeQueueHighWater: 0,
+    decodeQueuePeak: 0,
+    submitsWithoutOutputProgress: 0,
+    backpressureWaitCount: 0,
+    backpressureBlocked: false,
+    noMoreSubmission: false,
+    lastOutputProgressTimestamp: null,
+    submitPhaseTraces: [],
     ...partial,
   };
 }
@@ -224,6 +273,60 @@ export function streamLookaheadSamples(maxReorderSamples: number, prefetch: numb
   const pref = Math.max(1, prefetch | 0);
   if (reorder <= 0) return pref;
   return Math.min(16, Math.max(pref, reorder + 1, Math.min(16, reorder + 4)));
+}
+
+/**
+ * WebCodecs decodeQueue HIGH_WATER (AFE-12).
+ *
+ * Formula:
+ *   HIGH_WATER = min(CAP, max(RECOVERY_FILL, maxReorder + lookahead + bFrameNeed))
+ *   lookahead    = streamLookaheadSamples(maxReorder, prefetch)
+ *   bFrameNeed   = lookahead + prefetch
+ *                  extra decode-order samples a B-frame / hardware DPB may
+ *                  require beyond maxReorder before the next output
+ *   RECOVERY_FILL = 40
+ *                  Windows AFE-10 held sample 38 until ~36–44 submits after
+ *                  recreate. One recovery fill must be legal. Not a PREFETCH bump.
+ *   CAP           = 48
+ *                  never near the Windows AFE-12 flood of decodeQueue 125
+ *
+ * Typical prefetch=4, maxReorder=2 → lookahead=6 → raw=2+6+6+4=18 → HIGH_WATER=40.
+ * High reorder=16 → lookahead=16 → raw=16+16+16+4=52 → HIGH_WATER=48.
+ */
+export function decodeQueueHighWater(maxReorderSamples: number, prefetch: number): number {
+  const reorder = Math.max(0, maxReorderSamples | 0);
+  const pref = Math.max(1, prefetch | 0);
+  const look = streamLookaheadSamples(reorder, pref);
+  const bFrameNeed = look + pref;
+  const raw = reorder + look + bFrameNeed;
+  return Math.min(
+    AFE_DECODE_QUEUE_HIGH_WATER_CAP,
+    Math.max(AFE_DECODE_QUEUE_RECOVERY_FILL, raw),
+  );
+}
+
+/**
+ * Submit is allowed unless the decoder is at HIGH_WATER with no output
+ * progress. Then NO_MORE_SUBMISSION until dequeue / output / exact resolve
+ * or a typed stall.
+ */
+export function maySubmitEncoded(args: {
+  decodeQueueSize: number;
+  highWater: number;
+  outputProgressed: boolean;
+}): boolean {
+  if (args.decodeQueueSize < args.highWater) return true;
+  if (args.outputProgressed) return true;
+  return false;
+}
+
+/** INVARIANT: no output progress + queue>=HIGH_WATER → do not submit. */
+export function noMoreSubmissionRequired(args: {
+  decodeQueueSize: number;
+  highWater: number;
+  outputProgressed: boolean;
+}): boolean {
+  return args.decodeQueueSize >= args.highWater && !args.outputProgressed;
 }
 
 export type PumpSubmitArgs = {
@@ -636,8 +739,26 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `FINAL_FLUSH ${d.finalFlushAttempted || d.finalFlushArmed ? "yes" : "no"}`,
     `finalFlushArmed ${d.finalFlushArmed ? "yes" : "no"}`,
     `usefulInputExhausted ${d.usefulInputExhausted ? "yes" : "no"}`,
+    `decodeQueueHighWater ${d.decodeQueueHighWater}`,
+    `decodeQueuePeak ${d.decodeQueuePeak}`,
+    `submitsWithoutOutputProgress ${d.submitsWithoutOutputProgress}`,
+    `backpressureWaits ${d.backpressureWaitCount}`,
+    `backpressureBlocked ${d.backpressureBlocked ? "yes" : "no"}`,
+    `noMoreSubmission ${d.noMoreSubmission ? "yes" : "no"}`,
+    `lastOutputProgressTs ${d.lastOutputProgressTimestamp}`,
+    `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
     `stalledMs ${d.stalledMs}`,
   ].join("; ");
+}
+
+function formatSubmitPhaseTraces(traces: readonly SubmitPhaseTrace[]): string {
+  if (!traces.length) return "[]";
+  return traces
+    .map(
+      (t) =>
+        `${t.phase}:${t.submittedFrom}-${t.submittedTo}/q${t.decodeQueueStart}->${t.decodeQueueEnd}/ts${t.lastDecodedStart}->${t.lastDecodedEnd}${t.pausedForCapacity ? "/paused" : ""}${t.outputProgressed ? "/progress" : ""}`,
+    )
+    .join("|");
 }
 
 /** Host-safe leaf name only — no path, user folder, or query. */

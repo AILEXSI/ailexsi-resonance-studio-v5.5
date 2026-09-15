@@ -36,12 +36,15 @@ export {
 } from "./frame-match";
 export {
   AFE_DECODE_STALL_MS,
+  AFE_DECODE_QUEUE_HIGH_WATER_CAP,
+  AFE_DECODE_QUEUE_RECOVERY_FILL,
   AFE_FLUSH_WATCHDOG_MS,
   AFE_SETTLE_DRAIN_MS,
   AFE_STALL_NUDGE_MS,
   AFE_STALL_NUDGE_WAIT_MS,
   AFE_WAIT_EXACT_PTS_MS,
   classifySampleRole,
+  decodeQueueHighWater,
   emptyStallSnapshot,
   formatStallMessage,
   hasFurtherUsefulInput,
@@ -53,6 +56,8 @@ export {
   lastRequiredDecodeSample,
   legacyPumpSubmitEnd,
   mayFinalFlush,
+  maySubmitEncoded,
+  noMoreSubmissionRequired,
   usefulInputExhausted,
   nowMs,
   originFromStall,
@@ -74,6 +79,7 @@ export type {
   RequestOwnershipState,
   SampleFate,
   SampleRole,
+  SubmitPhaseTrace,
 } from "./stall";
 export {
   samplePtsToChunkTimestampUs,

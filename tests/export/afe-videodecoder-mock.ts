@@ -761,3 +761,179 @@ export function installRecoverThenNeverEmitDecoder(): () => void {
   RecoverThenNeverEmitDecoder.instances = 0;
   return installDecoderCtor(RecoverThenNeverEmitDecoder);
 }
+
+/**
+ * AFE-12: emit the first `emitLimit` chunks via microtask, then stick if
+ * decodeQueue reached `floodStickAt` before those emits ran (sync flood).
+ * If the producer waits (queue stays below floodStickAt), keep emitting.
+ * First instance holds so the scheduler GOP-recreates.
+ */
+export class RecoverThenFloodStuckDecoder {
+  static instances = 0;
+  static emitLimit = 12;
+  static floodStickAt = 64;
+  readonly born: number;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  emitted = 0;
+  stuck = false;
+  closed = false;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+    this.born = RecoverThenFloodStuckDecoder.instances++;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+    if (this.born === 0) return;
+    if (
+      this.decodeQueueSize >= RecoverThenFloodStuckDecoder.floodStickAt &&
+      this.emitted >= RecoverThenFloodStuckDecoder.emitLimit
+    ) {
+      this.stuck = true;
+      return;
+    }
+    queueMicrotask(() => this.tryEmit());
+  }
+
+  tryEmit(): void {
+    if (this.closed || this.stuck) return;
+    if (
+      this.decodeQueueSize >= RecoverThenFloodStuckDecoder.floodStickAt &&
+      this.emitted >= RecoverThenFloodStuckDecoder.emitLimit
+    ) {
+      this.stuck = true;
+      return;
+    }
+    if (this.emitted >= this.submitted.length) return;
+    this.output(new FakeVideoFrame(this.submitted[this.emitted++]!));
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+    for (const fn of this.listeners) fn();
+    if (this.emitted < this.submitted.length && !this.stuck) {
+      queueMicrotask(() => this.tryEmit());
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.stuck) {
+      return new Promise(() => {
+        /* hang — flood-stuck hardware does not drain */
+      });
+    }
+    while (this.emitted < this.submitted.length) {
+      this.output(new FakeVideoFrame(this.submitted[this.emitted++]!));
+    }
+    this.decodeQueueSize = 0;
+    for (const fn of this.listeners) fn();
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.emitted = 0;
+    this.decodeQueueSize = 0;
+    this.stuck = false;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installRecoverThenFloodStuckDecoder(opts?: {
+  emitLimit?: number;
+  floodStickAt?: number;
+}): () => void {
+  RecoverThenFloodStuckDecoder.instances = 0;
+  RecoverThenFloodStuckDecoder.emitLimit = opts?.emitLimit ?? 12;
+  RecoverThenFloodStuckDecoder.floodStickAt = opts?.floodStickAt ?? 64;
+  return installDecoderCtor(RecoverThenFloodStuckDecoder);
+}
+
+/**
+ * AFE-12 hypothesis proof: emit first `emitLimit` synchronously, hold the
+ * rest in decodeQueue, hang on flush. Models submitted140 / queue125 /
+ * lastDecoded stuck without any capacity wait.
+ */
+export class EmitThenHoldFloodDecoder {
+  static emitLimit = 12;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  emitted = 0;
+  closed = false;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    if (this.emitted < EmitThenHoldFloodDecoder.emitLimit) {
+      this.output(new FakeVideoFrame(chunk.timestamp));
+      this.emitted += 1;
+    }
+    this.decodeQueueSize = Math.max(0, this.submitted.length - EmitThenHoldFloodDecoder.emitLimit);
+    for (const fn of this.listeners) fn();
+  }
+
+  async flush(): Promise<void> {
+    return new Promise(() => {
+      /* hang */
+    });
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.emitted = 0;
+    this.decodeQueueSize = 0;
+  }
+
+  close(): void {
+    this.closed = true;
+    this.decodeQueueSize = 0;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installEmitThenHoldFloodDecoder(emitLimit = 12): () => void {
+  EmitThenHoldFloodDecoder.emitLimit = emitLimit;
+  return installDecoderCtor(EmitThenHoldFloodDecoder);
+}
