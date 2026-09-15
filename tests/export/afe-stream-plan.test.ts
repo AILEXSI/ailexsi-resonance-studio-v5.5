@@ -2,10 +2,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   isMonotonicRun,
+  isPresentationRun,
+  maxDecodeIndex,
   parseIsoBmff,
   planDecodeSpan,
   planSampleIndexes,
   sampleIndexAtTime,
+  shouldSplitPresentationRun,
 } from "../../src/core/frame-engine";
 
 describe("AFE-03 precomputed sequential plan", () => {
@@ -50,5 +53,15 @@ describe("AFE-03 precomputed sequential plan", () => {
     expect(isMonotonicRun([0, 2, 1], 0, 3)).toBe(false);
     expect(isMonotonicRun([5, 5, 6], 0, 3)).toBe(true);
     expect(isMonotonicRun([1, null, 2], 0, 3)).toBe(false);
+  });
+});
+
+describe("AFE-04 presentation-run grouping (B-frame wobble vs true seek)", () => {
+  it("keeps IBBP decode-index wobble in one run and splits a prior-GOP seek", () => {
+    const movie = parseIsoBmff(new Uint8Array(readFileSync("tests/fixtures/afe/afe-cfr-30-g30-2s.mp4")));
+    expect(shouldSplitPresentationRun(movie, 3, 1)).toBe(false);
+    expect(shouldSplitPresentationRun(movie, 40, 5)).toBe(true);
+    expect(isPresentationRun(movie, [0, 2, 3, 1], 0, 4)).toBe(true);
+    expect(maxDecodeIndex([0, 2, 3, 1], 0, 4)).toBe(3);
   });
 });

@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+  <!-- AFE-04 B-frame / varying CTTS pixel harness. Dev-only. Not under public/. -->
+  <head>
+    <meta charset="utf-8" />
+    <title>AFE-04 B-frame harness</title>
+    <style>
+      body { font-family: ui-monospace, monospace; background: #111; color: #ddd; margin: 16px; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>AILEXSI Frame Engine — AFE-04 B-frame barcode identity</h1>
+    <pre id="out">starting</pre>
+    <script type="module">
+      import { createFrameSourceBackend, isAfeError } from "/src/core/frame-engine/index.ts";
+      import { expectedFrameAtSec, classifyFrameHit, readBarcodeFromImageData } from "/scripts/afe-shared.mjs";
+      import { sequentialTimes, randomTimes } from "/tests/export/afe-plan.ts";
+
+      const out = document.getElementById("out");
+      const RECEIVE = "http://127.0.0.1:" + (new URLSearchParams(location.search).get("receive") || "18768");
+
+      function show(text) {
+        out.textContent = text;
+        document.title = text.split("\n")[0].slice(0, 80);
+        window.__AFE04_TEXT = text;
+      }
+
+      async function report(path, body) {
+        try {
+          await fetch(RECEIVE + path, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } catch {
+          /* optional */
+        }
+      }
+
+      function makeCanvas(w, h) {
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        return canvas;
+      }
+
+      function readCanvas(canvas) {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        return readBarcodeFromImageData(img.data, canvas.width);
+      }
+
+      async function paintBatch(src, times, width, height, fps, frames) {
+        const opened = await createFrameSourceBackend("ailexsi").open(src);
+        const canvas = makeCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        const rows = [];
+        let i = 0;
+        try {
+          for await (const sample of opened.getFramesAt(times)) {
+            const t = times[i++];
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, width, height);
+            if (!sample) {
+              rows.push({ t, expected: expectedFrameAtSec(t, fps), actual: null, class: "UNKNOWN" });
+              continue;
+            }
+            sample.draw(ctx, 0, 0, width, height);
+            sample.close();
+            const actual = readCanvas(canvas);
+            const expected = expectedFrameAtSec(t, fps);
+            const klass = classifyFrameHit(expected, actual);
+            rows.push({ t, expected, actual, class: klass });
+          }
+        } finally {
+          opened.close();
+        }
+        return rows;
+      }
+
+      async function paintRandom(src, times, width, height, fps) {
+        const opened = await createFrameSourceBackend("ailexsi").open(src);
+        const canvas = makeCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        const rows = [];
+        try {
+          for (const t of times) {
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, width, height);
+            const sample = await opened.getFrameAt(t);
+            if (!sample) {
+              rows.push({ t, expected: expectedFrameAtSec(t, fps), actual: null, class: "UNKNOWN" });
+              continue;
+            }
+            sample.draw(ctx, 0, 0, width, height);
+            sample.close();
+            const actual = readCanvas(canvas);
+            const expected = expectedFrameAtSec(t, fps);
+            rows.push({ t, expected, actual, class: classifyFrameHit(expected, actual) });
+          }
+        } finally {
+          opened.close();
+        }
+        return rows;
+      }
+
+      try {
+        show("loading manifest");
+        const manifest = await (await fetch("/tests/fixtures/afe/manifest.json")).json();
+        const files = manifest.files.filter((f) => (f.width ?? 160) <= 160 && (f.id.includes("bframe") || f.id === "afe-cfr-30-g30-2s"));
+        const wide = manifest.files.find((f) => f.id === "afe-bframe-30-g30-720p-2s");
+        const all = [];
+        for (const file of files) {
+          show("sequential " + file.id);
+          const url = new URL("/" + file.path, location.origin).href;
+          const seq = sequentialTimes(file);
+          const rows = await paintBatch(url, seq, file.width ?? 160, file.height ?? 90, file.fps, file.frames);
+          all.push(...rows.map((r) => ({ ...r, file: file.id, pattern: "sequential" })));
+          show("random " + file.id);
+          const rand = randomTimes(file, 40, 0xafe04);
+          const rrows = await paintRandom(url, rand, file.width ?? 160, file.height ?? 90, file.fps);
+          all.push(...rrows.map((r) => ({ ...r, file: file.id, pattern: "random" })));
+        }
+        if (wide && typeof VideoDecoder !== "undefined") {
+          show("720p B-frame sequential");
+          const url = new URL("/" + wide.path, location.origin).href;
+          const seq = sequentialTimes(wide);
+          const rows = await paintBatch(url, seq, 1280, 720, 30, wide.frames);
+          all.push(...rows.map((r) => ({ ...r, file: wide.id, pattern: "sequential-720p" })));
+        }
+
+        const counts = { EXACT: 0, "WITHIN 1 FRAME": 0, ">1 FRAME ERROR": 0, UNKNOWN: 0 };
+        for (const row of all) counts[row.class] = (counts[row.class] ?? 0) + 1;
+        const exact = counts.EXACT;
+        const compared = all.length;
+        const wrong = compared - exact;
+        const summary = {
+          classification: wrong === 0 ? "AFE-04-PIXEL-EXACT" : "AFE-04-PIXEL-FAIL",
+          humanProven: false,
+          pixels: {
+            compared,
+            exact,
+            within1: counts["WITHIN 1 FRAME"],
+            wrong: counts[">1 FRAME ERROR"] + counts.UNKNOWN,
+            snap: 0,
+            substitution: 0,
+            counts,
+          },
+          files: files.map((f) => f.id),
+          environment: { userAgent: navigator.userAgent, webCodecs: typeof VideoDecoder !== "undefined" },
+        };
+        window.__AFE04_RESULT = summary;
+        show("AFE04_DONE compared=" + compared + " exact=" + exact + " wrong=" + wrong);
+        await report("/afe-results", summary);
+      } catch (e) {
+        const err = { error: e instanceof Error ? e.message : String(e), afe: isAfeError(e) ? e.code : null };
+        window.__AFE04_RESULT = err;
+        show("AFE04_FAIL " + err.error);
+        await report("/afe-results", err);
+      }
+    </script>
+  </body>
+</html>

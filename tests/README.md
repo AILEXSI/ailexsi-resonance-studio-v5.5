@@ -9,7 +9,7 @@ Suites by area:
 - timeline (edit, zoom, markers, clip preview)
 - persistence (project-file, last-project, Speichern vs Speichern unter + Tauri `lastPath`)
 - preview / playback
-- export (dialog, destination, aac-mux, filename-version / export-name `.vN`)
+- export (dialog, destination, aac-mux, filename-version / export-name `.vN`, AFE CTTS/B-frame)
 - visualizer
 - mixer / volume
 - layout (**dynamic-audio-lanes**, **mixer-resize**, **track-groups**, **volume-automation**)

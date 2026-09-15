@@ -26,6 +26,9 @@
     "tests/v55/mediabunny-absent.test.ts",
     "tests/v55/identity.test.ts",
     "tests/export/afe-cache-abort.test.ts",
-    "tests/export/afe-stream-plan.test.ts"
+    "tests/export/afe-stream-plan.test.ts",
+    "tests/export/afe-bframe.test.ts",
+    "tests/export/afe-bframe-memory.test.ts",
+    "tests/export/afe-bframe-pixels.test.ts"
   ]
 }

@@ -1,4 +1,5 @@
 import { AfeError } from "./errors";
+import { addTimescale } from "./frame-match";
 import type { AfeSample } from "./types";
 
 export interface RawSampleTables {
@@ -59,10 +60,17 @@ export function buildSampleTable(tables: RawSampleTables): AfeSample[] {
   if (tables.ctts && tables.ctts.length > 0) {
     cttsOffsets = [];
     for (const e of tables.ctts) {
+      if (e.count <= 0) throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "ctts count <= 0");
+      if (!Number.isSafeInteger(e.offset)) {
+        throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "ctts offset is not a safe integer");
+      }
       for (let i = 0; i < e.count; i++) cttsOffsets.push(e.offset);
     }
     if (cttsOffsets.length !== tables.sampleCount) {
-      throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "ctts length mismatch");
+      throw new AfeError(
+        "AFE_UNSUPPORTED_SAMPLE_TABLE",
+        `ctts samples ${cttsOffsets.length} != stsz ${tables.sampleCount}`,
+      );
     }
   }
 
@@ -94,7 +102,11 @@ export function buildSampleTable(tables: RawSampleTables): AfeSample[] {
   let dts = 0;
   for (let i = 0; i < tables.sampleCount; i++) {
     const duration = deltas[i]!;
-    const pts = dts + (cttsOffsets ? cttsOffsets[i]! : 0);
+    if (duration < 0 || !Number.isSafeInteger(duration)) {
+      throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "stts delta invalid");
+    }
+    const offset = cttsOffsets ? cttsOffsets[i]! : 0;
+    const pts = addTimescale(dts, offset, "pts = dts + ctts");
     samples.push({
       index: i,
       byteOffset: offsets[i]!,
@@ -104,7 +116,7 @@ export function buildSampleTable(tables: RawSampleTables): AfeSample[] {
       durationTimescale: duration,
       isKeyframe: tables.syncSamples == null || keySet.has(i),
     });
-    dts += duration;
+    dts = addTimescale(dts, duration, "dts");
   }
   return samples;
 }

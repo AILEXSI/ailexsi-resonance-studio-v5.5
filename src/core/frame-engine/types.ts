@@ -62,6 +62,8 @@ export interface AfeAvcConfig {
   levelIndication: number;
 }
 
+export type AfeCttsKind = "absent" | "constant" | "variable";
+
 export interface AfeMovie {
   timescale: number;
   editListOffset: number;
@@ -74,6 +76,11 @@ export interface AfeMovie {
   /** Decode-order samples sorted by PTS (presentation order). */
   presentation: AfeSample[];
   keyframeIndices: number[];
+  /** CTTS v0 unsigned / v1 signed, or null when the box is absent. */
+  cttsVersion: 0 | 1 | null;
+  cttsKind: AfeCttsKind;
+  /** Max (decode_index − presentation_rank); bounds the reorder-ready queue. */
+  maxReorderSamples: number;
   avc: AfeAvcConfig;
   bytes: Uint8Array;
 }

@@ -41,11 +41,10 @@ describe("AFE ISO-BMFF reader", () => {
       expect(movie.avc.codec.startsWith("avc1.")).toBe(true);
       expect(movie.sampleCount).toBe(file.frames);
       expect(movie.samples[0]!.isKeyframe).toBe(true);
-      expect(movie.samples[0]!.ptsTimescale).toBeGreaterThanOrEqual(0);
-      expect(sampleIndexAtTime(movie, 0)).toBe(0);
-      expect(sampleIndexAtTime(movie, 1 / file.fps)).toBe(1);
+      expect(sampleIndexAtTime(movie, 0)).toBe(movie.presentation[0]!.index);
+      expect(sampleIndexAtTime(movie, 1 / file.fps)).toBe(movie.presentation[1]!.index);
       const last = file.frames - 1;
-      expect(sampleIndexAtTime(movie, (last + 0.5) / file.fps)).toBe(last);
+      expect(sampleIndexAtTime(movie, (last + 0.5) / file.fps)).toBe(movie.presentation[last]!.index);
       expect(keyframeAtOrBefore(movie, 0)).toBe(0);
       const mid = Math.min(file.gop, file.frames - 1);
       const kf = keyframeAtOrBefore(movie, mid);

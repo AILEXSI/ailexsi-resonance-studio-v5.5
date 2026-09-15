@@ -3,7 +3,7 @@ import { AfeVideoDecoder } from "./decoder";
 import { AfeError, isAfeError, throwIfAborted } from "./errors";
 import { keyframeAtOrBefore, sampleIndexAtTime } from "./mp4-reader";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMax } from "./perf";
-import { isMonotonicRun, planDecodeSpan, planSampleIndexes } from "./plan";
+import { isMonotonicRun, isPresentationRun, maxDecodeIndex, planDecodeSpan, planSampleIndexes, shouldSplitPresentationRun } from "./plan";
 import type { AfeMemoryStats, AfeMovie, AfeSample, DrawableFrame } from "./types";
 
 /** Encoded samples submitted ahead of the next yield so encode can overlap decode.
@@ -124,17 +124,25 @@ export class AfeScheduler {
         continue;
       }
       let last = indexes[i]!;
+      let maxIdx = last;
       let j = i + 1;
       while (j < indexes.length) {
         const nxt = indexes[j];
-        if (nxt == null || nxt < last) break;
+        if (nxt == null) break;
+        if (shouldSplitPresentationRun(this.movie, maxIdx, nxt)) break;
+        maxIdx = Math.max(maxIdx, nxt);
         last = nxt;
         j += 1;
       }
-      if (isMonotonicRun(indexes, i, j)) {
-        yield* this.streamFramesAt(indexes, i, j, last, signal);
+      const decodeLast = maxDecodeIndex(indexes, i, j);
+      const streamable =
+        this.movie.cttsKind === "variable"
+          ? isPresentationRun(this.movie, indexes, i, j)
+          : isMonotonicRun(indexes, i, j);
+      if (streamable || isPresentationRun(this.movie, indexes, i, j)) {
+        yield* this.streamFramesAt(indexes, i, j, decodeLast, signal);
       } else {
-        yield* this.legacyFramesAt(indexes, i, j, last, signal);
+        yield* this.legacyFramesAt(indexes, i, j, decodeLast >= 0 ? decodeLast : last, signal);
       }
       i = j;
     }

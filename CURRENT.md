@@ -2,7 +2,7 @@
 
 Ein Blick. Kein Wunschzettel.
 
-**V5.5 bootstrap** from V5 AFE-03 `4e80162`. Mediabunny removed. Export = AILEXSI Frame Engine only. V5 repo not modified. PR #23/#24/#25 not merged. **1080p OPEN ISSUE.**
+**V5.5 bootstrap** from V5 AFE-03 `4e80162`. Mediabunny removed. Export = AILEXSI Frame Engine only. **AFE-04** B-frame / varying CTTS on AILEXSI (not HUMAN-PROVEN). V5 repo not modified. PR #23/#24/#25 not merged. **1080p OPEN ISSUE.**
 
 Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED** | **NOT IMPLEMENTED**.
 **HUMAN-PROVEN** only from MODE B operator EXE acceptance — not from tests, agent screenshots, or Chrome-only runs.
@@ -37,7 +37,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Write volume | **H HUMAN-PROVEN in EXE.** Compact **W** on audio tracks. Writes into the existing G envelope during playback. Owner: local Vite + Root-Exe `24f4337`. Ruler flex-shrink + VOL header polish included. |
 | VIS click-seek | Klick in die VIS-Lane (leer oder Event-Fill) setzt den Playhead — gleicher Snap-Seek wie V1/V2/A-Lane-Body. |
 | AUTO | Video zuerst, VIS nur in der Lücke (AUTO-Zeile unangetastet) |
-| Export | H.264-MP4. Dialog shows **`Frame Engine: AILEXSI`** from `getFrameSourceBackend()`. No silent HTMLVideo export fallback. Typed `AFE_*` failures. **1080p OPEN ISSUE.** V5 EXE HUMAN-PROVEN is historical (Mediabunny default, chip 5.0.0). |
+| Export | H.264-MP4. Dialog shows **`Frame Engine: AILEXSI`** from `getFrameSourceBackend()`. No silent HTMLVideo export fallback. Typed `AFE_*` failures. **AFE-04:** B-frames / varying CTTS parse + PTS-keyed decode match (**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN). Owner Windows retest required for the production media that failed `AFE_UNSUPPORTED_SAMPLE_TABLE: varying ctts`. **1080p OPEN ISSUE.** V5 EXE HUMAN-PROVEN is historical (Mediabunny default, chip 5.0.0). |
 | Visualizer | **HUMAN-PROVEN** (earlier). Canvas-Modi unverändert. Geladenes first-audible-audio / Mix-PCM treibt Onset/Energy. Silence gate (`rms < 0.02 && bass < 0.03`). Beat = audio-derived onset/energy — **kein** DAW Beat-Grid-Lock. |
 | Persistenz | `last-project.json` in V5.5 AppData (`com.ailexsi.resonance-studio-v5-5`). Keys `resonance-studio-v5-5*`. JSON `schemaVersion` **5**. App/Tauri/Cargo **5.5.0**. Separate from V5. |
 | Dev/test fixtures | `tests/fixtures/user-video.mp4` + `user-audio.mp3` only. Owner-provided development/test fixture supplied specifically for internal Grok VM testing during remote development. Not intended for product distribution. **NOT DISTRIBUTED / TEST-ONLY** — removed from `public/fixtures/` so Vite/`dist`/Tauri cannot copy them. `export-check.html` is repo-root / Vite-dev only (not under `public/`). This note is provenance of presence, **not** a copyright-ownership or commercial-clearance claim. |

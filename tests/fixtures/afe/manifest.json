@@ -74,7 +74,16 @@
         1.9,
         1.933333,
         1.966667
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g24-2s",
@@ -89,7 +98,17 @@
         0,
         0.8,
         1.6
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g25-2s",
@@ -104,7 +123,17 @@
         0,
         0.833333,
         1.666667
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g30-2s",
@@ -118,7 +147,17 @@
       "keyframeSec": [
         0,
         1
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g50-3s",
@@ -132,7 +171,17 @@
       "keyframeSec": [
         0,
         1.666667
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g60-8s",
@@ -148,7 +197,17 @@
         2,
         4,
         6
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g250-28s",
@@ -164,7 +223,17 @@
         8.333333,
         16.666667,
         25
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-24-g24-2s",
@@ -178,7 +247,17 @@
       "keyframeSec": [
         0,
         1
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-25-g25-2s",
@@ -192,7 +271,17 @@
       "keyframeSec": [
         0,
         1
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-50-g50-2s",
@@ -206,7 +295,17 @@
       "keyframeSec": [
         0,
         1
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-60-g60-2s",
@@ -220,7 +319,17 @@
       "keyframeSec": [
         0,
         1
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
     },
     {
       "id": "afe-cfr-30-g30-720p-2s",
@@ -234,7 +343,145 @@
       "keyframeSec": [
         0,
         1
-      ]
+      ],
+      "bf": 0,
+      "profile": "baseline",
+      "bframes": 0,
+      "pictTypes": [
+        "I",
+        "P"
+      ],
+      "cttsVersion": null,
+      "cttsUniqueOffsets": 0,
+      "nobControl": true
+    },
+    {
+      "id": "afe-bframe-30-g30-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g30-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ],
+      "bf": 2,
+      "profile": "main",
+      "bframes": 38,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false
+    },
+    {
+      "id": "afe-bframe-30-g30-2s-ctts-v1",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g30-2s-ctts-v1.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ],
+      "bf": 2,
+      "profile": "main",
+      "bframes": 38,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 1,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false,
+      "rewrittenCttsVersion": 1
+    },
+    {
+      "id": "afe-bframe-30-g60-4s",
+      "fps": 30,
+      "seconds": 4,
+      "gop": 60,
+      "width": 160,
+      "height": 90,
+      "frames": 120,
+      "path": "tests/fixtures/afe/afe-bframe-30-g60-4s.mp4",
+      "keyframeSec": [
+        0,
+        2
+      ],
+      "bf": 2,
+      "profile": "main",
+      "bframes": 78,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false
+    },
+    {
+      "id": "afe-bframe-30-g15-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 15,
+      "width": 160,
+      "height": 90,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g15-2s.mp4",
+      "keyframeSec": [
+        0,
+        0.5,
+        1,
+        1.5
+      ],
+      "bf": 3,
+      "profile": "high",
+      "bframes": 40,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false
+    },
+    {
+      "id": "afe-bframe-30-g30-720p-2s",
+      "fps": 30,
+      "seconds": 2,
+      "gop": 30,
+      "width": 1280,
+      "height": 720,
+      "frames": 60,
+      "path": "tests/fixtures/afe/afe-bframe-30-g30-720p-2s.mp4",
+      "keyframeSec": [
+        0,
+        1
+      ],
+      "bf": 2,
+      "profile": "main",
+      "bframes": 38,
+      "pictTypes": [
+        "I",
+        "B",
+        "P"
+      ],
+      "cttsVersion": 0,
+      "cttsUniqueOffsets": 4,
+      "nobControl": false
     }
   ]
 }

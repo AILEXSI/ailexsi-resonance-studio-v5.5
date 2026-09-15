@@ -1,6 +1,7 @@
 import { AfeError } from "./errors";
-import type { AfeAvcConfig, AfeMovie, AfeSample } from "./types";
+import type { AfeAvcConfig, AfeCttsKind, AfeMovie, AfeSample } from "./types";
 import { parseAvcC } from "./avc-config";
+import { classifyCtts, maxReorderSamples } from "./frame-match";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfTime, peekAfePerf } from "./perf";
 import { buildSampleTable } from "./sample-table";
 
@@ -176,6 +177,7 @@ function parseElst(bytes: Uint8Array, box: ParsedBox): number {
 interface RawTables {
   stts: { count: number; delta: number }[];
   ctts: { count: number; offset: number }[] | null;
+  cttsVersion: 0 | 1 | null;
   stsc: { firstChunk: number; samplesPerChunk: number; descriptionIndex: number }[];
   sampleSize: number;
   sampleSizes: number[];
@@ -197,24 +199,41 @@ function parseStts(bytes: Uint8Array, box: ParsedBox): RawTables["stts"] {
   return out;
 }
 
-function parseCtts(bytes: Uint8Array, box: ParsedBox): RawTables["ctts"] {
+export type ParsedCtts = {
+  version: 0 | 1;
+  entries: { count: number; offset: number }[];
+};
+
+/**
+ * ISO/IEC 14496-12 Composition Time to Sample.
+ * v0: unsigned offset. v1: signed offset. Absent box = all offsets 0.
+ * Varying offsets (B-frames) are supported — do not reject on unique-offset count.
+ */
+export function parseCtts(bytes: Uint8Array, box: ParsedBox): ParsedCtts {
   const { version, dataStart } = readFullBox(bytes, box);
+  if (version !== 0 && version !== 1) {
+    throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", `unsupported ctts version ${version}`);
+  }
+  if (dataStart + 4 > box.payloadEnd) {
+    throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "truncated ctts");
+  }
   const n = u32(bytes, dataStart);
-  const out: NonNullable<RawTables["ctts"]> = [];
+  const out: { count: number; offset: number }[] = [];
   let cursor = dataStart + 4;
-  const seen = new Set<number>();
+  let total = 0;
   for (let i = 0; i < n; i++) {
     if (cursor + 8 > box.payloadEnd) throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "truncated ctts");
     const count = u32(bytes, cursor);
+    if (count <= 0) throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "ctts count <= 0");
     const offset = version === 1 ? i32(bytes, cursor + 4) : u32(bytes, cursor + 4);
-    seen.add(offset);
+    total = total + count;
+    if (!Number.isSafeInteger(total)) {
+      throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "ctts sample count overflow");
+    }
     out.push({ count, offset });
     cursor += 8;
   }
-  if (seen.size > 1) {
-    throw new AfeError("AFE_UNSUPPORTED_SAMPLE_TABLE", "varying ctts (B-frames) unsupported");
-  }
-  return out;
+  return { version, entries: out };
 }
 
 function parseStsc(bytes: Uint8Array, box: ParsedBox): RawTables["stsc"] {
@@ -345,9 +364,11 @@ function parseVideoTrack(bytes: Uint8Array, trak: ParsedBox): Omit<AfeMovie, "by
   const cttsBox = findBox(stblKids, "ctts");
   const stssBox = findBox(stblKids, "stss");
 
+  const parsedCtts = cttsBox ? parseCtts(bytes, cttsBox) : null;
   const tables: RawTables = {
     stts: parseStts(bytes, sttsBox),
-    ctts: cttsBox ? parseCtts(bytes, cttsBox) : null,
+    ctts: parsedCtts ? parsedCtts.entries : null,
+    cttsVersion: parsedCtts ? parsedCtts.version : null,
     stsc: parseStsc(bytes, stscBox),
     ...parseStsz(bytes, stszBox),
     chunkOffsets: parseChunkOffsets(bytes, (stcoBox ?? co64Box)!, Boolean(co64Box)),
@@ -365,6 +386,8 @@ function parseVideoTrack(bytes: Uint8Array, trak: ParsedBox): Omit<AfeMovie, "by
   const fpsHint = samples[0] && samples[0].durationTimescale > 0
     ? timescale / samples[0].durationTimescale
     : 0;
+  const cttsOffsets = parsedCtts ? samples.map((s) => s.ptsTimescale - s.dtsTimescale) : null;
+  const cttsKind: AfeCttsKind = classifyCtts(cttsOffsets);
 
   return {
     timescale,
@@ -377,6 +400,9 @@ function parseVideoTrack(bytes: Uint8Array, trak: ParsedBox): Omit<AfeMovie, "by
     samples,
     presentation,
     keyframeIndices,
+    cttsVersion: parsedCtts ? parsedCtts.version : null,
+    cttsKind,
+    maxReorderSamples: maxReorderSamples(samples),
     avc,
   };
 }

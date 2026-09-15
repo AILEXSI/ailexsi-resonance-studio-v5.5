@@ -47,7 +47,7 @@ export function planDecodeSpan(
   return { decodeStart, decodeEnd: hi, needed };
 }
 
-/** True when times map to a single non-decreasing sample-index run (export sequential path). */
+/** True when times map to a single non-decreasing sample-index run (constant-CTTS fast path). */
 export function isMonotonicRun(indexes: readonly (number | null)[], start: number, end: number): boolean {
   let last = -1;
   let seen = false;
@@ -59,4 +59,45 @@ export function isMonotonicRun(indexes: readonly (number | null)[], start: numbe
     seen = true;
   }
   return seen;
+}
+
+/**
+ * True seek-back across a prior GOP. B-frame presentation order wobbles
+ * decode indexes inside the same GOP — that is not a seek.
+ */
+export function shouldSplitPresentationRun(
+  movie: AfeMovie,
+  prevMaxDecode: number,
+  nextIndex: number,
+): boolean {
+  if (nextIndex >= prevMaxDecode) return false;
+  return keyframeAtOrBefore(movie, nextIndex) < keyframeAtOrBefore(movie, prevMaxDecode);
+}
+
+/** Sequential export with B-frames: decode indexes may decrease inside a GOP. */
+export function isPresentationRun(
+  movie: AfeMovie,
+  indexes: readonly (number | null)[],
+  start: number,
+  end: number,
+): boolean {
+  let maxIdx = -1;
+  let seen = false;
+  for (let i = start; i < end; i++) {
+    const idx = indexes[i];
+    if (idx == null) return false;
+    if (seen && shouldSplitPresentationRun(movie, maxIdx, idx)) return false;
+    maxIdx = seen ? Math.max(maxIdx, idx) : idx;
+    seen = true;
+  }
+  return seen;
+}
+
+export function maxDecodeIndex(indexes: readonly (number | null)[], start: number, end: number): number {
+  let hi = -1;
+  for (let i = start; i < end; i++) {
+    const idx = indexes[i];
+    if (idx != null && idx > hi) hi = idx;
+  }
+  return hi;
 }

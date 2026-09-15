@@ -212,4 +212,32 @@ describe("AFE Resonance export semantics (AILEXSI + htmlvideo identity, no decod
       expect(sourceTimeSec(jc, 0, 30)).toBeCloseTo((500 + 500 / 30) / 1000, 6);
     }
   });
+
+  it("Source In on a B-frame center, hard cut, crossfade, clip rate, IN/OUT stay compositor-side", () => {
+    const bIn = exportClip({
+      startMs: 0,
+      endMs: 1000,
+      sourceInMs: Math.round((2.5 / 30) * 1000),
+      sourceOutMs: 2000,
+      rate: 1,
+    });
+    const t0 = sourceTimeSec(bIn, 0, 30);
+    expect(t0).toBeGreaterThan((2 / 30));
+    expect(t0).toBeLessThan((4 / 30));
+    const cutA = exportClip({ id: "a", trackId: "V1", startMs: 0, endMs: 1000, sourceUrl: "blob:a" });
+    const cutB = exportClip({
+      id: "b",
+      trackId: "V2",
+      startMs: 1000,
+      endMs: 2000,
+      sourceUrl: "blob:b",
+      sourceInMs: Math.round((5.5 / 30) * 1000),
+      sourceOutMs: 2000,
+    });
+    expect(sourceTimeSec(cutB, 1000, 30)).toBeGreaterThan(5 / 30);
+    const rated = exportClip({ startMs: 0, endMs: 1000, sourceInMs: 0, sourceOutMs: 4000, rate: 2 });
+    expect(sourceTimeSec(rated, 500, 30)).toBeGreaterThan(sourceTimeSec(cutA, 500, 30));
+    const faded = { durationMs: 1000, gain: 1, fadeInMs: 0, fadeOutMs: 0 };
+    expect(videoAlphaAtClipTime(faded, 500)).toBe(1);
+  });
 });

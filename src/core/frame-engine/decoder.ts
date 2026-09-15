@@ -1,6 +1,8 @@
 import { decoderConfigOf } from "./avc-config";
 import { AfeError, abortedError, throwIfAborted } from "./errors";
+import { AFE_MAX_REORDER_READY, PtsIndexMap } from "./frame-match";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMarkDecoded, afePerfMax, afePerfProbeInstalled } from "./perf";
+import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
 import type { AfeMovie, AfeSample } from "./types";
 import { sampleBytes } from "./mp4-reader";
 
@@ -8,7 +10,8 @@ type FrameWaiter = { resolve: (frame: VideoFrame) => void; reject: (e: Error) =>
 
 export class AfeVideoDecoder {
   private decoder: VideoDecoder | null = null;
-  private waiters = new Map<number, FrameWaiter>();
+  /** PTS(us) → waiter queue (duplicate timestamps stay FIFO within that PTS). */
+  private waiters = new Map<number, FrameWaiter[]>();
   private generation = 0;
   private closed = false;
   private lastError: Error | null = null;
@@ -16,17 +19,21 @@ export class AfeVideoDecoder {
   /** WebCodecs requires a key chunk after configure() or flush(). */
   needsKeyframe = true;
 
-  /** Sequential stream: timestamp(us) → sample index for in-flight encoded chunks. */
-  private streamTs = new Map<number, number>();
-  /** Submit order for no-B-frame streams (output order == decode order). */
-  private streamOrder: number[] = [];
+  /** Sequential stream: exact PTS(us) → queued sample indexes (decode-order submit). */
+  private streamPts = new PtsIndexMap();
   private streamReady = new Map<number, VideoFrame>();
   private streamWaiter: (FrameWaiter & { index: number }) | null = null;
   private streamNeeded: Uint8Array | null = null;
   private streamDecodeStart = 0;
   private streamMode = false;
+  private readonly reorderCap: number;
 
-  constructor(private readonly movie: AfeMovie) {}
+  constructor(private readonly movie: AfeMovie) {
+    this.reorderCap = Math.min(
+      AFE_MAX_REORDER_READY,
+      Math.max(8, (movie.maxReorderSamples || 0) + 8),
+    );
+  }
 
   get isOpen(): boolean {
     return this.decoder != null && this.configured && !this.closed;
@@ -37,7 +44,7 @@ export class AfeVideoDecoder {
   }
 
   get pendingOutputCount(): number {
-    return this.streamTs.size + this.streamReady.size;
+    return this.streamPts.pendingCount() + this.streamReady.size;
   }
 
   async ensure(signal?: AbortSignal): Promise<void> {
@@ -92,14 +99,17 @@ export class AfeVideoDecoder {
     }
   }
 
+  /**
+   * EncodedVideoChunk.timestamp := sample PTS in microseconds.
+   * VideoFrame.timestamp is specified to copy that integer (not DTS, not FIFO index).
+   */
   chunkTimestampUs(sample: AfeSample): number {
-    return Math.round((sample.ptsTimescale / this.movie.timescale) * 1_000_000);
+    return samplePtsToChunkTimestampUs(sample.ptsTimescale, this.movie.timescale);
   }
 
   beginStream(needed: Uint8Array, decodeStart: number): void {
     this.closeStreamFrames();
-    this.streamTs.clear();
-    this.streamOrder.length = 0;
+    this.streamPts.clear();
     this.streamMode = true;
     this.streamNeeded = needed;
     this.streamDecodeStart = decodeStart;
@@ -109,8 +119,7 @@ export class AfeVideoDecoder {
     this.streamMode = false;
     this.streamNeeded = null;
     this.closeStreamFrames();
-    this.streamTs.clear();
-    this.streamOrder.length = 0;
+    this.streamPts.clear();
     if (this.streamWaiter) {
       const w = this.streamWaiter;
       this.streamWaiter = null;
@@ -127,7 +136,7 @@ export class AfeVideoDecoder {
 
   knowsSample(index: number): boolean {
     if (this.streamReady.has(index) || this.streamWaiter?.index === index) return true;
-    return this.streamOrder.includes(index);
+    return this.streamPts.hasIndex(index);
   }
 
   takeReady(index: number): VideoFrame | null {
@@ -172,14 +181,12 @@ export class AfeVideoDecoder {
     if (!this.decoder) throw new AfeError("AFE_DECODE_FAILED", "decoder missing");
     if (this.lastError) throw this.lastError;
     const { timestamp, chunk } = this.makeChunk(sample);
-    this.streamTs.set(timestamp, sample.index);
-    this.streamOrder.push(sample.index);
+    this.streamPts.push(timestamp, sample.index);
     try {
       this.decoder.decode(chunk);
       if (sample.isKeyframe) this.needsKeyframe = false;
     } catch (e) {
-      this.streamTs.delete(timestamp);
-      if (this.streamOrder[this.streamOrder.length - 1] === sample.index) this.streamOrder.pop();
+      this.streamPts.deleteIndex(sample.index);
       throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
     }
     afePerfMax("inFlightPeak", this.pendingOutputCount);
@@ -192,12 +199,7 @@ export class AfeVideoDecoder {
     if (this.lastError) throw this.lastError;
     const { timestamp, chunk } = this.makeChunk(sample);
     const promise = new Promise<VideoFrame>((resolve, reject) => {
-      const onAbort = () => {
-        this.waiters.delete(timestamp);
-        reject(abortedError(signal));
-      };
-      signal?.addEventListener("abort", onAbort, { once: true });
-      this.waiters.set(timestamp, {
+      const waiter: FrameWaiter = {
         resolve: (f) => {
           signal?.removeEventListener("abort", onAbort);
           resolve(f);
@@ -206,13 +208,33 @@ export class AfeVideoDecoder {
           signal?.removeEventListener("abort", onAbort);
           reject(e);
         },
-      });
+      };
+      const onAbort = () => {
+        const q = this.waiters.get(timestamp);
+        if (q) {
+          const pos = q.indexOf(waiter);
+          if (pos >= 0) q.splice(pos, 1);
+          if (q.length === 0) this.waiters.delete(timestamp);
+        }
+        reject(abortedError(signal));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      let q = this.waiters.get(timestamp);
+      if (!q) {
+        q = [];
+        this.waiters.set(timestamp, q);
+      }
+      q.push(waiter);
     });
     try {
       this.decoder.decode(chunk);
       if (sample.isKeyframe) this.needsKeyframe = false;
     } catch (e) {
-      this.waiters.delete(timestamp);
+      const q = this.waiters.get(timestamp);
+      if (q) {
+        q.pop();
+        if (q.length === 0) this.waiters.delete(timestamp);
+      }
       throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
     }
     return promise;
@@ -270,7 +292,7 @@ export class AfeVideoDecoder {
   private async settleOutputs(signal?: AbortSignal, persist = false): Promise<void> {
     const dec = this.decoder;
     if (!dec) return;
-    if (this.waiters.size === 0 && this.streamTs.size === 0 && !this.streamWaiter) return;
+    if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
 
     const waitDequeue = () =>
       new Promise<void>((resolve) => {
@@ -288,16 +310,16 @@ export class AfeVideoDecoder {
       await waitDequeue();
     }
 
-    if (persist && (this.waiters.size > 0 || this.streamTs.size > 0 || this.streamWaiter)) {
+    if (persist && (this.waiterCount() > 0 || this.streamPts.pendingCount() > 0 || this.streamWaiter)) {
       const stallMs = 40;
-      let lastSize = this.waiters.size + this.streamTs.size;
+      let lastSize = this.waiterCount() + this.streamPts.pendingCount();
       let lastChange = typeof performance !== "undefined" ? performance.now() : Date.now();
-      while (this.waiters.size > 0 || this.streamTs.size > 0 || this.streamWaiter) {
+      while (this.waiterCount() > 0 || this.streamPts.pendingCount() > 0 || this.streamWaiter) {
         throwIfAborted(signal);
         const now = typeof performance !== "undefined" ? performance.now() : Date.now();
         if (now - lastChange >= stallMs) break;
         await new Promise<void>((r) => setTimeout(r, 0));
-        const size = this.waiters.size + this.streamTs.size;
+        const size = this.waiterCount() + this.streamPts.pendingCount();
         if (size < lastSize) {
           lastSize = size;
           lastChange = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -305,7 +327,7 @@ export class AfeVideoDecoder {
       }
     }
 
-    if (this.waiters.size === 0 && this.streamTs.size === 0 && !this.streamWaiter) return;
+    if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
     try {
       await dec.flush();
       if (!afePerfProbeInstalled()) afePerfCount("decoderFlushes");
@@ -345,7 +367,7 @@ export class AfeVideoDecoder {
       chunk: new EncodedVideoChunk({
         type: sample.isKeyframe ? "key" : "delta",
         timestamp,
-        duration: Math.max(1, Math.round((sample.durationTimescale / this.movie.timescale) * 1_000_000)),
+        duration: sampleDurationToChunkDurationUs(sample.durationTimescale, this.movie.timescale),
         data,
       }),
     };
@@ -366,37 +388,60 @@ export class AfeVideoDecoder {
         /* */
       }
     }
+    if (!this.streamReady.has(index) && this.streamReady.size >= this.reorderCap) {
+      try {
+        frame.close();
+      } catch {
+        /* */
+      }
+      const err = new AfeError(
+        "AFE_DECODE_FAILED",
+        `reorder buffer exceeded (${this.streamReady.size} >= ${this.reorderCap})`,
+        false,
+      );
+      this.lastError = err;
+      this.rejectWaiters(err);
+      return true;
+    }
     this.streamReady.set(index, frame);
     afePerfMax("inFlightPeak", this.pendingOutputCount);
     return true;
   }
 
-  /**
-   * AFE rejects B-frames (varying ctts), so output order equals submit/decode
-   * order. Assign FIFO first — timestamp nearest-match was observed to drop a
-   * mid-GOP requested frame (hard-cut / Source In) and stall waitReady forever.
-   */
+  /** Exact PTS(us) only. No FIFO identity, no nearest/snap. */
   private matchStreamIndex(timestamp: number): number | undefined {
-    const fifo = this.streamOrder.shift();
-    if (fifo != null) {
-      const mapped = this.streamTs.get(timestamp);
-      if (mapped === fifo) this.streamTs.delete(timestamp);
-      else {
-        for (const [ts, idx] of this.streamTs) {
-          if (idx === fifo) {
-            this.streamTs.delete(ts);
-            break;
-          }
-        }
-      }
-      return fifo;
+    return this.streamPts.takeExact(timestamp);
+  }
+
+  private takeWaiter(timestamp: number): FrameWaiter | undefined {
+    const q = this.waiters.get(timestamp);
+    if (!q || q.length === 0) return undefined;
+    const w = q.shift()!;
+    if (q.length === 0) this.waiters.delete(timestamp);
+    return w;
+  }
+
+  private waiterCount(): number {
+    let n = 0;
+    for (const q of this.waiters.values()) n += q.length;
+    return n;
+  }
+
+  private failUnmatched(frame: VideoFrame, timestamp: number): void {
+    try {
+      frame.close();
+    } catch {
+      /* */
     }
-    const exact = this.streamTs.get(timestamp);
-    if (exact != null) {
-      this.streamTs.delete(timestamp);
-      return exact;
+    const err = new AfeError(
+      "AFE_DECODE_FAILED",
+      `unmatched VideoFrame timestamp ${timestamp} (PTS-keyed exact match only)`,
+      false,
+    );
+    if (this.streamMode || this.streamWaiter || this.waiterCount() > 0) {
+      this.lastError = err;
+      this.rejectWaiters(err);
     }
-    return undefined;
   }
 
   private onOutput(frame: VideoFrame): void {
@@ -415,29 +460,15 @@ export class AfeVideoDecoder {
         this.resolveStream(idx, frame);
         return;
       }
+      this.failUnmatched(frame, frame.timestamp);
+      return;
     }
-    const waiter = this.waiters.get(frame.timestamp);
+    const waiter = this.takeWaiter(frame.timestamp);
     if (waiter) {
-      this.waiters.delete(frame.timestamp);
       waiter.resolve(frame);
       return;
     }
-    let best: number | undefined;
-    let bestDelta = Infinity;
-    for (const ts of this.waiters.keys()) {
-      const d = Math.abs(ts - frame.timestamp);
-      if (d < bestDelta) {
-        bestDelta = d;
-        best = ts;
-      }
-    }
-    if (best != null && bestDelta < 2) {
-      const w = this.waiters.get(best);
-      this.waiters.delete(best);
-      w?.resolve(frame);
-      return;
-    }
-    frame.close();
+    this.failUnmatched(frame, frame.timestamp);
   }
 
   private onError(e: DOMException): void {
@@ -447,7 +478,8 @@ export class AfeVideoDecoder {
   }
 
   private rejectWaiters(err: Error): void {
-    const pending = [...this.waiters.values()];
+    const pending: FrameWaiter[] = [];
+    for (const q of this.waiters.values()) pending.push(...q);
     this.waiters.clear();
     for (const w of pending) w.reject(err);
     if (this.streamWaiter) {
@@ -456,8 +488,7 @@ export class AfeVideoDecoder {
       w.reject(err);
     }
     this.closeStreamFrames();
-    this.streamTs.clear();
-    this.streamOrder.length = 0;
+    this.streamPts.clear();
   }
 
   private closeStreamFrames(): void {
@@ -475,8 +506,7 @@ export class AfeVideoDecoder {
     this.configured = false;
     this.needsKeyframe = true;
     this.closeStreamFrames();
-    this.streamTs.clear();
-    this.streamOrder.length = 0;
+    this.streamPts.clear();
     this.streamMode = false;
     this.streamNeeded = null;
     if (this.decoder) {
