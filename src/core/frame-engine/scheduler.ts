@@ -10,6 +10,7 @@ import {
   formatStallMessage,
   hasFurtherUsefulInput,
   lastRequiredDecodeSample,
+  mayEarlierKeyframeRecover,
   mayFinalFlush,
   nowMs,
   progressivePumpSliceEnd,
@@ -341,8 +342,18 @@ export class AfeScheduler {
       const tryEarlierKeyframe = async (): Promise<boolean> => {
         if (earlierWalked || this.decoder.earlierKeyframeRecoverUsed) return false;
         const current = this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx);
+        if (current <= 0) return false;
         const earlier = earlierKeyframeOrigin(this.movie, current);
         if (earlier == null) return false;
+        if (!mayEarlierKeyframeRecover({
+          frozenHighWaterAfterRecreate: this.decoder.isFrozenAtHighWaterAfterRecreate(),
+          earlierKeyframeOrigin: earlier,
+          earlierKeyframeRecovered: this.decoder.earlierKeyframeRecoverUsed,
+          gopKeyframeStart: current,
+          earlierKeyframeAvailable: true,
+        })) {
+          return false;
+        }
         earlierWalked = true;
         this.decoder.noteEarlierKeyframeRecover();
         await recoverGop(idx, earlier);

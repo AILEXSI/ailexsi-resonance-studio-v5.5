@@ -90,24 +90,18 @@ describe("AFE-12 A–L WebCodecs decodeQueue backpressure / queue progress", () 
   }, 10_000);
 
   it("B. HIGH_WATER = min(CAP, max(RECOVERY_FILL, maxReorder+lookahead+bFrameNeed)); never near 125", () => {
-    const look2 = streamLookaheadSamples(2, 4);
-    const raw2 = 2 + look2 + look2 + 4;
-    expect(decodeQueueHighWater(2, 4)).toBe(
-      Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, Math.max(AFE_DECODE_QUEUE_RECOVERY_FILL, raw2)),
-    );
-    expect(decodeQueueHighWater(2, 4)).toBe(AFE_DECODE_QUEUE_RECOVERY_FILL);
-    expect(decodeQueueHighWater(2, 4)).toBeLessThan(50);
-    expect(decodeQueueHighWater(2, 4)).not.toBeGreaterThanOrEqual(125);
-    const look16 = streamLookaheadSamples(16, 4);
-    const raw16 = 16 + look16 + look16 + 4;
-    expect(decodeQueueHighWater(16, 4)).toBe(
-      Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, Math.max(AFE_DECODE_QUEUE_RECOVERY_FILL, raw16)),
-    );
-    expect(decodeQueueHighWater(16, 4)).toBe(AFE_DECODE_QUEUE_HIGH_WATER_CAP);
-    expect(decodeQueueHighWater(0, 4)).toBe(AFE_DECODE_QUEUE_RECOVERY_FILL);
+    /* AFE-14 replaced the RECOVERY_FILL 40 floor. Constant remains historical. */
     expect(AFE_DECODE_QUEUE_HIGH_WATER_CAP).toBe(48);
     expect(AFE_DECODE_QUEUE_RECOVERY_FILL).toBe(40);
     expect(AFE_DECODE_QUEUE_HIGH_WATER_CAP).toBeLessThan(125);
+    expect(decodeQueueHighWater(2, 4)).toBeLessThan(AFE_DECODE_QUEUE_RECOVERY_FILL);
+    expect(decodeQueueHighWater(2, 4)).toBeLessThan(50);
+    expect(decodeQueueHighWater(2, 4)).not.toBeGreaterThanOrEqual(125);
+    expect(decodeQueueHighWater(16, 4)).toBeLessThan(AFE_DECODE_QUEUE_HIGH_WATER_CAP);
+    expect(decodeQueueHighWater(16, 4)).toBeLessThan(AFE_DECODE_QUEUE_RECOVERY_FILL);
+    expect(decodeQueueHighWater(16, 4)).not.toBeGreaterThanOrEqual(125);
+    expect(decodeQueueHighWater(0, 4)).toBeLessThan(AFE_DECODE_QUEUE_RECOVERY_FILL);
+    expect(decodeQueueHighWater(0, 4)).not.toBe(AFE_DECODE_QUEUE_RECOVERY_FILL);
   });
 
   it("C. INVARIANT: no output progress + queue>=HIGH_WATER => NO_MORE_SUBMISSION", () => {
@@ -119,7 +113,7 @@ describe("AFE-12 A–L WebCodecs decodeQueue backpressure / queue progress", () 
     ).toBe(true);
     expect(
       maySubmitEncoded({ decodeQueueSize: high, highWater: high, outputProgressed: true }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       maySubmitEncoded({ decodeQueueSize: high, highWater: high, outputProgressed: false }),
     ).toBe(false);

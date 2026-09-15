@@ -355,7 +355,8 @@ describe("AFE-13 A–L backpressure deadlock after recreate / earlier-keyframe e
     const look = streamLookaheadSamples(10, 4);
     const high = decodeQueueHighWater(10, 4);
     expect(look).toBeGreaterThanOrEqual(10);
-    expect(high).toBeGreaterThanOrEqual(10 + look);
+    expect(high).toBeGreaterThanOrEqual(10);
+    expect(high).toBeLessThan(40);
     expect(high).toBeLessThan(125);
     expect(high).toBeLessThanOrEqual(AFE_DECODE_QUEUE_HIGH_WATER_CAP);
     const movie = loadMovie(LONG);
@@ -363,7 +364,8 @@ describe("AFE-13 A–L backpressure deadlock after recreate / earlier-keyframe e
     const patched = { ...movie, maxReorderSamples: 10 };
     const decoder = new AfeVideoDecoder(patched);
     expect(decoder.decodeQueueHighWater).toBe(high);
-    expect(decoder.decodeQueueHighWater).toBeGreaterThanOrEqual(40);
+    expect(decoder.decodeQueueHighWater).toBeLessThan(40);
+    expect(decoder.decodeQueueHighWater).toBeGreaterThanOrEqual(10 + Math.min(6, look));
     decoder.close();
   });
 

@@ -34,11 +34,18 @@ export const AFE_POST_RECREATE_OUTPUT_BUDGET_MS = 80;
 export const AFE_DECODE_QUEUE_HIGH_WATER_CAP = 48;
 
 /**
- * Minimum recovery fill that must be legal after GOP recreate.
- * Windows AFE-10: WebView2 held sample 38 until ~36–44 decode-order submits.
- * 40 admits that one fill. 40 is far below the Windows flood of 125.
+ * AFE-12 historical recovery-fill floor. AFE-14 does **not** use this as
+ * HIGH_WATER — a 40-deep post-recreate window still dies on WebView2
+ * (lastDecodedTs 458333, gopStart 0, no earlier I-frame). Kept so dumps
+ * and AFE-12 tests can name the old floor. Not a PREFETCH bump.
  */
 export const AFE_DECODE_QUEUE_RECOVERY_FILL = 40;
+
+/**
+ * Structural decode-window lookahead (AFE-05). Caps the HIGH_WATER
+ * lookahead term. Not a global PREFETCH bump.
+ */
+export const AFE_DECODE_WINDOW_LOOKAHEAD = 6;
 
 export type SampleFate = "PENDING" | "READY" | "RESOLVED" | "DISCARDED_NOT_NEEDED" | "ERROR" | "ABORTED";
 
@@ -172,6 +179,29 @@ export type AfeStallSnapshot = {
   frozenAtHighWater: boolean;
   /** AFE-13: one walk-back GOP recover from an earlier keyframe already used. */
   earlierKeyframeRecovered: boolean;
+  /** AFE-14: LOW_WATER hysteresis resume target (strictly below HIGH_WATER). */
+  decodeQueueLowWater: number;
+  /** AFE-14: explicit — false when gopStart==0 (do not re-loop AFE-13 escape). */
+  earlierKeyframeAvailable: boolean;
+  /** First decode-order sample submitted after the last recreate. */
+  firstSubmittedAfterRecreate: number | null;
+  firstSubmittedAfterRecreateKey: boolean | null;
+  firstSubmittedAfterRecreatePts: number | null;
+  firstSubmittedAfterRecreateDts: number | null;
+  /** Cold vs recovery packet fingerprints (null = no recreate yet). */
+  packetParity: boolean | null;
+  packetParityCompared: number;
+  packetParityMismatchIndex: number | null;
+  packetParityMismatchField: string | null;
+  /** Cold vs recovery decoder-config fingerprints (null = no recreate yet). */
+  configParity: boolean | null;
+  configParityHashCold: string | null;
+  configParityHashRecovery: string | null;
+  /** Compact post-recreate output PTS list (capped). */
+  postRecreateOutputTimestamps: number[];
+  postRecreateSubmitted: number;
+  postRecreateOutputs: number;
+  postRecreateLastDecodedTs: number | null;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -270,6 +300,23 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     submitPhaseTraces: [],
     frozenAtHighWater: false,
     earlierKeyframeRecovered: false,
+    decodeQueueLowWater: 0,
+    earlierKeyframeAvailable: false,
+    firstSubmittedAfterRecreate: null,
+    firstSubmittedAfterRecreateKey: null,
+    firstSubmittedAfterRecreatePts: null,
+    firstSubmittedAfterRecreateDts: null,
+    packetParity: null,
+    packetParityCompared: 0,
+    packetParityMismatchIndex: null,
+    packetParityMismatchField: null,
+    configParity: null,
+    configParityHashCold: null,
+    configParityHashRecovery: null,
+    postRecreateOutputTimestamps: [],
+    postRecreateSubmitted: 0,
+    postRecreateOutputs: 0,
+    postRecreateLastDecodedTs: null,
     ...partial,
   };
 }
@@ -287,51 +334,96 @@ export function streamLookaheadSamples(maxReorderSamples: number, prefetch: numb
 }
 
 /**
- * WebCodecs decodeQueue HIGH_WATER (AFE-12).
+ * Decode-window lookahead used for HIGH/LOW water (AFE-14).
+ * Caps pump lookahead at AFE_DECODE_WINDOW_LOOKAHEAD (6). Not PREFETCH.
+ */
+export function decodeWindowLookahead(maxReorderSamples: number, prefetch: number): number {
+  const pref = Math.max(1, prefetch | 0);
+  return Math.min(AFE_DECODE_WINDOW_LOOKAHEAD, streamLookaheadSamples(maxReorderSamples, pref));
+}
+
+/**
+ * Extra decode-order slots a B-frame / hardware DPB may need beyond the I.
+ * Equals prefetch — not lookahead+prefetch (that plus the 40 floor made HIGH=40).
+ */
+export function decodeWindowBNeed(prefetch: number): number {
+  return Math.max(1, prefetch | 0);
+}
+
+/**
+ * WebCodecs decodeQueue HIGH_WATER (AFE-14 hysteresis).
+ *
+ * AFE-12 used min(CAP, max(RECOVERY_FILL 40, maxReorder+lookahead+bFrameNeed))
+ * which forced HIGH_WATER=40 on the human 720p30 shape. After recreate with
+ * gopStart==0 and no earlier I-frame, WebView2 still died at ~458333 µs
+ * with a 40-deep queue. The 40 floor is gone.
  *
  * Formula:
- *   HIGH_WATER = min(CAP, max(RECOVERY_FILL, maxReorder + lookahead + bFrameNeed))
- *   lookahead    = streamLookaheadSamples(maxReorder, prefetch)
- *   bFrameNeed   = lookahead + prefetch
- *                  extra decode-order samples a B-frame / hardware DPB may
- *                  require beyond maxReorder before the next output
- *   RECOVERY_FILL = 40
- *                  Windows AFE-10 held sample 38 until ~36–44 submits after
- *                  recreate. One recovery fill must be legal. Not a PREFETCH bump.
- *   CAP           = 48
- *                  never near the Windows AFE-12 flood of decodeQueue 125
+ *   L           = min(WINDOW_LOOKAHEAD 6, streamLookaheadSamples(maxReorder, prefetch))
+ *   B           = prefetch
+ *   HIGH_WATER  = min(CAP 48, maxReorder + L + B)
+ *   LOW_WATER   = min(HIGH_WATER - 1, max(L, B))     // LOW < HIGH
  *
- * Typical prefetch=4, maxReorder=2 → lookahead=6 → raw=2+6+6+4=18 → HIGH_WATER=40.
- * High reorder=16 → lookahead=16 → raw=16+16+16+4=52 → HIGH_WATER=48.
+ * Human 720p30: maxReorder=10, prefetch=4, L=6, B=4 → HIGH=20 < 40, LOW=6.
+ * Typical prefetch=4, maxReorder=2 → L=6, B=4 → HIGH=12, LOW=6.
+ * CAP remains 48 as a hard safety (never near decodeQueue 125).
+ * No global PREFETCH bump. RECOVERY_FILL is historical only.
  */
 export function decodeQueueHighWater(maxReorderSamples: number, prefetch: number): number {
   const reorder = Math.max(0, maxReorderSamples | 0);
   const pref = Math.max(1, prefetch | 0);
-  const look = streamLookaheadSamples(reorder, pref);
-  const bFrameNeed = look + pref;
-  const raw = reorder + look + bFrameNeed;
-  return Math.min(
-    AFE_DECODE_QUEUE_HIGH_WATER_CAP,
-    Math.max(AFE_DECODE_QUEUE_RECOVERY_FILL, raw),
-  );
+  const look = decodeWindowLookahead(reorder, pref);
+  const bNeed = decodeWindowBNeed(pref);
+  const raw = Math.max(1, reorder + look + bNeed);
+  return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, raw);
+}
+
+/** Resume target after HIGH_WATER pause. Always strictly below HIGH_WATER. */
+export function decodeQueueLowWater(maxReorderSamples: number, prefetch: number): number {
+  const high = decodeQueueHighWater(maxReorderSamples, prefetch);
+  const look = decodeWindowLookahead(maxReorderSamples, prefetch);
+  const bNeed = decodeWindowBNeed(prefetch);
+  return Math.max(0, Math.min(high - 1, Math.max(look, bNeed)));
 }
 
 /**
- * Submit is allowed unless the decoder is at HIGH_WATER with no output
- * progress. Then NO_MORE_SUBMISSION until dequeue / output / exact resolve
- * or a typed stall.
+ * Submit is allowed unless the decoder is at HIGH_WATER.
+ * AFE-14: output progress alone does not refill above LOW_WATER.
+ * Resume only at LOW_WATER or exact frame ready — not on every dequeue.
  */
 export function maySubmitEncoded(args: {
   decodeQueueSize: number;
   highWater: number;
   outputProgressed: boolean;
+  lowWater?: number;
+  paused?: boolean;
+  exactReady?: boolean;
 }): boolean {
-  if (args.decodeQueueSize < args.highWater) return true;
-  if (args.outputProgressed) return true;
-  return false;
+  if (args.exactReady) return true;
+  if (args.decodeQueueSize >= args.highWater) return false;
+  if (args.paused && args.lowWater != null && args.decodeQueueSize > args.lowWater) return false;
+  if (args.decodeQueueSize < args.highWater && !args.paused) return true;
+  if (args.outputProgressed && args.lowWater == null) return true;
+  return args.decodeQueueSize < args.highWater;
 }
 
-/** INVARIANT: no output progress + queue>=HIGH_WATER → do not submit. */
+/**
+ * AFE-14: after a HIGH_WATER pause, resume only at LOW_WATER or exact ready.
+ * A dequeue that leaves the queue between LOW and HIGH must not refill.
+ */
+export function mayResumeDecode(args: {
+  decodeQueueSize: number;
+  highWater: number;
+  lowWater: number;
+  exactReady: boolean;
+  paused: boolean;
+}): boolean {
+  if (args.exactReady) return true;
+  if (!args.paused) return args.decodeQueueSize < args.highWater;
+  return args.decodeQueueSize <= args.lowWater;
+}
+
+/** INVARIANT: no output progress + queue>=HIGH_WATER → do not submit / decode(). */
 export function noMoreSubmissionRequired(args: {
   decodeQueueSize: number;
   highWater: number;
@@ -392,9 +484,13 @@ export function mayEarlierKeyframeRecover(args: {
   frozenHighWaterAfterRecreate: boolean;
   earlierKeyframeOrigin: number | null;
   earlierKeyframeRecovered: boolean;
+  gopKeyframeStart?: number | null;
+  earlierKeyframeAvailable?: boolean;
 }): boolean {
   if (!args.frozenHighWaterAfterRecreate) return false;
   if (args.earlierKeyframeRecovered) return false;
+  if (args.gopKeyframeStart != null && args.gopKeyframeStart <= 0) return false;
+  if (args.earlierKeyframeAvailable === false) return false;
   return args.earlierKeyframeOrigin != null && args.earlierKeyframeOrigin >= 0;
 }
 
@@ -762,11 +858,26 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `decodeQueue ${d.decodeQueueSize}`,
     `lastDecodedTs ${d.lastDecodedTimestamp}`,
     `gopStart ${d.gopKeyframeStart}`,
+    `decodeStart ${d.decodeStartSample}`,
     `frozenAtHighWater ${d.frozenAtHighWater ? "yes" : "no"}`,
     `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
+    `earlierKeyframeAvailable ${d.earlierKeyframeAvailable ? "yes" : "no"}`,
+    `firstSubmittedAfterRecreate ${d.firstSubmittedAfterRecreate}`,
+    `firstSubmittedAfterRecreateKey ${d.firstSubmittedAfterRecreateKey == null ? "n/a" : d.firstSubmittedAfterRecreateKey ? "yes" : "no"}`,
+    `firstSubmittedAfterRecreatePts ${d.firstSubmittedAfterRecreatePts}`,
+    `firstSubmittedAfterRecreateDts ${d.firstSubmittedAfterRecreateDts}`,
+    `packetParity ${d.packetParity == null ? "n/a" : d.packetParity ? "yes" : "no"}`,
+    `packetParityCompared ${d.packetParityCompared}`,
+    `packetParityMismatch ${d.packetParityMismatchIndex == null ? "none" : `${d.packetParityMismatchIndex}:${d.packetParityMismatchField ?? "?"}`}`,
+    `configParity ${d.configParity == null ? "n/a" : d.configParity ? "yes" : "no"}`,
+    `configParityHashCold ${d.configParityHashCold}`,
+    `configParityHashRecovery ${d.configParityHashRecovery}`,
+    `postRecreateSubmitted ${d.postRecreateSubmitted}`,
+    `postRecreateOutputs ${d.postRecreateOutputs}`,
+    `postRecreateLastDecodedTs ${d.postRecreateLastDecodedTs}`,
+    `postRecreateOutputTs [${d.postRecreateOutputTimestamps.join(",")}]`,
     `submitted ${d.lastSubmittedSample}`,
     `lastSubmittedSample ${d.lastSubmittedSample} (sample-index)`,
-    `decodeStart ${d.decodeStartSample}`,
     `waiter ${d.streamWaiterIndex}`,
     `streamPts ${d.streamPtsPending}`,
     `streamReady ${d.streamReadySize}`,
@@ -811,6 +922,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `finalFlushArmed ${d.finalFlushArmed ? "yes" : "no"}`,
     `usefulInputExhausted ${d.usefulInputExhausted ? "yes" : "no"}`,
     `decodeQueueHighWater ${d.decodeQueueHighWater}`,
+    `decodeQueueLowWater ${d.decodeQueueLowWater}`,
     `decodeQueuePeak ${d.decodeQueuePeak}`,
     `submitsWithoutOutputProgress ${d.submitsWithoutOutputProgress}`,
     `backpressureWaits ${d.backpressureWaitCount}`,
