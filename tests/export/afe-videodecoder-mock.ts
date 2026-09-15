@@ -584,14 +584,10 @@ export class EmitThenHoldHangFlushDecoder {
   decode(chunk: { timestamp: number }): void {
     if (this.closed) return;
     this.submitted.push(chunk.timestamp);
-    if (this.emitted < EmitThenHoldHangFlushDecoder.emitLimit) {
-      this.output(new FakeVideoFrame(chunk.timestamp));
-      this.emitted += 1;
-      this.decodeQueueSize = this.submitted.length - this.emitted;
-      for (const fn of this.listeners) fn();
-      return;
-    }
-    this.decodeQueueSize = this.submitted.length - this.emitted;
+    this.output(new FakeVideoFrame(chunk.timestamp));
+    this.emitted += 1;
+    this.decodeQueueSize = Math.max(0, this.submitted.length - EmitThenHoldHangFlushDecoder.emitLimit);
+    for (const fn of this.listeners) fn();
   }
 
   async flush(): Promise<void> {

@@ -379,13 +379,19 @@ export function isExportTransactionComplete(dump: Partial<AfeStallSnapshot>): bo
   const req = dump.videoFramesRequested;
   const dec = dump.videoFramesDecoded;
   const enc = dump.videoFramesEncoded;
+  if (req == null || dec == null || enc == null) return false;
+  if (req !== dec || dec !== enc) return false;
+  if (dump.streamWaiterIndex != null) return false;
+  if ((dump.unresolvedRequestedVideoFrames ?? 0) > 0) return false;
   const nullRequest = dump.sourceSampleRequested == null && dump.requestedPtsUs == null;
-  if (dump.stallPhase === "TRANSACTION_END" && nullRequest && req != null && req === dec && req === enc) {
+  if (dump.stallPhase === "TRANSACTION_END" && (nullRequest || dump.transactionComplete === true)) {
     return true;
   }
   return isTransactionComplete({
     unresolvedRequestedVideoFrames: dump.unresolvedRequestedVideoFrames ?? 0,
     streamWaiterIndex: dump.streamWaiterIndex ?? null,
+    requestedVideoFrameCount: dump.lastRequestedSample != null ? 1 : null,
+    resolvedRequestedVideoFrames: dump.transactionComplete ? 1 : 0,
     videoFramesRequested: req,
     videoFramesDecoded: dec,
     videoFramesEncoded: enc,

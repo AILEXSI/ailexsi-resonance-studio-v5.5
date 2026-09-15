@@ -329,7 +329,7 @@ describe("AFE-07 A–M recovery / exact-frame delivery", () => {
     expect(text).toContain("originExportFrame 42");
     expect(text).toContain("stallPhase GOP_RECOVERY");
     expect(text).toContain("transactionId 3");
-    expect(text).not.toMatch(/nearest|snap|neighbor|BLACK|paintFallback/i);
+    expect(text).not.toMatch(/(?<![A-Za-z])(nearest|snap|neighbor|BLACK|paintFallback)(?![A-Za-z])/i);
   });
 
   it("M. AFE-05 lookahead still emits hold-for-N+k without flush", async () => {

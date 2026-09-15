@@ -220,14 +220,6 @@ export class AfeVideoDecoder {
       maxReorderSamples: this.movie.maxReorderSamples,
       stallPhase: this.stallPhase,
       transactionId: this.transactionId,
-      lastRequestedSample: this.lastRequestedSample,
-      lastRequiredDecodeSample: this.lastRequiredSample,
-      speculativeSamplesSubmitted: this.speculativeSubmitted,
-      cancelledSpeculativeSamples: this.cancelledSpeculativeSamples,
-      decodeQueueBeforeCancel: this.decodeQueueBeforeCancel,
-      decoderResetForTransactionEnd: this.decoderResetForTransactionEnd,
-      unresolvedRequestedVideoFrames: unresolved,
-      transactionComplete: complete,
       ...origin,
       sourceSampleRequested: extra?.sourceSampleRequested ?? origin.sourceSampleRequested ?? null,
       requestedPtsUs: extra?.requestedPtsUs ?? origin.requestedPtsUs ?? null,
@@ -430,7 +422,7 @@ export class AfeVideoDecoder {
       this.abandonSpeculativeDecoder();
     }
     this.protectedIndexes.clear();
-    this.clearOrigin();
+    /* Keep origin for post-stream stall dumps (AFE-07 identity). */
   }
 
   private classifySubmitted(index: number): SampleRole {
