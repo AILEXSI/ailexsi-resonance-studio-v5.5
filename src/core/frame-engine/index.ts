@@ -55,8 +55,10 @@ export {
   mayFinalFlush,
   nowMs,
   originFromStall,
+  progressivePumpSliceEnd,
   pumpMoreSubmitEnd,
   pumpSubmitEnd,
+  requestOwnershipHolds,
   requestedPtsIsPending,
   requestedVideoFateLegal,
   REQUESTED_VIDEO_FATES,
@@ -68,6 +70,7 @@ export type {
   AfeStallSnapshot,
   PumpMoreArgs,
   PumpSubmitArgs,
+  RequestOwnershipState,
   SampleFate,
   SampleRole,
 } from "./stall";

@@ -8,10 +8,12 @@ import {
   AFE_DECODE_STALL_MS,
   AFE_WAIT_EXACT_PTS_MS,
   formatStallMessage,
+  hasFurtherUsefulInput,
   isTrueTransactionTail,
   lastRequiredDecodeSample,
   mayFinalFlush,
   nowMs,
+  progressivePumpSliceEnd,
   pumpMoreSubmitEnd,
   pumpSubmitEnd,
   streamLookaheadSamples,
@@ -269,6 +271,7 @@ export class AfeScheduler {
       this.decoder.setStallPhase("GOP_RECOVERY");
       this.decoder.noteRecoveryAttempt();
       this.decoder.bindOrigin(stallExtra(requested));
+      this.decoder.markRecoveryRebuilding([requested]);
       await this.decoder.recreate(signal);
       this.nextDecode = decodeOrigin(this.movie, requested);
       this.warm = true;
@@ -280,9 +283,13 @@ export class AfeScheduler {
       });
       this.decoder.setPrefetchHint(PREFETCH);
       this.decoder.bindOrigin(stallExtra(requested));
+      this.decoder.restoreOpenedIdentity(requested, this.decoder.chunkTimestampUs(this.movie.samples[requested]!));
       this.decoder.protectSample(requested);
       pump(requested);
       pumpMore(requested);
+      if (this.nextDecode <= requested) pumpThrough(requested);
+      this.decoder.confirmPtsRegistered(requested, this.decoder.chunkTimestampUs(this.movie.samples[requested]!));
+      this.decoder.assertOpenedOwnership(stallExtra(requested));
     };
 
     const atTail = (requested: number) =>
@@ -294,6 +301,7 @@ export class AfeScheduler {
       });
 
     const throwStall = (requested: number): never => {
+      this.decoder.assertOpenedOwnership(stallExtra(requested));
       const dump = this.decoder.snapshot({
         ...stallExtra(requested),
         stalledMs: AFE_DECODE_STALL_MS,
@@ -315,9 +323,10 @@ export class AfeScheduler {
     const exactVideoFrame = async (idx: number): Promise<VideoFrame> => {
       const extra = stallExtra(idx);
       this.decoder.bindOrigin(extra);
-      this.decoder.openRequested(idx);
+      this.decoder.openRequested(idx, extra.requestedPtsUs);
       const budgetEnd = nowMs() + AFE_DECODE_STALL_MS;
       let recovered = false;
+      const sliceSamples = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
 
       try {
         pump(idx);
@@ -330,6 +339,7 @@ export class AfeScheduler {
       let frame = this.decoder.takeReady(idx);
       if (frame) {
         afePerfCount("readyImmediate");
+        this.decoder.markEncoded(idx);
         return frame;
       }
 
@@ -337,13 +347,40 @@ export class AfeScheduler {
       const t0 = afePerfEnabled() ? performance.now() : 0;
       frame = await waitExact(idx, budgetEnd);
       if (!frame) {
+        this.decoder.markRecoveryRebuilding([idx]);
         pumpMore(idx);
+        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
+        this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
       }
       if (!frame && !recovered) {
         await recoverGop(idx);
         recovered = true;
-        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, nowMs() + AFE_DECODE_STALL_MS));
+        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+      }
+      while (
+        !frame &&
+        hasFurtherUsefulInput({
+          nextDecode: this.nextDecode,
+          sampleCount: this.movie.sampleCount,
+          lastRequiredDecodeSample: lastRequired,
+        })
+      ) {
+        this.decoder.markRecoveryRebuilding([idx]);
+        const sliceStart = this.nextDecode;
+        const sliceEnd = progressivePumpSliceEnd({
+          nextDecode: this.nextDecode,
+          lastRequiredDecodeSample: lastRequired,
+          sampleCount: this.movie.sampleCount,
+          sliceSamples,
+        });
+        this.decoder.setStallPhase("PUMP_LOOKAHEAD");
+        this.decoder.setPumpSlice(sliceStart, sliceEnd);
+        pumpThrough(sliceEnd);
+        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
+        this.decoder.assertOpenedOwnership(extra);
+        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+        if (nowMs() >= budgetEnd) break;
       }
       if (
         !frame &&
@@ -368,7 +405,11 @@ export class AfeScheduler {
         }
       }
       if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
-      return frame ?? throwStall(idx);
+      if (frame) {
+        this.decoder.markEncoded(idx);
+        return frame;
+      }
+      return throwStall(idx);
     };
 
     try {

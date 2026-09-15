@@ -621,3 +621,85 @@ export function installEmitThenHoldHangFlushDecoder(emitLimit: number): () => vo
   EmitThenHoldHangFlushDecoder.emitLimit = emitLimit;
   return installDecoderCtor(EmitThenHoldHangFlushDecoder);
 }
+
+/**
+ * AFE-10: first decoder instance holds (forces GOP recreate). The recreated
+ * instance emits only after `need` decode-order submits — models WebView2
+ * holding sample 38 until later DPB input arrives (submitted 44 → 140).
+ */
+export class RecoverThenNeedDecoder {
+  static instances = 0;
+  static need = 36;
+  readonly born: number;
+  decodeQueueSize = 0;
+  submitted: number[] = [];
+  emitted = 0;
+  closed = false;
+  private readonly output: HoldDecoderOptions["output"];
+  private readonly listeners = new Set<() => void>();
+
+  constructor(opts: { output: (frame: FakeVideoFrame) => void; error: (e: DOMException) => void }) {
+    this.output = opts.output;
+    this.born = RecoverThenNeedDecoder.instances++;
+  }
+
+  static async isConfigSupported(): Promise<{ supported: boolean }> {
+    return { supported: true };
+  }
+
+  configure(): void {
+    /* */
+  }
+
+  decode(chunk: { timestamp: number }): void {
+    if (this.closed) return;
+    this.submitted.push(chunk.timestamp);
+    if (this.born === 0) {
+      this.decodeQueueSize = this.submitted.length;
+      return;
+    }
+    this.decodeQueueSize = this.submitted.length - this.emitted;
+    this.tryEmit();
+  }
+
+  tryEmit(): void {
+    if (this.submitted.length < RecoverThenNeedDecoder.need) return;
+    while (this.emitted < this.submitted.length) {
+      this.output(new FakeVideoFrame(this.submitted[this.emitted++]!));
+      this.decodeQueueSize = this.submitted.length - this.emitted;
+    }
+    for (const fn of this.listeners) fn();
+  }
+
+  async flush(): Promise<void> {
+    while (this.emitted < this.submitted.length) {
+      this.output(new FakeVideoFrame(this.submitted[this.emitted++]!));
+    }
+    this.decodeQueueSize = 0;
+    for (const fn of this.listeners) fn();
+  }
+
+  reset(): void {
+    this.submitted = [];
+    this.emitted = 0;
+    this.decodeQueueSize = 0;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  addEventListener(eventType: string, fn: () => void): void {
+    if (eventType === "dequeue") this.listeners.add(fn);
+  }
+
+  removeEventListener(_eventType: string, fn: () => void): void {
+    this.listeners.delete(fn);
+  }
+}
+
+export function installRecoverThenNeedDecoder(need: number): () => void {
+  RecoverThenNeedDecoder.instances = 0;
+  RecoverThenNeedDecoder.need = need;
+  return installDecoderCtor(RecoverThenNeedDecoder);
+}
