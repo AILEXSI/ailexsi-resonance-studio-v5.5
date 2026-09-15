@@ -433,9 +433,12 @@ export class AfeScheduler {
         });
         if (!canFlush || flushSnap.finalFlushAttempted) return;
         this.decoder.armFinalFlush([idx]);
+        this.decoder.retainExactIdentity(idx, extra.requestedPtsUs);
         this.decoder.assertOpenedOwnership(extra);
         this.decoder.setStallPhase("FINAL_FLUSH");
         await this.decoder.flushTail(signal);
+        this.decoder.retainExactIdentity(idx, extra.requestedPtsUs);
+        this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx);
         if (!frame) {
           const remain = Math.max(16, budgetEnd - nowMs());

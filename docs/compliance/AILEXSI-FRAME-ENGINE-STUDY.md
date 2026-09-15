@@ -978,3 +978,23 @@ STAGE 3 (only because parity holds by the same `makeChunk` / `decoderConfigOf` p
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest 720p30 sample 34 PTS 1458333 / lastDecoded 458333 / gopStart 0 → Req==Dec==Enc, unresolved 0, `packetParity yes`, `configParity yes`, first submit sample 0 key, HIGH < 40, exact frame, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-15 — exact-PTS tail ownership + FINAL_FLUSH drain (V5.5)
+
+Windows AFE-14 720p30 first-fill (no recreate): sample 134 PTS 5625000, FINAL_FLUSH, pending[] ready[], decodeQueue 2, lastDecodedTs 5583333, gopStart 0, resets/recreates/recoveryAttempts 0, packetParity n/a, submitted 140 lastRequired 140, streamPts 0 streamReady 0, flushes 1, videoReq 40 Dec/Enc 39, unresolved 1, ptsRegistered yes, waiterActive no, ownershipRebuilt yes, ownershipState FINAL_FLUSH_ARMED, usefulInputExhausted yes, HIGH 40 LOW 6 Peak 40, backpressureBlocked no, stalledMs 3000.
+
+## Cause
+
+`ptsRegistered yes` with `streamPts 0` / `streamReady 0` / waiter null is stale ever-registered bookkeeping. `FINAL_FLUSH_ARMED` was treated as ownership while exact PTS identity had already left `PtsIndexMap`. Not recreate, not GOP walk-back, not HIGH_WATER (`decodeQueue=2`).
+
+## Fix
+
+1. TRACE: `OPEN_REQUEST` … takeExact insert/leave … `RESOLVE_STREAM` / rematch / fate for the opened sample. Dump: `ptsEverRegistered`, `ptsCurrentlyRegistered`, `targetPts*`, `tailOutput*`, `exactIdentity`.
+2. INVARIANT: until RESOLVED/ERROR/ABORT retain identity via PtsIndexMap OR streamReady exact OR exact waiter OR active recovery rebuild. FINAL_FLUSH_ARMED alone → immediate `AFE_REQUEST_OWNERSHIP_LOST`.
+3. CASE A (target output exists): rematch exact opened PTS after map miss. Never discard an opened unresolved frame. Bookkeeping only.
+4. CASE B (never emitted) + lastRequired 140 already closes sample 134: genuine WebCodecs drain if queue>0 after flush; optional ONE extra flush. Not GOP recreate, not frame fallback.
+5. AFE-11 FINAL_FLUSH when useful input is exhausted stays. First-fill HIGH 40 / post-recreate HIGH 20 unchanged.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest 720p30 sample 134 PTS 5625000 / lastDecoded 5583333 / submitted 140 / queue 2 → Req==Dec==Enc, unresolved 0, `ptsCurrentlyRegistered` honest, exact frame, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+

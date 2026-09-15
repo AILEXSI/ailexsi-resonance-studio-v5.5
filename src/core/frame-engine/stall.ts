@@ -71,6 +71,29 @@ export type RequestOwnershipState =
   | "ABORTED"
   | "OWNERSHIP_LOST";
 
+/** Compact exact-PTS identity event (AFE-15 lifecycle / takeExact audit). */
+export type PtsIdentityAction =
+  | "OPEN_REQUEST"
+  | "PTS_INSERT"
+  | "PTS_LEAVE_TAKE_EXACT"
+  | "PTS_LEAVE_DELETE"
+  | "PTS_LEAVE_CLEAR"
+  | "REMATCH_EXACT_PTS"
+  | "RESOLVE_STREAM"
+  | "READY"
+  | "RETAIN"
+  | "FATE";
+
+export type PtsIdentityEvent = {
+  index: number;
+  ptsUs: number | null;
+  action: PtsIdentityAction;
+  fate?: SampleFate;
+  streamPtsPending: number;
+  streamReady: boolean;
+  waiter: boolean;
+};
+
 /** Requested VIDEO cannot be DISCARDED_NOT_NEEDED. */
 export const REQUESTED_VIDEO_FATES: readonly SampleFate[] = ["READY", "RESOLVED", "ERROR", "ABORTED"];
 
@@ -202,6 +225,21 @@ export type AfeStallSnapshot = {
   postRecreateSubmitted: number;
   postRecreateOutputs: number;
   postRecreateLastDecodedTs: number | null;
+  /** AFE-15: sticky — PTS was inserted at least once. Not live identity. */
+  ptsEverRegistered: boolean;
+  /** AFE-15: live PtsIndexMap / exact pending PTS for the focus sample. */
+  ptsCurrentlyRegistered: boolean;
+  /** Opened request PTS the dump is focused on. */
+  targetPtsUs: number | null;
+  /** WebCodecs emitted this exact PTS at least once (CASE A). */
+  targetPtsSeen: boolean;
+  targetPtsOutputCount: number;
+  targetPtsLastSeenTs: number | null;
+  /** Compact FINAL_FLUSH-window output timestamps (capped). */
+  tailOutputTimestamps: number[];
+  tailOutputCount: number;
+  /** Live identity: map OR ready exact OR waiter OR active rebuild. */
+  exactIdentityHolds: boolean;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -317,6 +355,15 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     postRecreateSubmitted: 0,
     postRecreateOutputs: 0,
     postRecreateLastDecodedTs: null,
+    ptsEverRegistered: false,
+    ptsCurrentlyRegistered: false,
+    targetPtsUs: null,
+    targetPtsSeen: false,
+    targetPtsOutputCount: 0,
+    targetPtsLastSeenTs: null,
+    tailOutputTimestamps: [],
+    tailOutputCount: 0,
+    exactIdentityHolds: false,
     ...partial,
   };
 }
@@ -736,29 +783,110 @@ export function isTransactionComplete(args: {
 }
 
 /**
- * AFE-11: opened unresolved VIDEO must own decode. Ledger-only without a
- * waiter, pending/registered PTS, recovery rebuild, or armed FINAL_FLUSH
- * is immediate OWNERSHIP_LOST (no 3s mystery stall).
+ * AFE-15: until RESOLVED / ERROR / ABORT, retain exact identity via
+ * PtsIndexMap OR streamReady exact OR exact waiter OR active recovery
+ * rebuild. FINAL_FLUSH_ARMED and stale ptsEverRegistered are not identity.
+ * Else immediate AFE_REQUEST_OWNERSHIP_LOST.
+ *
+ * `ptsRegistered` means currently registered (live map / exact pending),
+ * never "ever registered".
+ */
+export function exactRequestIdentityHolds(args: {
+  unresolvedRequestedVideoFrames: number;
+  streamWaiterIndex?: number | null;
+  pendingPtsCount?: number;
+  pendingPts?: readonly number[] | null;
+  requestedPtsUs?: number | null;
+  ptsRegistered?: boolean;
+  ptsCurrentlyRegistered?: boolean;
+  streamReadyExact?: boolean;
+  recoveryRebuilding?: boolean;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames <= 0) return true;
+  if (args.streamWaiterIndex != null) return true;
+  if (args.streamReadyExact) return true;
+  if (args.recoveryRebuilding) return true;
+  if (args.ptsCurrentlyRegistered || args.ptsRegistered) return true;
+  if (args.requestedPtsUs != null && args.pendingPts != null) {
+    return args.pendingPts.includes(args.requestedPtsUs);
+  }
+  const pending =
+    args.pendingPtsCount ??
+    (args.pendingPts != null ? args.pendingPts.length : 0);
+  return pending > 0;
+}
+
+/**
+ * AFE-11/15: opened unresolved VIDEO must own decode. Ledger-only without
+ * live exact identity is immediate OWNERSHIP_LOST (no 3s mystery stall).
+ * `finalFlushArmed` / `finalFlushInProgress` are accepted for signature
+ * compatibility and ignored — a flag is not PTS identity.
  */
 export function requestOwnershipHolds(args: {
   unresolvedRequestedVideoFrames: number;
   streamWaiterIndex?: number | null;
   pendingPtsCount?: number;
   pendingPts?: readonly number[] | null;
+  requestedPtsUs?: number | null;
   ptsRegistered?: boolean;
+  ptsCurrentlyRegistered?: boolean;
+  streamReadyExact?: boolean;
   recoveryRebuilding?: boolean;
   finalFlushArmed?: boolean;
   finalFlushInProgress?: boolean;
 }): boolean {
-  if (args.unresolvedRequestedVideoFrames <= 0) return true;
-  if (args.streamWaiterIndex != null) return true;
-  if (args.recoveryRebuilding) return true;
-  if (args.finalFlushArmed || args.finalFlushInProgress) return true;
-  if (args.ptsRegistered) return true;
-  const pending =
-    args.pendingPtsCount ??
-    (args.pendingPts != null ? args.pendingPts.length : 0);
-  return pending > 0;
+  return exactRequestIdentityHolds(args);
+}
+
+/**
+ * Human 720p30 tail: lastRequired 140 vs requested 134. Closed when
+ * submitted reached lastRequired and lastRequired already covers the
+ * structural B-ref window or EOF. Not a reason to raise HIGH_WATER.
+ */
+export function tailDependencyClosed(args: {
+  requested: number;
+  lastRequiredDecodeSample: number;
+  lastSubmittedSample?: number | null;
+  sampleCount: number;
+  maxReorderSamples?: number;
+  prefetch?: number;
+}): boolean {
+  if (args.sampleCount <= 0) return true;
+  const submitted = args.lastSubmittedSample ?? args.lastRequiredDecodeSample;
+  if (submitted < args.lastRequiredDecodeSample) return false;
+  const structural = lastRequiredDecodeSample({
+    lastRequested: args.requested,
+    maxReorderSamples: args.maxReorderSamples ?? 0,
+    prefetch: args.prefetch ?? 1,
+    sampleCount: args.sampleCount,
+  });
+  return args.lastRequiredDecodeSample >= structural;
+}
+
+/**
+ * CASE B genuine WebCodecs drain — all of: unresolved, useful input
+ * exhausted, FINAL_FLUSH already attempted, target PTS never seen,
+ * hardware still holding (queue>0) or lastDecoded is not the target,
+ * not rebuilding, not complete. Not a GOP/backpressure escape.
+ */
+export function mayGenuineFinalDrain(args: {
+  unresolvedRequestedVideoFrames: number;
+  usefulInputExhausted: boolean;
+  finalFlushAttempted: boolean;
+  targetPtsSeen: boolean;
+  decodeQueueSize: number;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+  recoveryRebuilding?: boolean;
+  transactionComplete?: boolean;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames <= 0) return false;
+  if (!args.usefulInputExhausted) return false;
+  if (!args.finalFlushAttempted) return false;
+  if (args.targetPtsSeen) return false;
+  if (args.recoveryRebuilding) return false;
+  if (args.transactionComplete) return false;
+  return args.decodeQueueSize > 0;
 }
 
 /**
@@ -924,6 +1052,15 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `transactionComplete ${d.transactionComplete}`,
     `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
     `ptsRegistered ${d.ptsRegistered ? "yes" : "no"}`,
+    `ptsEverRegistered ${d.ptsEverRegistered ? "yes" : "no"}`,
+    `ptsCurrentlyRegistered ${d.ptsCurrentlyRegistered ? "yes" : "no"}`,
+    `targetPts ${d.targetPtsUs}`,
+    `targetPtsSeen ${d.targetPtsSeen ? "yes" : "no"}`,
+    `targetPtsOutputs ${d.targetPtsOutputCount}`,
+    `targetPtsLastSeenTs ${d.targetPtsLastSeenTs}`,
+    `tailOutputs ${d.tailOutputCount}`,
+    `tailOutputTs [${d.tailOutputTimestamps.join(",")}]`,
+    `exactIdentity ${d.exactIdentityHolds ? "yes" : "no"}`,
     `waiterActive ${d.ownershipWaiterActive ? "yes" : "no"}`,
     `ownershipRebuilt ${d.ownershipRebuilt ? "yes" : "no"}`,
     `recoveryRebuilding ${d.recoveryRebuilding ? "yes" : "no"}`,
