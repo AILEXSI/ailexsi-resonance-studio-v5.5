@@ -37,15 +37,18 @@ Same `shape(x)=clamp01(pow(clamp01(x*gain), gamma))`. No AGC. No per-song normal
 
 ## Before / after (same Phase 1 PCM, presentation)
 
-| PCM | 01 rms | 02 rms | 01 bass | 02 bass | 01 energy | 02 energy |
-| --- | --- | --- | --- | --- | --- | --- |
-| silence | 0 | 0 | 0 | 0 | 0 | 0 |
-| quiet 220 Hz amp 0.06 | 0.180 | ~0.218 | 0.180 | ~0.218 | 0.180 | ~0.218 |
-| pad 220 Hz amp 0.35 | 0.676 | **~0.720** | 0.676 | ~0.720 | 0.676 | ~0.720 |
-| kick 70 Hz (no extra onset at sample) | 0.570 | higher | 0.534 | higher | 0.545 | higher |
-| kick + onset | +0.24 | **+0.38** | continuous | continuous | punch | punch |
+| PCM | 01 rms | 02 rms | 01 bass | 02 bass | 01 mid | 02 mid | 01 energy | 02 energy |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| silence | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| quiet 220 Hz amp 0.06 | 0.180 | **0.217** | 0.180 | 0.217 | 0 | 0 | 0.180 | 0.217 |
+| pad 220 Hz amp 0.35 | 0.676 | **0.721** | 0.676 | 0.721 | 0 | 0 | 0.676 | 0.721 |
+| kick 70 Hz | 0.570 | **0.617** | 0.534 | 0.582 | 0.010 | **0.051** | 0.545 | 0.599 |
+| snare | 0.346 | **0.393** | 0.412 | 0.460 | 0.393 | **0.441** | 0.379 | 0.427 |
+| bass 55 Hz amp 0.55 | 0.943 | 0.974 | 0.943 | 0.974 | 0 | 0 | 0.943 | 0.974 |
 
-Quiet stays well below pad. 0.25 < 0.50 < 1.00 amp. Mute → 0.
+Onset adds **0.38** to energy (was 0.24). Pad 0.35 stays at **0.721**, not 1. Quiet remains ~30% of pad. 0.25 < 0.50 < 1.00 amp. Mute → 0.
+
+`tsc --noEmit` clean. Focused VIS-RESPONSE + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **134/134**.
 
 ## Untouched
 

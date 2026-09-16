@@ -164,7 +164,8 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Why | 01 `transientBoost` only hit `energy`, which scenes do not read. Wave rings used `beatPulse*0.15`. Lattice warp was bass-only (pad > kick). |
 | Diff | Defaults **gain 1.25 / gamma 0.68 / spread 18 / transient 0.38** (01: 1.2 / 0.75 / 12 / 0.24). Pad 0.35 stays ~0.72, not 1. Shared `scene-impact.ts` for Resonance Wave + Void Lattice. Same `applyVisResponse` for Preview and Export. No AGC. |
 | Untouched | Analyser core; AUDIO-01; AFE; ENC-01; STRESS mux; volume. |
-| Test | Same vis-response file + 02 vs 01 assertions + lattice/wave geometry. |
+| Test | Same vis-response file + 02 vs 01 assertions + lattice/wave geometry (20). |
+| Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **134/134**. |
 | Human remaining | Short obvious-beat section vs 01 EXE, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
 
 ## Verification paths
