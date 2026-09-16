@@ -52,7 +52,9 @@ import {
 
 export { compositeVideoAt as exportComposite } from "../transition";
 import {
+  createExportFeatureSession,
   visFeaturesForExport,
+  type ExportFeatureSession,
   type MixPcm,
   renderVisualizerScene,
   visualizerEventAt,
@@ -151,6 +153,7 @@ function paintVisualizer(
   timeMs: number,
   dt: number,
   mix?: MixPcm | null,
+  session?: ExportFeatureSession | null,
 ): void {
   if (resolvePictureSource(exportPictureCtx(job), timeMs).kind !== "vis") return;
   const covering = visualizerEventAt(job.visualizer, timeMs);
@@ -162,6 +165,7 @@ function paintVisualizer(
   if (!sceneId) return;
   const features = visFeaturesForExport(timeMs, job.durationMs, mix, {
     timelineOriginMs: job.startMs,
+    extractor: session ?? undefined,
   });
   renderVisualizerScene(ctx, job.width, job.height, sceneId, features, dt);
 }
@@ -350,6 +354,11 @@ export async function exportWithWebCodecs(
   const frameDurUs = Math.round(1_000_000 / job.fps);
   const dt = 1 / job.fps;
   const runs = groupFrameRuns(job, frameCount, job.fps);
+  const visSession = createExportFeatureSession(mixed, {
+    hopMs: 1000 / Math.max(1, job.fps),
+    durationMs: job.durationMs,
+    timelineOriginMs: job.startMs,
+  });
 
   const waitForQueue = async () => {
     if (!afePerfEnabled()) {
@@ -383,7 +392,7 @@ export async function exportWithWebCodecs(
 
   const encodeCanvas = async (i: number) => {
     const timeMs = (i / job.fps) * 1000;
-    paintVisualizer(ctx, job, timeMs, dt, mixed);
+    paintVisualizer(ctx, job, timeMs, dt, mixed, visSession);
     await waitForQueue();
     const frame = new VideoFrame(canvas, {
       timestamp: i * frameDurUs,
@@ -396,7 +405,7 @@ export async function exportWithWebCodecs(
   const paintFallback = (i: number) => {
     const timeMs = (i / job.fps) * 1000;
     beginExportFrame(ctx, width, height, job, timeMs);
-    paintVisualizer(ctx, job, timeMs, dt, mixed);
+    paintVisualizer(ctx, job, timeMs, dt, mixed, visSession);
   };
 
   let visFrames = 0;

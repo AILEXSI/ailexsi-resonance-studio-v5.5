@@ -16,10 +16,22 @@ export { createVisualEngine, ensureBuiltinsRegistered, getRegisteredScene, regis
 export type { VisualEngine } from "./engine";
 export { builtinScenes } from "./scenes";
 export {
+  ANALYSER_FFT_SIZE,
+  ANALYSER_MAX_DECIBELS,
+  ANALYSER_MIN_DECIBELS,
+  ANALYSER_SMOOTHING,
   applySilenceGate,
+  assembleAudioFeatures,
+  bandsFromSpectrum,
   createFeatureExtractor,
+  createFeatureState,
+  createOfflineFeatureExtractor,
+  featuresFromAnalyserBytes,
   isSilentEnergy,
+  offlineExtractorFor,
+  rmsFromTimeDomain,
   SILENCE_BASS,
   SILENCE_RMS,
 } from "./feature-extractor";
-export type { FeatureExtractor } from "./feature-extractor";
+export type { FeatureExtractor, OfflineFeatureExtractor } from "./feature-extractor";
+export { analyserSpectrumFromWindow, binFrequencyHz } from "./fft";

@@ -126,6 +126,19 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Gates | `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **81/81**. Full suite **1265 passed / 6 failed / 1271**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
 | Human remaining | Same ~29:11 1080p30 VIDEO+VIS+AUDIO project. Fertig + audible AAC start/mid/end + A/V sync. EXE path/SHA left for coordinator. Details: `docs/compliance/AUDIO-01-LONG-FORM-FAIL-HONEST.md`. |
 
+## VIS-SYNC-01 — preview / export audio-reactivity parity
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Do **not** merge PR #19–#23 or this branch.
+
+| | |
+| --- | --- |
+| Human | AUDIO-01 long-form MP4: mix+AAC audible. Studio VIS reacts. Exported VIS looks unsynced / dead. Not a volume bug. |
+| First divergence | Export used `mixEnergyAt` (~23 ms LPF / sample-diff) + `syntheticSpectrum()` (64 bins). Preview uses AnalyserNode FFT 2048 / 1024 bins + persistent onset. Kick Δrms **+0.309**; pad Δbass **−0.521**; spectrum **1024 vs 64**. |
+| Diff | Shared core (`assembleAudioFeatures` / `stepOnset` / FFT bands). Adapter A = live AnalyserNode. Adapter B = deterministic offline FFT on mixed PCM. Sequential export state. No `syntheticSpectrum` when PCM exists. Volume still proportional (no normalize). |
+| Untouched | Scenes; AUDIO-01 mix/`expectsAudio`/mux; AFE; ENC-01; STRESS-01..04 mux; Mediabunny/WebM. |
+| Test | `tests/visualizer/vis-sync-01-preview-export-parity.test.ts` — Phase 1 table + tests 1–8. |
+| Human remaining | Short 1–2 min obvious-beats export vs Studio preview, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-SYNC-01-PREVIEW-EXPORT-PARITY.md`. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |
