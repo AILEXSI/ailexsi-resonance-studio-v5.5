@@ -390,12 +390,13 @@ export class AfeScheduler {
       const progressiveTowardRequired = async () => {
         while (
           !frame &&
-          !this.decoder.isFrozenAtHighWaterAfterRecreate() &&
           hasFurtherUsefulInput({
             nextDecode: this.nextDecode,
             sampleCount: this.movie.sampleCount,
             lastRequiredDecodeSample: lastRequired,
-          })
+          }) &&
+          (!this.decoder.isFrozenAtHighWaterAfterRecreate() ||
+            this.decoder.canBorrowTowardLocalHorizon(idx))
         ) {
           this.decoder.markRecoveryRebuilding([idx]);
           this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
@@ -420,18 +421,20 @@ export class AfeScheduler {
 
       const tryFinalFlush = async () => {
         this.decoder.clearRecoveryRebuilding([idx]);
+        this.decoder.releaseStaleFinalFlushIfLiveHorizonOpen(idx);
         const flushSnap = this.decoder.snapshot(extra);
-        const canFlush = mayFinalFlush({
-          unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
-          nextDecode: this.nextDecode,
-          sampleCount: this.movie.sampleCount,
-          lastRequiredDecodeSample: lastRequired,
-          lastSubmittedSample: this.nextDecode - 1,
-          streamWaiterIndex: flushSnap.streamWaiterIndex,
-          recoveryRebuilding: false,
-          transactionComplete: flushSnap.transactionComplete,
-        });
-        if (!canFlush || flushSnap.finalFlushAttempted) return;
+        const canFlush =
+          mayFinalFlush({
+            unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
+            nextDecode: this.nextDecode,
+            sampleCount: this.movie.sampleCount,
+            lastRequiredDecodeSample: lastRequired,
+            lastSubmittedSample: this.nextDecode - 1,
+            streamWaiterIndex: flushSnap.streamWaiterIndex,
+            recoveryRebuilding: false,
+            transactionComplete: flushSnap.transactionComplete,
+          }) || this.decoder.mayFormulaHorizonDrain(idx);
+        if (!canFlush || this.decoder.finalFlushConsumedThisDecoder) return;
         this.decoder.armFinalFlush([idx]);
         this.decoder.retainExactIdentity(idx, extra.requestedPtsUs);
         this.decoder.assertOpenedOwnership(extra);
@@ -441,13 +444,43 @@ export class AfeScheduler {
         this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx);
         if (!frame) {
-          const remain = Math.max(16, budgetEnd - nowMs());
+          /* CASE B already drained. Do not sit the leftover 3s budget with a
+           * waiter that is then cleared (human: waiter null, stalledMs 3000). */
+          const remain = Math.min(AFE_WAIT_EXACT_PTS_MS, Math.max(16, budgetEnd - nowMs()));
           frame = await this.decoder.awaitReady(idx, signal, extra, {
             allowSkip: false,
             throwOnTimeout: false,
             timeoutMs: remain,
           });
         }
+      };
+
+      const tryLivenessReopen = async (): Promise<void> => {
+        if (this.decoder.livenessReopenConsumed) return;
+        if (!this.decoder.mayPostResetLivenessReopenFor(idx)) return;
+        /* AFE-24: fingerprint match after AFE-22 is enough. Do not wait for
+         * hardHorizonResetExhausted (lastDecoded===lastDecodedAtSubmit) —
+         * WebView2 emits the 458333 death after the last submit. */
+        this.decoder.noteLivenessReopen();
+        const origin = this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx);
+        await this.decoder.coldReopenNativeDecoder(signal);
+        this.nextDecode = origin;
+        this.decoder.beginStream(span.needed, span.decodeStart, {
+          lastRequested,
+          lastRequiredDecodeSample: lastRequired,
+          requestedIndexes,
+          keepResolved: true,
+        });
+        this.decoder.setPrefetchHint(PREFETCH);
+        this.decoder.setGopKeyframeStart(origin);
+        this.decoder.bindOrigin(extra);
+        this.decoder.restoreOpenedIdentity(idx, extra.requestedPtsUs);
+        this.decoder.protectSample(idx);
+        this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
+        await pump(idx);
+        await pumpMore(idx);
+        frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+        if (!frame) await progressiveTowardRequired();
       };
 
       /* First-fill HIGH admits AFE-10 ~36 submits before any STEP C recreate. */
@@ -463,9 +496,42 @@ export class AfeScheduler {
         if (await tryEarlierKeyframe()) {
           frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
           if (!frame) await progressiveTowardRequired();
+        } else if (this.decoder.mayHardHorizonResetFor(idx)) {
+          /* AFE-21: lastSubmitted < requested, queue >= HARD.
+           * AFE-22: requested already submitted, exact PTS unseen, decoder
+           * dead after recreate — do not keep borrowing toward 44/144. */
+          this.decoder.capturePostResetFingerprint();
+          this.decoder.noteHardHorizonReset();
+          const origin = this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx);
+          await recoverGop(idx, origin);
+          recovered = true;
+          frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+          if (!frame) await progressiveTowardRequired();
+          if (!frame) await tryLivenessReopen();
+          if (!frame && this.decoder.livenessReopenExhausted(idx)) {
+            return throwStall(idx);
+          }
+          if (
+            !frame &&
+            this.decoder.hardHorizonResetExhausted(idx) &&
+            !this.decoder.mayPostResetLivenessReopenFor(idx) &&
+            !this.decoder.livenessReopenConsumed
+          ) {
+            return throwStall(idx);
+          }
+        } else if (this.decoder.canBorrowTowardLocalHorizon(idx)) {
+          /* gopStart 0 / no earlier I — still spend HARD toward sample 81. */
+          await progressiveTowardRequired();
         }
       }
       if (!frame) await tryFinalFlush();
+      /* Human @ dea72ca: FINAL_FLUSH then 3s stall with fingerprintMatch yes
+       * and livenessReopen no — reopen was skipped because exhausted was
+       * false. Invoke here so the mix cannot sit 3s after the same death. */
+      if (!frame) await tryLivenessReopen();
+      if (!frame && this.decoder.livenessReopenExhausted(idx)) {
+        return throwStall(idx);
+      }
       if (t0) afePerfAdd("decodeQueueWait", performance.now() - t0);
       if (frame) {
         this.decoder.markEncoded(idx);

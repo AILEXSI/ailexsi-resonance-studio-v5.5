@@ -1,3 +1,5 @@
+import { formatBuildIdentityLedger } from "../build-info";
+
 /**
  * AFE-05/07 — B-frame export stall diagnostics + recover-without-mid-run-flush.
  *
@@ -240,6 +242,49 @@ export type AfeStallSnapshot = {
   tailOutputCount: number;
   /** Live identity: map OR ready exact OR waiter OR active rebuild. */
   exactIdentityHolds: boolean;
+  /** AFE-17: opened / focused requested sample index (alias of source). */
+  requestedSample: number | null;
+  /**
+   * AFE-17: LOCAL decode-order horizon for the current exact requested sample.
+   * min(lastRequired(requested), transaction lastRequired). Not lastRequired=140.
+   */
+  currentTargetRequiredSample: number | null;
+  /**
+   * AFE-19: formula lastRequired(requested) before the post-horizon extension.
+   * Production VIDEO→VIS→VIDEO: 67 while live currentTarget is 77.
+   */
+  formulaTargetRequiredSample: number | null;
+  /** Sequential prefetch hint used for HIGH/LOW / local horizon. */
+  prefetch: number | null;
+  /** AFE-17: normal AFE-14/16 backpressure threshold (decodeQueueHighWater). */
+  softHighWater: number;
+  /**
+   * AFE-17: bounded emergency queue ceiling. Soft + remaining local-horizon
+   * credits, capped by lookahead+prefetch. Never lastRequired=140, never ~125.
+   */
+  hardDependencyCeiling: number;
+  /** Submitted minus emitted (post-recreate when available). */
+  submittedMinusOutputs: number;
+  /**
+   * AFE-21: one HARD-horizon reset+rebuild already used this transaction.
+   * Typed stall only after that escape is exhausted.
+   */
+  hardHorizonResetUsed: boolean;
+  /** AFE-23: lastDecodedTs captured before the AFE-22 reset. */
+  postResetFingerprintTs: number | null;
+  /** AFE-23: postRecreateOutputs captured before the AFE-22 reset. */
+  postResetFingerprintOutputs: number;
+  /** AFE-23: post-reset decoder died at the same lastDecoded / output band. */
+  postResetFingerprintMatch: boolean;
+  /** AFE-23: one cold native-decoder reopen after identical reset death. */
+  livenessReopenUsed: boolean;
+  /**
+   * AFE-24: why reopen ran or was skipped. `yes` after the path executes.
+   * Human @ dea72ca: match yes but reason was pending — scheduler never called it.
+   */
+  livenessReopenReason: string | null;
+  /** AFE-23: VIDEO run after VIS/black evicted the cached decoder. */
+  coldOpenAfterVis: boolean;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -364,6 +409,20 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     tailOutputTimestamps: [],
     tailOutputCount: 0,
     exactIdentityHolds: false,
+    requestedSample: null,
+    currentTargetRequiredSample: null,
+    formulaTargetRequiredSample: null,
+    prefetch: null,
+    softHighWater: 0,
+    hardDependencyCeiling: 0,
+    submittedMinusOutputs: 0,
+    hardHorizonResetUsed: false,
+    postResetFingerprintTs: null,
+    postResetFingerprintOutputs: 0,
+    postResetFingerprintMatch: false,
+    livenessReopenUsed: false,
+    livenessReopenReason: null,
+    coldOpenAfterVis: false,
     ...partial,
   };
 }
@@ -453,7 +512,11 @@ export function decodeQueueLowWater(
  * Queued decoder input does **not** necessarily produce the requested PTS
  * (or any further output). Producer spends remaining HIGH-queue credits
  * toward lastRequired until exact ready, HIGH_WATER, or lastRequired is
- * fully submitted. HIGH_WATER remains the hard cap.
+ * fully submitted. SOFT HIGH_WATER remains the normal cap. AFE-17/18 may
+ * borrow a bounded HARD_DEPENDENCY_CEILING when the live local target is
+ * still unsubmitted and the queue is already at SOFT. AFE-18 may extend
+ * that local target by one lookahead+prefetch window if the formula
+ * horizon was submitted and the exact PTS still has not appeared.
  */
 export function mustAdvanceTowardDependencyHorizon(args: {
   lastSubmittedSample: number | null;
@@ -470,11 +533,400 @@ export function mustAdvanceTowardDependencyHorizon(args: {
 }
 
 /**
+ * LOCAL decode-order horizon for the CURRENT exact requested sample.
+ * lastRequiredDecodeSample(lastRequested=requested), then capped by the
+ * transaction-wide lastRequired so lastRequired=140 cannot authorize a flood.
+ */
+export function currentTargetRequiredSample(args: {
+  requested: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  sampleCount: number;
+  lastRequiredDecodeSample?: number;
+  nextRefOrGop?: number | null;
+}): number {
+  const local = lastRequiredDecodeSample({
+    lastRequested: args.requested,
+    maxReorderSamples: args.maxReorderSamples,
+    prefetch: args.prefetch,
+    sampleCount: args.sampleCount,
+    nextRefOrGop: args.nextRefOrGop,
+  });
+  if (args.lastRequiredDecodeSample == null) return local;
+  return Math.min(local, args.lastRequiredDecodeSample);
+}
+
+/**
+ * HARD_DEPENDENCY_CEILING — emergency queue cap for the LIVE local horizon.
+ *
+ *   extraCap = L + B          // lookahead + prefetch; maxReorder already in SOFT
+ *   extra    = min(remaining to live local horizon, extraCap)
+ *   HARD     = min(CAP 48, SOFT + extra)
+ *
+ * When remaining is 0 (formula horizon already submitted) HARD==SOFT unless
+ * AFE-18 post-horizon extends the live target. Never lastRequired=140/102.
+ * Never the old 40/125 flood. First-fill also derives extra when remaining>0.
+ */
+export function hardDependencyCeiling(args: {
+  softHighWater: number;
+  lastSubmittedSample: number | null;
+  currentTargetRequiredSample: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  afterRecreate?: boolean;
+}): number {
+  const soft = Math.max(1, args.softHighWater | 0);
+  const submitted = args.lastSubmittedSample ?? -1;
+  const remaining = Math.max(0, args.currentTargetRequiredSample - submitted);
+  const extraCap =
+    decodeWindowLookahead(args.maxReorderSamples, args.prefetch) +
+    decodeWindowBNeed(args.prefetch);
+  const extra = Math.min(remaining, Math.max(0, extraCap));
+  return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, soft + extra);
+}
+
+/**
+ * AFE-18: formula lastRequired(requested) was submitted but exact PTS still
+ * missing and lastDecoded is behind the target. One more lookahead+prefetch
+ * window past the formula — not transaction lastRequired (102/140).
+ */
+export function postHorizonRequiredSample(args: {
+  requested: number;
+  currentTargetRequiredSample: number;
+  lastSubmittedSample: number | null;
+  lastRequiredDecodeSample: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  sampleCount: number;
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  lastDecodedTimestamp: number | null;
+  targetPtsUs: number | null;
+}): number {
+  const formula = args.currentTargetRequiredSample;
+  if (args.exactReady || args.targetPtsSeen) return formula;
+  const submitted = args.lastSubmittedSample ?? -1;
+  if (submitted < formula) return formula;
+  if (args.lastDecodedTimestamp == null || args.targetPtsUs == null) return formula;
+  if (args.lastDecodedTimestamp >= args.targetPtsUs) return formula;
+  const extra =
+    streamLookaheadSamples(args.maxReorderSamples, args.prefetch) +
+    decodeWindowBNeed(args.prefetch);
+  const extended = formula + Math.max(0, extra);
+  const hi = args.sampleCount > 0 ? args.sampleCount - 1 : extended;
+  return Math.min(hi, args.lastRequiredDecodeSample, extended);
+}
+
+/**
+ * After the live local horizon is submitted, held decodeQueue may still
+ * contain the exact PTS. Allow one ownership-retaining flush/drain — not
+ * a mid-run pressure flush, not a flood to lastRequired.
+ */
+export function mayLocalHorizonFinalFlush(args: {
+  unresolvedRequestedVideoFrames: number;
+  lastSubmittedSample: number | null;
+  currentTargetRequiredSample: number;
+  /** Formula lastRequired(requested). When set, drain is legal at formula — not only at live 77. */
+  formulaTargetRequiredSample?: number;
+  /** When set, drain is legal once the exact requested sample itself is submitted. */
+  requestedSample?: number;
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  decodeQueueSize: number;
+  outputProgressed: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+  recoveryRebuilding?: boolean;
+  transactionComplete?: boolean;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames <= 0) return false;
+  if (args.exactReady || args.targetPtsSeen) return false;
+  if (args.transactionComplete) return false;
+  if (args.recoveryRebuilding) return false;
+  const horizon = args.formulaTargetRequiredSample ?? args.currentTargetRequiredSample;
+  const flushAt =
+    args.requestedSample != null ? Math.min(horizon, args.requestedSample) : horizon;
+  if ((args.lastSubmittedSample ?? -1) < flushAt) return false;
+  if (args.decodeQueueSize <= 0) return false;
+  if (args.outputProgressed) return false;
+  if (args.lastDecodedTimestamp == null || args.targetPtsUs == null) return false;
+  return args.lastDecodedTimestamp < args.targetPtsUs;
+}
+
+/**
+ * AFE-17/18/20 HARD borrow. Exact unresolved, useful input remains,
+ * live currentTargetRequired > lastSubmitted, queue already at/above SOFT
+ * and still below HARD. Neighbor outputProgress does NOT cancel borrow —
+ * Shape A lastDecoded 2625000 / 62 post-recreate outputs still left
+ * lastSubmitted 82 < requested 90 < target 96 with queue 15 ∈ (12, 22).
+ */
+export function mayBorrowHardDependencyCredits(args: {
+  exactReady: boolean;
+  usefulInputRemains: boolean;
+  currentTargetRequiredSample: number;
+  lastSubmittedSample: number | null;
+  outputProgressed: boolean;
+  decodeQueueSize: number;
+  softHighWater: number;
+  hardDependencyCeiling: number;
+  afterRecreate?: boolean;
+}): boolean {
+  if (args.afterRecreate === false) return false;
+  if (args.exactReady) return false;
+  if (!args.usefulInputRemains) return false;
+  if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
+  if (args.decodeQueueSize < args.softHighWater) return false;
+  if (args.decodeQueueSize >= args.hardDependencyCeiling) return false;
+  return args.hardDependencyCeiling > args.softHighWater;
+}
+
+/**
+ * AFE-20: SOFT freeze / queue already above SOFT must not kill HARD borrow
+ * while the exact requested sample / its live local horizon is still
+ * unsubmitted. Shape A: lastSubmitted 82 < 90 < 96, queue 15 ∈ (SOFT 12, HARD 22).
+ * `frozenAtSoftHighWater` is accepted for signature compatibility — a flag
+ * is not required once queue is already in the HARD band.
+ * Never lastRequired 102/140, never HIGH 40/125.
+ */
+export function mayAdvancePastSoftFreeze(args: {
+  frozenAtSoftHighWater: boolean;
+  lastSubmittedSample: number | null;
+  currentTargetRequiredSample: number;
+  decodeQueueSize: number;
+  hardDependencyCeiling: number;
+  exactReady: boolean;
+}): boolean {
+  if (args.exactReady) return false;
+  if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
+  return args.decodeQueueSize < args.hardDependencyCeiling;
+}
+
+/**
+ * AFE-21: HARD is an absolute decodeQueue cap. Equal is the last legal slot;
+ * greater is an overrun (human dump: queue 21 / peak 22 vs displayed HARD 20).
+ */
+export function queueRespectsHardCeiling(args: {
+  decodeQueueSize: number;
+  hardDependencyCeiling: number;
+}): boolean {
+  if (args.hardDependencyCeiling <= 0) return true;
+  return args.decodeQueueSize <= args.hardDependencyCeiling;
+}
+
+/**
+ * AFE-22: exact packet already submitted but PTS never seen after recreate.
+ * lastSubmitted >= requested is expected — do not require lastSubmitted <
+ * requested (that was AFE-21 only). Decoder liveness dead at an early
+ * lastDecoded (human 458333) with queue at/over SOFT or frozenAtHighWater.
+ * One reset+rebuild from gopStart; not a flood to lastRequired 144.
+ */
+export function maySubmittedUnseenHorizonReset(args: {
+  exactReady: boolean;
+  lastSubmittedSample: number | null;
+  requestedSample: number;
+  targetPtsSeen: boolean;
+  recreateCount: number;
+  hardHorizonResetUsed: boolean;
+  earlierKeyframeAvailable: boolean;
+  outputProgressed: boolean;
+  decodeQueueSize: number;
+  softHighWater: number;
+  frozenAtHighWater?: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): boolean {
+  if (args.exactReady) return false;
+  if (args.hardHorizonResetUsed) return false;
+  if (args.recreateCount < 1) return false;
+  if (args.earlierKeyframeAvailable) return false;
+  if (args.targetPtsSeen) return false;
+  if ((args.lastSubmittedSample ?? -1) < args.requestedSample) return false;
+  const frozen =
+    args.frozenAtHighWater === true || args.decodeQueueSize >= args.softHighWater;
+  if (!frozen) return false;
+  if (args.lastDecodedTimestamp != null && args.targetPtsUs != null) {
+    return args.lastDecodedTimestamp < args.targetPtsUs;
+  }
+  return !args.outputProgressed;
+}
+
+/**
+ * AFE-21: exact unresolved, lastSubmitted < requested < live local horizon,
+ * queue already at/over HARD, no output progress, no earlier I-frame.
+ * AFE-22: requested already submitted, targetPtsSeen no, post-recreate,
+ * no progress toward the exact PTS, queue >= SOFT or frozen.
+ * One controlled reset+ownership rebuild from gopStart, then output-gated
+ * resubmit (SOFT first; no HARD spend until lastDecoded moves).
+ * Not a flood to lastRequired 140/144, not a mid-run flush, not a timeout bump.
+ * Typed stall only after this escape has already been used.
+ */
+export function mayHardHorizonReset(args: {
+  exactReady: boolean;
+  lastSubmittedSample: number | null;
+  requestedSample: number;
+  currentTargetRequiredSample: number;
+  decodeQueueSize: number;
+  hardDependencyCeiling: number;
+  outputProgressed: boolean;
+  earlierKeyframeAvailable: boolean;
+  recreateCount: number;
+  hardHorizonResetUsed: boolean;
+  targetPtsSeen?: boolean;
+  softHighWater?: number;
+  frozenAtHighWater?: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): boolean {
+  if (args.exactReady) return false;
+  if (args.hardHorizonResetUsed) return false;
+  if (args.recreateCount < 1) return false;
+  if (args.earlierKeyframeAvailable) return false;
+  if (
+    args.targetPtsSeen === false &&
+    args.softHighWater != null &&
+    maySubmittedUnseenHorizonReset({
+      exactReady: args.exactReady,
+      lastSubmittedSample: args.lastSubmittedSample,
+      requestedSample: args.requestedSample,
+      targetPtsSeen: false,
+      recreateCount: args.recreateCount,
+      hardHorizonResetUsed: args.hardHorizonResetUsed,
+      earlierKeyframeAvailable: args.earlierKeyframeAvailable,
+      outputProgressed: args.outputProgressed,
+      decodeQueueSize: args.decodeQueueSize,
+      softHighWater: args.softHighWater,
+      frozenAtHighWater: args.frozenAtHighWater,
+      lastDecodedTimestamp: args.lastDecodedTimestamp,
+      targetPtsUs: args.targetPtsUs,
+    })
+  ) {
+    return true;
+  }
+  if (args.outputProgressed) return false;
+  if (args.decodeQueueSize < args.hardDependencyCeiling) return false;
+  const submitted = args.lastSubmittedSample ?? -1;
+  if (submitted >= args.requestedSample) return false;
+  if (submitted >= args.currentTargetRequiredSample) return false;
+  return args.requestedSample <= args.currentTargetRequiredSample;
+}
+
+/**
+ * AFE-23: same gopStart=0 recreate died at the same lastDecoded / output
+ * band (human 458333 / 10). packetParity/configParity already held — the
+ * native decoder, not the input, is dead. Another identical reset cannot help.
+ */
+export function identicalPostResetFingerprint(args: {
+  beforeLastDecodedTs: number | null;
+  afterLastDecodedTs: number | null;
+  beforeOutputs: number;
+  afterOutputs: number;
+}): boolean {
+  if (args.beforeLastDecodedTs == null || args.afterLastDecodedTs == null) return false;
+  if (args.beforeLastDecodedTs !== args.afterLastDecodedTs) return false;
+  if (args.afterOutputs <= 0) return false;
+  return Math.abs(args.afterOutputs - args.beforeOutputs) <= 2;
+}
+
+/**
+ * AFE-23/24: AFE-22 reset already used, exact still unseen, fingerprint
+ * identical. Do **not** require lastDecoded===lastDecodedAtSubmit or
+ * hardHorizonResetExhausted — WebView2 emits the 10-frame death *after*
+ * the last submit, so those stay unequal and the human dump never
+ * invoked reopen. Queue/frozen is diagnostic, not a gate.
+ * Close the native decoder and reopen cold; not another gopStart=0 recreate.
+ */
+export function mayPostResetLivenessReopen(args: {
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  hardHorizonResetUsed: boolean;
+  livenessReopenUsed: boolean;
+  earlierKeyframeAvailable: boolean;
+  identicalFingerprint: boolean;
+  decodeQueueSize: number;
+  softHighWater: number;
+  frozenAtHighWater?: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): boolean {
+  if (args.exactReady) return false;
+  if (args.targetPtsSeen) return false;
+  if (!args.hardHorizonResetUsed) return false;
+  if (args.livenessReopenUsed) return false;
+  if (args.earlierKeyframeAvailable) return false;
+  if (!args.identicalFingerprint) return false;
+  /* queue / frozen stay on the API for dumps; not a reopen gate (AFE-24). */
+  void args.decodeQueueSize;
+  void args.softHighWater;
+  void args.frozenAtHighWater;
+  if (args.lastDecodedTimestamp != null && args.targetPtsUs != null) {
+    return args.lastDecodedTimestamp < args.targetPtsUs;
+  }
+  return true;
+}
+
+/** AFE-24 stall ledger: why reopen ran or was skipped. */
+export function livenessReopenDumpReason(args: {
+  livenessReopenUsed: boolean;
+  hardHorizonResetUsed: boolean;
+  identicalFingerprint: boolean;
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  earlierKeyframeAvailable: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): string {
+  if (args.livenessReopenUsed) return "yes";
+  if (!args.hardHorizonResetUsed) return "reset-not-used";
+  if (!args.identicalFingerprint) return "fingerprint-mismatch";
+  if (args.exactReady) return "exact-ready";
+  if (args.targetPtsSeen) return "target-seen";
+  if (args.earlierKeyframeAvailable) return "earlier-keyframe";
+  if (
+    args.lastDecodedTimestamp != null &&
+    args.targetPtsUs != null &&
+    args.lastDecodedTimestamp >= args.targetPtsUs
+  ) {
+    return "decoded-past-target";
+  }
+  return "pending";
+}
+
+/**
+ * AFE-23: VIDEO-only first run stays on the cached decoder (cold first-fill
+ * works). VIDEO after VIS/black must not reuse that wrapper — human mix
+ * dies at 458333; pure VIDEO does not.
+ */
+export function mustColdOpenVideoDecoder(args: {
+  previousPictureKind: AfeDumpPictureKind | null | undefined;
+  nextPictureKind: AfeDumpPictureKind;
+}): boolean {
+  if (args.nextPictureKind !== "video") return false;
+  const prev = args.previousPictureKind;
+  if (prev == null) return false;
+  return prev === "vis" || prev === "black";
+}
+
+/**
+ * Stall pumpSlice must describe the CURRENT / last actual submit attempt.
+ * A planned leftover (e.g. 92-97) must not contradict PUMP_LOOKAHEAD:41-40.
+ */
+export function pumpSliceMatchesSubmitProvenance(args: {
+  pumpSliceStart: number | null;
+  pumpSliceEnd: number | null;
+  submitPhaseTraces: readonly SubmitPhaseTrace[];
+}): boolean {
+  const last = args.submitPhaseTraces[args.submitPhaseTraces.length - 1];
+  if (!last) return true;
+  return args.pumpSliceStart === last.submittedFrom && args.pumpSliceEnd === last.submittedTo;
+}
+
+/**
  * Submit is allowed unless the decoder is at HIGH_WATER.
  * AFE-14: output progress alone does not refill above LOW_WATER.
  * Resume only at LOW_WATER or exact frame ready — not on every dequeue
  * after lastRequired is fully submitted.
  * AFE-16: LOW_WATER must not starve when mustAdvanceTowardDependencyHorizon.
+ * AFE-17: mustBorrowHardDependencyCredits may spend queue slots up to HARD.
  */
 export function maySubmitEncoded(args: {
   decodeQueueSize: number;
@@ -484,8 +936,20 @@ export function maySubmitEncoded(args: {
   paused?: boolean;
   exactReady?: boolean;
   mustAdvanceTowardDependencyHorizon?: boolean;
+  mustBorrowHardDependencyCredits?: boolean;
+  hardDependencyCeiling?: number;
 }): boolean {
   if (args.exactReady) return true;
+  if (args.hardDependencyCeiling != null && args.decodeQueueSize >= args.hardDependencyCeiling) {
+    return false;
+  }
+  if (
+    args.mustBorrowHardDependencyCredits &&
+    args.hardDependencyCeiling != null &&
+    args.decodeQueueSize < args.hardDependencyCeiling
+  ) {
+    return true;
+  }
   if (args.decodeQueueSize >= args.highWater) return false;
   if (args.mustAdvanceTowardDependencyHorizon) return true;
   if (args.paused && args.lowWater != null && args.decodeQueueSize > args.lowWater) return false;
@@ -499,6 +963,7 @@ export function maySubmitEncoded(args: {
  * A dequeue that leaves the queue between LOW and HIGH must not refill
  * once lastRequired is fully submitted.
  * AFE-16: if mustAdvanceTowardDependencyHorizon, resume whenever queue < HIGH.
+ * AFE-17: mustBorrowHardDependencyCredits resumes while queue < HARD.
  */
 export function mayResumeDecode(args: {
   decodeQueueSize: number;
@@ -507,8 +972,20 @@ export function mayResumeDecode(args: {
   exactReady: boolean;
   paused: boolean;
   mustAdvanceTowardDependencyHorizon?: boolean;
+  mustBorrowHardDependencyCredits?: boolean;
+  hardDependencyCeiling?: number;
 }): boolean {
   if (args.exactReady) return true;
+  if (args.hardDependencyCeiling != null && args.decodeQueueSize >= args.hardDependencyCeiling) {
+    return false;
+  }
+  if (
+    args.mustBorrowHardDependencyCredits &&
+    args.hardDependencyCeiling != null &&
+    args.decodeQueueSize < args.hardDependencyCeiling
+  ) {
+    return true;
+  }
   if (args.mustAdvanceTowardDependencyHorizon && args.decodeQueueSize < args.highWater) return true;
   if (!args.paused) return args.decodeQueueSize < args.highWater;
   return args.decodeQueueSize <= args.lowWater;
@@ -913,9 +1390,10 @@ export function mayGenuineFinalDrain(args: {
   targetPtsUs?: number | null;
   recoveryRebuilding?: boolean;
   transactionComplete?: boolean;
+  localHorizonExhausted?: boolean;
 }): boolean {
   if (args.unresolvedRequestedVideoFrames <= 0) return false;
-  if (!args.usefulInputExhausted) return false;
+  if (!args.usefulInputExhausted && !args.localHorizonExhausted) return false;
   if (!args.finalFlushAttempted) return false;
   if (args.targetPtsSeen) return false;
   if (args.recoveryRebuilding) return false;
@@ -1014,8 +1492,41 @@ export function originFromStall(partial: Partial<AfeStallSnapshot>): Partial<Afe
 export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
   const d = emptyStallSnapshot(dump);
   const clip = d.originClipLabel ?? d.sourceClipLabel ?? d.originClipId ?? d.sourceClipId;
+  const requested = d.requestedSample ?? d.sourceSampleRequested ?? d.originRequestedSample;
+  const submitted = d.lastSubmittedSample;
+  const requestedSubmitted = requested != null && submitted != null && submitted >= requested;
   return [
+    ...formatBuildIdentityLedger(),
     `requested sample ${d.sourceSampleRequested ?? d.originRequestedSample} PTS ${d.requestedPtsUs ?? d.originRequestedPts}`,
+    `lastSubmittedSample ${submitted}`,
+    `requestedSubmitted ${requestedSubmitted ? "yes" : "no"}`,
+    `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
+    `formulaTargetRequiredSample ${d.formulaTargetRequiredSample}`,
+    `horizonExtended ${
+      d.currentTargetRequiredSample != null &&
+      d.formulaTargetRequiredSample != null &&
+      d.currentTargetRequiredSample > d.formulaTargetRequiredSample
+        ? "yes"
+        : "no"
+    }`,
+    `lastRequiredDecodeSample ${d.lastRequiredDecodeSample}`,
+    `softHighWater ${d.softHighWater || d.decodeQueueHighWater}`,
+    `hardDependencyCeiling ${d.hardDependencyCeiling}`,
+    `decodeQueue ${d.decodeQueueSize}`,
+    `lastDecodedTs ${d.lastDecodedTimestamp}`,
+    `targetPtsSeen ${d.targetPtsSeen ? "yes" : "no"}`,
+    `gopStart ${d.gopKeyframeStart}`,
+    `earlierKeyframeAvailable ${d.earlierKeyframeAvailable ? "yes" : "no"}`,
+    `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
+    `postRecreateSubmitted ${d.postRecreateSubmitted}`,
+    `postRecreateOutputs ${d.postRecreateOutputs}`,
+    `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
+    `postResetFingerprintMatch ${d.postResetFingerprintMatch ? "yes" : "no"}`,
+    `livenessReopen ${d.livenessReopenUsed ? "yes" : "no"}`,
+    `livenessReopenReason ${d.livenessReopenReason ?? "n/a"}`,
+    `coldOpenAfterVis ${d.coldOpenAfterVis ? "yes" : "no"}`,
+    `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
+    `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
     `originSample ${d.originRequestedSample}`,
     `originPts ${d.originRequestedPts}`,
     `originExportFrame ${d.originExportFrame}`,
@@ -1075,8 +1586,20 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `videoReq ${d.videoFramesRequested} (frame-count)`,
     `videoDec ${d.videoFramesDecoded} (frame-count)`,
     `videoEnc ${d.videoFramesEncoded} (frame-count)`,
+    `requestedSample ${d.requestedSample ?? d.sourceSampleRequested}`,
     `lastRequestedSample ${d.lastRequestedSample} (sample-index)`,
+    `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
+    `formulaTargetRequiredSample ${d.formulaTargetRequiredSample}`,
+    `horizonExtended ${
+      d.currentTargetRequiredSample != null &&
+      d.formulaTargetRequiredSample != null &&
+      d.currentTargetRequiredSample > d.formulaTargetRequiredSample
+        ? "yes"
+        : "no"
+    }`,
     `lastRequiredDecodeSample ${d.lastRequiredDecodeSample} (sample-index)`,
+    `maxReorderSamples ${d.maxReorderSamples}`,
+    `prefetch ${d.prefetch}`,
     `speculativeSubmitted ${d.speculativeSamplesSubmitted}`,
     `cancelledSpeculativeSamples ${d.cancelledSpeculativeSamples}`,
     `decodeQueueBeforeCancel ${d.decodeQueueBeforeCancel}`,
@@ -1103,6 +1626,10 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `finalFlushArmed ${d.finalFlushArmed ? "yes" : "no"}`,
     `usefulInputExhausted ${d.usefulInputExhausted ? "yes" : "no"}`,
     `decodeQueueHighWater ${d.decodeQueueHighWater}`,
+    `softHighWater ${d.softHighWater || d.decodeQueueHighWater}`,
+    `hardDependencyCeiling ${d.hardDependencyCeiling}`,
+    `submittedMinusOutputs ${d.submittedMinusOutputs}`,
+    `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
     `decodeQueueLowWater ${d.decodeQueueLowWater}`,
     `decodeQueuePeak ${d.decodeQueuePeak}`,
     `submitsWithoutOutputProgress ${d.submitsWithoutOutputProgress}`,

@@ -1148,11 +1148,13 @@ export class FlushLeavesQueueDecoder {
   static leaveOnFirstFlush = 2;
   static skipPts = new Set<number>();
   static emitSkippedOnSecondFlush = true;
+  static hangFirstFlush = false;
   decodeQueueSize = 0;
   submitted: number[] = [];
   emitted = 0;
   flushCount = 0;
   closed = false;
+  private held: number[] = [];
   private readonly output: HoldDecoderOptions["output"];
   private readonly listeners = new Set<() => void>();
 
@@ -1172,7 +1174,7 @@ export class FlushLeavesQueueDecoder {
   decode(chunk: { timestamp: number }): void {
     if (this.closed) return;
     this.submitted.push(chunk.timestamp);
-    this.decodeQueueSize = this.submitted.length - this.emitted;
+    this.decodeQueueSize = this.submitted.length - this.emitted + this.held.length;
   }
 
   private emitOne(ts: number): void {
@@ -1181,18 +1183,37 @@ export class FlushLeavesQueueDecoder {
     this.output(new FakeVideoFrame(ts));
   }
 
+  private holdFirstFlush(): void {
+    const keepLast = Math.max(0, FlushLeavesQueueDecoder.leaveOnFirstFlush);
+    const cutoff = this.submitted.length - keepLast;
+    this.held = [];
+    while (this.emitted < this.submitted.length) {
+      const ts = this.submitted[this.emitted]!;
+      if (this.emitted >= cutoff || FlushLeavesQueueDecoder.skipPts.has(ts)) {
+        this.held.push(ts);
+        this.emitted += 1;
+        continue;
+      }
+      this.emitOne(ts);
+      this.emitted += 1;
+    }
+    this.decodeQueueSize = this.held.length;
+    for (const fn of this.listeners) fn();
+  }
+
   async flush(): Promise<void> {
     this.flushCount += 1;
     if (this.flushCount === 1) {
-      const keep = Math.max(0, FlushLeavesQueueDecoder.leaveOnFirstFlush);
-      const stop = Math.max(this.emitted, this.submitted.length - keep);
-      while (this.emitted < stop) {
-        this.emitOne(this.submitted[this.emitted++]!);
+      this.holdFirstFlush();
+      if (FlushLeavesQueueDecoder.hangFirstFlush) {
+        return new Promise(() => {
+          /* CASE B: first flush never resolves while queue holds the exact PTS. */
+        });
       }
-      this.decodeQueueSize = this.submitted.length - this.emitted;
-      for (const fn of this.listeners) fn();
       return;
     }
+    for (const ts of this.held) this.emitOne(ts);
+    this.held = [];
     while (this.emitted < this.submitted.length) {
       this.emitOne(this.submitted[this.emitted++]!);
     }
@@ -1203,6 +1224,7 @@ export class FlushLeavesQueueDecoder {
   reset(): void {
     this.submitted = [];
     this.emitted = 0;
+    this.held = [];
     this.decodeQueueSize = 0;
     this.flushCount = 0;
   }
@@ -1224,10 +1246,12 @@ export function installFlushLeavesQueueDecoder(opts?: {
   leaveOnFirstFlush?: number;
   skipPts?: Iterable<number>;
   emitSkippedOnSecondFlush?: boolean;
+  hangFirstFlush?: boolean;
 }): () => void {
   FlushLeavesQueueDecoder.last = null;
   FlushLeavesQueueDecoder.leaveOnFirstFlush = opts?.leaveOnFirstFlush ?? 2;
   FlushLeavesQueueDecoder.skipPts = new Set(opts?.skipPts ?? []);
   FlushLeavesQueueDecoder.emitSkippedOnSecondFlush = opts?.emitSkippedOnSecondFlush ?? true;
+  FlushLeavesQueueDecoder.hangFirstFlush = opts?.hangFirstFlush ?? false;
   return installDecoderCtor(FlushLeavesQueueDecoder);
 }

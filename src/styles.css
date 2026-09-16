@@ -1338,7 +1338,15 @@ body.media-asset-dragging .project-overlay-drawer {
   justify-content: flex-start;
   gap: 14px;
 }
-.err { color: var(--danger); }
+.err {
+  color: var(--danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 8em;
+  overflow: auto;
+  display: inline-block;
+  max-width: min(100%, 72ch);
+}
 
 .hidden-audio { display: none; }
 
@@ -1627,10 +1635,18 @@ body.media-asset-dragging .project-overlay-drawer {
   background: var(--accent);
   width: 0;
 }
+.export-dialog[data-phase="failed"] {
+  width: min(640px, calc(100vw - 32px));
+}
 .export-dialog-status {
   margin: 8px 0 12px;
   font-size: 12px;
   color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 40vh;
+  overflow: auto;
+  font-family: var(--mono);
 }
 .export-dialog-actions {
   display: flex;

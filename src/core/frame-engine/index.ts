@@ -1,3 +1,14 @@
+export {
+  AILEXSI_FRAME_ENGINE,
+  AILEXSI_GIT_BRANCH,
+  AILEXSI_GIT_SHA,
+  AILEXSI_PRODUCT_VERSION,
+  ailexsiBuildIdentity,
+  formatBuildIdentityLedger,
+  formatBuildIdentityPrefix,
+  withBuildIdentityPrefix,
+} from "../build-info";
+export type { AilexsiBuildIdentity } from "../build-info";
 export { AfeError, isAfeError, throwIfAborted } from "./errors";
 export {
   parseIsoBmff,
@@ -15,6 +26,13 @@ export {
 } from "./mp4-reader";
 export type { ParsedBox, ParsedCtts } from "./mp4-reader";
 export { parseAvcC, decoderConfigOf } from "./avc-config";
+export {
+  firstAvcCSps,
+  inspectAvcSpsRestriction,
+  patchAvcCBitstreamRestriction,
+  patchAvcSampleBitstreamRestriction,
+} from "./avc-sps";
+export type { AvcSpsRestrictionInfo } from "./avc-sps";
 export {
   chunkFingerprintMismatchField,
   chunkFingerprintsEqual,
@@ -66,6 +84,20 @@ export {
   AFE_STALL_NUDGE_WAIT_MS,
   AFE_WAIT_EXACT_PTS_MS,
   mustAdvanceTowardDependencyHorizon,
+  mayBorrowHardDependencyCredits,
+  mayAdvancePastSoftFreeze,
+  mayHardHorizonReset,
+  maySubmittedUnseenHorizonReset,
+  identicalPostResetFingerprint,
+  mayPostResetLivenessReopen,
+  livenessReopenDumpReason,
+  mustColdOpenVideoDecoder,
+  queueRespectsHardCeiling,
+  mayLocalHorizonFinalFlush,
+  currentTargetRequiredSample,
+  postHorizonRequiredSample,
+  hardDependencyCeiling,
+  pumpSliceMatchesSubmitProvenance,
   classifySampleRole,
   decodeQueueHighWater,
   decodeQueueLowWater,

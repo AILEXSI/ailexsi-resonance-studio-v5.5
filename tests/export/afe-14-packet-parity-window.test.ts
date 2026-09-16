@@ -154,6 +154,7 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     expect(cfg.hash).toMatch(/^[0-9a-f]{8}$/);
     expect(cfg.descriptionHash).toMatch(/^[0-9a-f]{8}$/);
     expect(cfg.optimizeForLatency).toBe(false);
+    expect(cfg.hardwareAcceleration).toBe("prefer-software");
     const fp = fingerprintSampleChunk(movie!, movie!.samples[0]!, cfg.hash);
     expect(fp.index).toBe(0);
     expect(fp.key).toBe(true);
@@ -530,7 +531,10 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     });
     decoder.setStallPhase("PUMP_LOOKAHEAD");
     const hw = decoder.decodeQueueHighWater;
-    for (let i = 0; i < hw + 8 && i < movie!.sampleCount; i++) {
+    const hard = decoder.hardDependencyCeilingFor(34);
+    expect(hard).toBeGreaterThanOrEqual(hw);
+    expect(hard).toBeLessThan(40);
+    for (let i = 0; i < hard + 8 && i < movie!.sampleCount; i++) {
       const can = await decoder.waitForDecodeCapacity(undefined, {
         requested: 34,
         budgetEnd: nowMs() + 200,
@@ -541,6 +545,7 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     const elapsed = nowMs() - started;
     const dump = decoder.snapshot({ sourceSampleRequested: 34 });
     expect(dump.noMoreSubmission || dump.frozenAtHighWater || dump.backpressureBlocked).toBe(true);
+    expect(dump.decodeQueuePeak).toBeLessThanOrEqual(hard);
     expect(dump.decodeQueuePeak).toBeLessThan(40);
     expect(dump.decodeQueuePeak).toBeLessThan(125);
     expect(elapsed).toBeLessThan(1_000);

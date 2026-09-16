@@ -99,13 +99,36 @@ async function openPreferred(src: string, signal?: AbortSignal): Promise<OpenedD
   }
 }
 
-export function getDecoder(src: string, signal?: AbortSignal): Promise<OpenedDecoder> {
+export function evictFrameSource(src: string): void {
+  const key = `${frameSourceBackend}:${src}`;
+  const hit = decoderCache.get(key);
+  if (!hit) return;
+  decoderCache.delete(key);
+  void hit
+    .then((opened) => {
+      try {
+        opened.close();
+      } catch {
+        /* already gone */
+      }
+    })
+    .catch(() => {
+      /* open failed */
+    });
+}
+
+export function getDecoder(
+  src: string,
+  signal?: AbortSignal,
+  opts?: { fresh?: boolean },
+): Promise<OpenedDecoder> {
   if (frameSourceBackend === "htmlvideo") {
     return Promise.reject(new AfeError("AFE_UNSUPPORTED_CONTAINER", "HTMLVideo is not an export frame source"));
   }
   if (!isPlayableSource(src)) {
     return Promise.reject(new AfeError("AFE_UNSUPPORTED_CONTAINER", "blocked or unreadable source"));
   }
+  if (opts?.fresh) evictFrameSource(src);
   const key = `${frameSourceBackend}:${src}`;
   const hit = decoderCache.get(key);
   if (hit) return hit;

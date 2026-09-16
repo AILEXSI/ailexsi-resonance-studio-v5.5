@@ -1,3 +1,4 @@
+import { withBuildIdentityPrefix } from "../build-info";
 import type { ExportHooks, ExportJob, ExportProgress, ExportResult } from "./types";
 
 export type ExportDialogPhase = "closed" | "ready" | "running" | "aborted" | "failed" | "done";
@@ -135,7 +136,7 @@ export function failExportDialog(state: ExportDialogState, error: string): Expor
     phase: "failed",
     success: false,
     aborted: false,
-    error,
+    error: withBuildIdentityPrefix(error),
     stage: "Failed",
   };
 }

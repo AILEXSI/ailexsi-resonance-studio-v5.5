@@ -23,6 +23,7 @@ export function ExportDialog({ state, onCancel, onClose, onChange, onStart }: Pr
     <div className="export-dialog-layer" data-testid="export-dialog">
       <div
         className="export-dialog"
+        data-phase={state.phase}
         role="dialog"
         aria-modal="false"
         aria-label="Export"

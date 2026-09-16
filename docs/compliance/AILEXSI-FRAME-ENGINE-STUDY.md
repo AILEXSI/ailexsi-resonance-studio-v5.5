@@ -1017,3 +1017,368 @@ Windows AFE-15: requested sample 74 PTS 3125000, lastSubmitted 59, lastDecodedTs
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 74 / submitted 59 / queue 7 / LOW 6 / HIGH 12 → producer uses bounded credits toward 74, no empty 60-59 pause, exact PTS, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-17 — HIGH_WATER target reachability / bounded dependency credits (V5.5)
+
+Windows AFE-16: requested sample 43 PTS 2000000, lastSubmitted 40, lastRequired 140, decodeQueue 12, LOW 6, HIGH 12, lastDecodedTs 1000000 stuck, `frozenAtHighWater` / `backpressureBlocked` / `noMoreSubmission`, usefulInputExhausted no, FINAL_FLUSH no, packet/config parity yes, firstSubmittedAfterRecreate 0 key, postRecreateSubmitted 41 / outputs 23, targetPtsSeen no. Submit `PUMP_LOOKAHEAD:0-40/q0->12/.../progress` then `PUMP_LOOKAHEAD:41-40/q12->12/.../paused`. Stale dump `pumpSlice 92-97` contradicted the live 41-40 attempt.
+
+## Cause
+
+AFE-16 spends unused SOFT HIGH credits while queue < HIGH. This stall is the producer already **at** SOFT HIGH (12) before the current requested sample (43) and its local decode deps are submitted. Exact PTS cannot resolve: 43 > lastSubmitted 40 and submission is permanently blocked. Transaction-wide lastRequired 140 is not a license to refill to 140.
+
+## Fix
+
+1. LOCAL horizon: `currentTargetRequiredSample` = `lastRequiredDecodeSample(lastRequested=current requested)`, capped by transaction lastRequired. Sample 43 / reorder 2 / prefetch 4 → **49**, not 140.
+2. Two levels: `SOFT_HIGH_WATER` = existing AFE-14/16 HIGH. `HARD_DEPENDENCY_CEILING` = min(CAP, SOFT + min(remaining-to-live-local, L+B)). Human AFE-17: SOFT 12, remaining 9, L+B 10 → HARD **21**. First-fill also derives extra when remaining>0 (AFE-18).
+3. Borrow HARD credits ONLY when: exact unresolved, useful input remains, currentTarget > lastSubmitted, no output progress, queue already at SOFT. Stop once the local horizon is submitted. If HARD reached with no progress: no more submit (existing recover/stall). No global HIGH raise. No 40/125 flood.
+4. TRACE: `requestedSample`, `currentTargetRequiredSample`, `prefetch`, `softHighWater`, `hardDependencyCeiling`, `submittedMinusOutputs`.
+5. `pumpSlice` in the stall snapshot is the current / last actual submit attempt (begin/endSubmitPhase), never a leftover planned 92-97. Provenance cannot contradict `submitPhases`.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 43 / submitted 40 / queue 12 / HIGH 12 → bounded credits toward local 49, exact PTS 2000000, no flood to 140, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+
+# AFE-18 — post-horizon liveness / bounded local advance (V5.5)
+
+Local Powershell after AFE-17 `@f40fcb9`: requested sample **61** PTS **2583333** (originClip user-video-B / sourceInMs 2500), lastSubmitted **67**, currentTargetRequired **67**, lastRequired **102**, lastDecodedTs **2208333** < target, targetPtsSeen **no**, softHighWater **12**, hardDependencyCeiling **12**, decodeQueue **12** peak **22**, frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**, postRecreateSubmitted **68** / outputs **52** / lastDecoded **2208333**, firstSubmittedAfterRecreate **0** key **yes**, packetParity **yes**, configParity **yes**, submitPhases `PUMP_LOOKAHEAD:0-67/.../progress | 68-67/q12->12/... | 68-67/.../paused`, pumpSlice **68-67**, cancelledSpeculative **15**, submittedMinusOutputs **16**, unresolvedRequested **1**, FINAL_FLUSH **yes**, stalledMs **3000**, videoReq/Dec/Enc mid **46/45/45**.
+
+## Cause
+
+Discarded first-fill HARD==SOFT as the root. Local formula horizon **was** reached: lastSubmitted 67 >= currentTarget 67 >= requested 61. Exact PTS never produced. lastDecoded stuck at 2208333 (~sample 52) with decodeQueue frozen at SOFT HIGH. HARD==SOFT in the dump is remaining=0 on the **formula** 67, not a first-fill gate.
+
+True LOCAL for sample 61 / reorder 2 / prefetch 4:
+
+- formula `lastRequired(61)` = 61 + maxReorder + prefetch = **67**
+- dump proves 67 is insufficient: lastDecoded 2208333 never reached 2583333
+- one structural extra window = streamLookahead(2,4)+prefetch = 6+4 = 10 → live **77**, not transaction lastRequired 102/140
+
+`targetPtsSeen` stays no because WebCodecs never emitted 2583333 — 16 in-flight / queue 12 held, no further `decode()`. FINAL_FLUSH yes at 67<102 is stale leftover after recreate on the same `user-video.mp4` (vA → VIS → vB) or a premature arm; AFE-11 transaction flush is still illegal at 67<102. Stale `finalFlushAttempted` makes the next `tryFinalFlush` a no-op while ownership of sample 61 remains open.
+
+HARD computed from shrinking remaining meets a growing queue before 77 (SOFT+remaining drops as lastSubmitted rises). That is why a formula-only raise of HARD above SOFT cannot be the only fix, and why a leftover HARD==SOFT at remaining=0 cannot spend the extra window.
+
+## Fix
+
+1. LIVE local horizon: `postHorizonRequiredSample` extends formula by one lookahead+prefetch window when formula is submitted, lastDecoded < targetPts, exact not ready. Sample 61 → **77**, never 102/140.
+2. HARD uses the live target. At lastSubmitted 67 / live 77: SOFT 12 + min(10, L+B=10) = **22**. Freeze that ceiling for the borrow episode so remaining-shrink cannot stop the advance before 77.
+3. First-fill HARD may derive extra when remaining>0 (diagnostic / secondary). Borrow still requires recreate — first-fill stays on SOFT HIGH 40 (AFE-12/16).
+4. Liveness: recreate / beginStream clear `finalFlushArmed` / `finalFlushAttempted` / `tailDrainReplayed`. If live horizon is still unsubmitted, `releaseStaleFinalFlushIfLiveHorizonOpen` forgets a premature/stale arm so this request can borrow, then drain.
+5. `mayLocalHorizonFinalFlush` documents when a held queue may drain after the live horizon — not a new mid-run `tryFinalFlush` trigger (AFE-06). Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired. `mayGenuineFinalDrain` accepts `localHorizonExhausted`. Recreate clears the per-decoder flush gate so this request can flush again; the dump `FINAL_FLUSH` bit stays sticky. `releaseStaleFinalFlushIfLiveHorizonOpen` forgets the per-decoder gate when live horizon is still unsubmitted. Post-horizon extend is skipped while `recoveryRebuilding` (AFE-13 pause at SOFT).
+6. No timeout bump. No snap/nearest/drop. No global HIGH raise. No Mediabunny. HARD never floods to 102/140.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 61 / submitted 67 / currentTarget 67 / lastDecoded 2208333 / queue 12 / FINAL_FLUSH yes → live 77 / HARD 22, exact PTS 2583333, no flood to 102, no 3s silent stall.  
+**HUMAN-PROVEN: NO**
+
+# AFE-19 — formula-horizon drain when live 77 is unreachable (V5.5)
+
+MODE A Chrome on AFE-18 HEAD (`ca48b65` + harness) reproduced VIDEO→VIS→VIDEO at timeline 2500ms / clip B:
+
+- live `currentTargetRequiredSample` **77**, `hardDependencyCeiling` **22** (AFE-18 math worked)
+- `lastSubmittedSample` stayed **67**; pumpSlice **68-67**
+- `decodeQueue` **20**, lastDecodedTs **1875000**, `targetPtsSeen` no
+- `finalFlushArmed` no (cleared because 67<77); transaction `mayFinalFlush` false (67<102)
+- unresolved 1; MP4 0 bytes
+
+Requested sample **61** / PTS **2583333** was already inside the submitted range. HARD credits past 67 were not reachable (queue already 20 / HARD 22). Extending the live target blocked the only legal drain.
+
+Variant b0 (vB sourceInMs 0): sample **0** PTS **83333**, lastDecoded **null**, postRecreateOutputs **0**, queue 12, formula 6 already submitted.
+
+## Fix
+
+1. `mayLocalHorizonFinalFlush` accepts `formulaTargetRequiredSample`. Drain is legal at formula **67**, not only at live **77**.
+2. `tryFinalFlush` also runs when `mayFormulaHorizonDrain`: lastSubmitted>=formula, exact not ready, queue held, lastDecoded < target. Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired.
+3. After recreate, require `postRecreateOutputs >= lookahead` so AFE-13 E/F (freeze after few emits / hang-flush mock) still typed-stall without a mid-run pressure flush.
+4. Zero-output after recreate (b0): one drain if formula is in, queue held, lastDecoded null, first post-recreate chunk is a keyframe.
+5. No timeout bump. No snap/nearest/drop. No global HIGH raise. No Mediabunny.
+
+MODE A Chrome production `exportWithWebCodecs` (Linux, `--headless=new`): primary + b0 both **90/90/90** vis 30 unresolved 0; MP4 1280×720 30fps 4.000s 120 frames. Headless AAC `audio: none`. **Not HUMAN-PROVEN.**
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner EXE VIDEO→VIS→VIDEO past 2500ms / sample 61 PTS 2583333, Req==Dec==Enc, unresolved 0.  
+**HUMAN-PROVEN: NO**
+
+# AFE-20 — SOFT freeze after recreate with no earlier I-frame (sample 81)
+
+Human Windows EXE on a **different** production clip (`897e0449-22bf-4aeb-b15a-377b687db846.mp4`), not the MODE A user-video-B fixture:
+
+- requested sample **81** PTS **3416667**
+- originExportFrame **37** · originTimelineMs **~1233.33**
+- lastDecodedTs **2500000**
+- decodeQueue **15** · frozenAtHighWater **yes** · backpressureBlocked **yes**
+- earlierKeyframeRecovered **no** · recreates **1** · recoveryAttempts **1**
+- stalledMs 3000 WAIT_EXACT_PTS
+
+The one-picture dump omitted lastSubmitted / currentTarget / soft / hard / targetPtsSeen / postRecreate / pumpSlice / submitPhases (those fields existed but sat after ~1KB of other keys; dialog is 360px). Next dump **front-loads** them.
+
+## Cause
+
+1. `earlierKeyframeRecovered=no` is **correct ineligibility**: `mayEarlierKeyframeRecover` returns false when `gopStart<=0` / no earlier I. Recreate already started at file GOP 0. Not a missed walk-back.
+2. decodeQueue **15** = SOFT HIGH for maxReorder **5** (5+6+4). HARD should be SOFT+min(remaining, L+B)=**25** while lastSubmitted < formula **90**. LastDecoded 2500000 ≈ sample 60; queue 15 ⇒ lastSubmitted **~75 < 81**. Sample 81 was **not** yet submitted. Formula-horizon drain (AFE-19) does not apply until the packet is in.
+3. Scheduler `progressiveTowardRequired` exited on `isFrozenAtHighWaterAfterRecreate()` (SOFT), so HARD credits were never spent. Then earlier-I skipped, then stall.
+
+## Fix
+
+`mayAdvancePastSoftFreeze`: frozen at SOFT + lastSubmitted < live local horizon + queue < HARD → keep borrowing (bounded, never 40/125 / lastRequired 140). After ineligible earlier-I, retry that progressive. Drain also legal once lastSubmitted ≥ requested. Stall message ledger is first. Failed export dialog scrolls.
+
+MODE A fixture VIDEO→VIS→VIDEO remains **90/90/90**. **Not HUMAN-PROVEN.**
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `897e0449-….mp4` sample 81 PTS 3416667; dump must show lastSubmitted / requestedSubmitted / HARD.  
+**HUMAN-PROVEN: NO**
+
+# AFE-20 — Shape A: HARD credits unused while queue ∈ (SOFT, HARD)
+
+Human Windows EXE still on **0367eb1** (AFE-19 binary). Clip after recreate:
+
+- requested sample **90** PTS **3791667** · requestedSubmitted **no**
+- lastSubmitted **82** < 90 < currentTarget/formula **96** · lastRequired **140**
+- SOFT **12** · HARD **22** · decodeQueue **15** (7 HARD credits unused)
+- lastDecodedTs **2625000** · targetPtsSeen **no**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- usefulInputExhausted **no** · FINAL_FLUSH yes but finalFlushArmed **no**
+- recreates **1** · postRecreateSubmitted **83** · postRecreateOutputs **62**
+- pumpSlice **83-82** empty · `PUMP_LOOKAHEAD:83-82/q15->15/.../paused`
+- gopStart **0** · earlierKeyframeAvailable **no**
+- waiter **null** · ptsCurrentlyRegistered **no** · videoReq/Dec/Enc **47/46/46**
+
+## Cause
+
+`mayAdvancePastSoftFreeze` / HARD borrow only stayed live at queue==SOFT or when `outputProgressed` was false. Queue **15 already above SOFT 12** and **below HARD 22**. Neighbor outputs (62) set `outputProgressed`, `mayBorrowHardDependencyCredits` returned false, `waitForDecodeCapacity` expired and treated `queue>=SOFT` as terminal freeze. Progressive wrote empty 83-82. Not a missing drain of an already-submitted PTS. Not a license to raise SOFT to 40 or flood to lastRequired 140.
+
+## Fix
+
+Spend remaining HARD credits toward the live local horizon whenever exact is unresolved, useful input remains, lastSubmitted < currentTargetRequired, and queue < HARD — including when queue is already **between** SOFT and HARD and neighbors have emitted. Expire path no longer freezes at SOFT. HARD remains the cap.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 90 PTS 3791667 / lastSubmitted 82 / queue 15 / SOFT 12 / HARD 22 → lastSubmitted reaches 90/96, unused HARD spent, no empty 83-82 pause.  
+**HUMAN-PROVEN: NO**
+
+# AFE-20 — Shape B / FINAL_FLUSH tail: requested sample submitted, exact PTS never emitted
+
+Human Windows EXE on clip `9f994a16-4eb4-4533-8de9-db46965277a8.mp4` (24fps, sourceInMs ~4039.97 / sourceOutMs 6037). Not the AFE-20 sample-81 SOFT-freeze picture.
+
+- requested sample **134** PTS **5625000** · requestedSubmitted **yes**
+- lastSubmitted **140** · lastRequired **140** · currentTarget **140** · formula **140**
+- lastDecodedTs **5583333** (sample 133 — one 24fps frame short)
+- decodeQueue **2** · HIGH/SOFT **40** · HARD **40** · first-fill (recreates **0**)
+- targetPtsSeen **no** · targetPtsOutputs **12** · targetPtsLastSeenTs **5333333**
+- flushes **1** · FINAL_FLUSH **yes** · finalFlushArmed **yes** · usefulInputExhausted **yes**
+- waiter **null** · streamPts **0** · ptsEverRegistered **yes** · ptsCurrentlyRegistered **no**
+- ownershipState **FINAL_FLUSH_ARMED** · exactIdentity **no** · unresolved **1**
+- videoReq/Dec/Enc **46/45/45** · pumpSlice **141-140** · stalledMs **3000**
+
+This is the AFE-15 CASE B shape (same 134 / 5625000 / 5583333 / queue 2 / submitted 140). Soft-freeze / HARD credits / sample-beyond-submitted do not apply.
+
+## Cause
+
+1. `settleOutputs` returned early when waiter/pending/streamWaiter were empty even with unresolved=1 and decodeQueue=2, so CASE B `drainHeldTail` never ran after identity left `PtsIndexMap`.
+2. First `VideoDecoder.flush()` could occupy the entire 3s stall watchdog while hardware still held the exact sample. Extra genuine drain never started (`flushes` already 1, `recreates` 0, waiter never installed).
+3. `recordOutputTimestamp` rebound `targetPtsUs` to any opened neighbor (12 counts, lastSeen 5333333) so exact 5625000 was not the tracked target.
+
+Not a missing submit. Not SOFT freeze. Not a license to snap to 5583333.
+
+## Fix
+
+1. Unresolved exact request + (FINAL_FLUSH armed or queue>0) + exact PTS unseen → continue to flush / CASE B drain even when waiter is null and `streamPts` is 0. Re-bind identity around the extra flush.
+2. CASE B flush wait plateaus after `AFE_SETTLE_DRAIN_MS` of no output progress (queue still held, exact unseen) instead of sitting the 3s watchdog. One extra `flush()`. Scheduler post-flush wait is `AFE_WAIT_EXACT_PTS_MS` (120), not the leftover 3s budget.
+3. `targetPts*` counts only the exact requested PTS. Neighbor outputs do not rebind the target.
+
+Regression: requested submitted + lastSubmitted>=lastRequired + usefulInputExhausted + FINAL_FLUSH + exact not ready + queue small → exact PTS or typed fail with ownership intact. No timeout bump, no snap/nearest/drop, no global queue flood, no Mediabunny, no HTMLVideo fallback. AFE-19 SOFT-freeze path unchanged.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `9f994a16-….mp4` sample 134 PTS 5625000 / lastDecoded 5583333 / submitted 140 / queue 2 → exact frame or typed fail with `ptsCurrentlyRegistered` or waiter live; no 3s waiter-null sit.  
+**HUMAN-PROVEN: NO**
+
+# AFE-21 — HARD ceiling reached before local horizon + post-recreate liveness
+
+Human Windows EXE on AFE-20 tip (`aef5ff4` or later). One new picture — AFE-20 Shape A/B stay green.
+
+- requested sample **38** PTS **1625000** · requestedSubmitted **no**
+- lastSubmitted **36** < 38 < currentTarget/formula **44** · lastRequired **140**
+- SOFT **12** · HARD **20** · decodeQueue **21** · peak **22**
+- lastDecodedTs **458333** · targetPtsSeen **no**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- usefulInputExhausted **no**
+- recreates **1** · postRecreateSubmitted **37** · postRecreateOutputs **10** · postRecreateLastDecodedTs **458333**
+- pumpSlice **37-36** empty · `PUMP_LOOKAHEAD:37-36/q21->21/paused`
+- gopStart **0** · earlierKeyframeAvailable **no** · earlierKeyframeRecovered **no**
+- packetParity **yes** · configParity **yes**
+- waiter **null** · ptsCurrentlyRegistered **no** · ownershipState **PTS_REGISTERED**
+- videoReq/Dec/Enc **47/46/46** · visFrames **58** · afeFrames **46**
+- stalledMs **3000**
+
+AFE-20 mid-band HARD spend (queue ∈ (SOFT, HARD)) does not apply: the queue is already at/over HARD while lastSubmitted is still short of requested and the local horizon.
+
+## Cause
+
+1. **HARD overrun.** After recreate, SOFT = RAW = 12 and remaining-to-44 is large, so HARD starts at 12+10 = **22**. Submit while `queue < 22` legally peaks at 22. Remaining then shrinks (36 vs 44 → extra 8) and computed HARD becomes **20**. `hardBorrowCeiling` was cleared when `queue >= HARD`, so the dump reported HARD 20 under a live queue of 21. HARD was not a hard cap.
+2. **Post-recreate liveness.** The decoder after recreate emitted ~10 outputs through 458333 then froze (`submittedMinusOutputs` 27). Cannot borrow more without exceeding HARD. No earlier I-frame (`gopStart` 0). Progressive wrote empty 37-36 and sat the 3s stall.
+
+Not a license to raise SOFT/HARD globally or flood to lastRequired 140. Not a timeout bump. Not snap/nearest/drop/Mediabunny.
+
+## Fix
+
+1. Pin HARD at the borrow-episode max while lastSubmitted < live local horizon. Do not clear the pin because the queue reached the cap. Dump HARD stays 22; queue never exceeds that pin.
+2. `maySubmitEncoded` / `mayResumeDecode`: when HARD is set, `queue >= HARD` never submits.
+3. `mayHardHorizonReset`: exact unresolved + lastSubmitted < requested < currentTarget + queue >= HARD + no output progress + no earlier I + recreate >= 1 + reset not yet used → **one** recreate + ownership rebuild from gopStart, then output-gated refill (SOFT first; no HARD spend until lastDecoded moves). Typed `AFE_DECODE_STALL` only after that escape is exhausted — not an empty 37-36 pump for 3s.
+
+AFE-20 Shape A (queue 15 ∈ (12, 22), lastSubmitted 82 < 90) still spends remaining HARD. Shape B CASE B drain unchanged. AFE-13 lastSubmitted > requested does not fire this reset.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 / lastSubmitted 36 / queue >= HARD / no earlier I → progress toward 38/44 or typed recover; queue never exceeds HARD; no empty 37-36 for 3s.  
+**HUMAN-PROVEN: NO**
+
+# AFE-22 — HARD horizon reset must cover submitted-but-unseen exact PTS
+
+Human Windows EXE on AFE-21 + build-identity tip (`c73447a`). One new picture — AFE-20 Shape A/B and AFE-21 stay green. Icon/Explorer out of scope.
+
+- requested sample **28** PTS **1375000** · requestedSubmitted **yes**
+- lastSubmitted **34** · currentTarget **44** · formula **34** · lastRequired **144**
+- SOFT **12** · HARD **22** · decodeQueue **19** · peak **22**
+- lastDecodedTs **458333** · targetPtsSeen **no** · targetPtsOutputs **0**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- usefulInputExhausted **no**
+- recreates **1** · recoveryAttempts **1** · flushes **3**
+- postRecreateSubmitted **35** · postRecreateOutputs **10** · stuck early outputs through 458333
+- hardHorizonReset **no**
+- FINAL_FLUSH **yes** · finalFlushArmed **yes**
+- pumpSlice **35-34** empty
+- gopStart **0** · earlierKeyframeAvailable **no** · earlierKeyframeRecovered **no**
+- waiter **null** · ptsCurrentlyRegistered **no** · ownershipState **PTS_REGISTERED**
+- videoReq/Dec/Enc **191/190/190**
+- stalledMs **3000**
+- productVersion **5.5.0** · gitSha **c73447a** · frameEngine **AILEXSI**
+
+AFE-21 `mayHardHorizonReset` requires lastSubmitted < requested. Human 34 >= 28, so that escape correctly did **not** fire. After FINAL_FLUSH the pump wrote empty 35-34 (`needsKeyframe`) and sat 3s. Decoder liveness was already dead at 458333 (10 post-recreate outputs).
+
+## Cause
+
+1. **Submitted but unseen.** Exact sample 28 was already in the decode queue (`lastSubmitted 34 >= 28`) but PTS 1375000 never emitted. AFE-21's lastSubmitted < requested gate left no escape.
+2. **formula 34 vs current 44 is not a dump bug.** formula = lastRequired(requested 28) = 28+2+4 = **34**. current = AFE-18 `postHorizonRequiredSample` = 34+lookahead 6+prefetch 4 = **44**, because the formula horizon was submitted and lastDecoded 458333 < 1375000. Dump now names `horizonExtended yes`. Not a license to flood to lastRequired 144.
+
+Not a global HARD/SOFT raise. Not a timeout bump. Not snap/nearest/drop/Mediabunny.
+
+## Fix
+
+1. `maySubmittedUnseenHorizonReset`: exact unresolved AND requestedSubmitted AND targetPtsSeen no AND recreates>=1 AND no output progress toward target AND (queue>=SOFT or frozenAtHighWater) AND no earlier I AND reset unused. lastSubmitted < requested is **not** required for this path.
+2. `mayHardHorizonReset` tries the AFE-22 path first when `targetPtsSeen === false` and SOFT is supplied; otherwise AFE-21 (lastSubmitted < requested < live target, queue>=HARD) is unchanged.
+3. Scheduler prefers this reset over `canBorrowTowardLocalHorizon` so submitted-unseen does not keep borrowing toward 44/144 (empty 35-34).
+4. One output-gated recreate+ownership rebuild from gopStart (SOFT first; no HARD spend until lastDecoded moves). Typed stall only after that escape is exhausted.
+
+AFE-21 (36 < 38, queue>=HARD) still uses the AFE-21 path. Shape A (82 < 90, queue 15 < HARD 22) still spends remaining HARD. First-fill recreates=0 stays off. AFE-13 helper calls without `targetPtsSeen === false` stay off.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 28 PTS 1375000 / lastSubmitted 34 / requestedSubmitted yes / targetPtsSeen no / post-recreate freeze at 458333 → one hard-horizon reset+rebuild, then exact PTS or typed stall after exhausted; no empty 35-34 for 3s; no flood to 144.  
+**HUMAN-PROVEN: NO**
+
+# AFE-23 — HARD horizon reset fired but same liveness death (458333)
+
+Human Windows EXE on AFE-22 tip (`b91ecfc`). One new picture. Pure VIDEO export works; VIDEO+VIS mix still fails. AFE-20/21/22 stay green.
+
+- requested sample **28** PTS **1375000** · requestedSubmitted **yes** · lastSubmitted **34**
+- currentTarget **44** · formula **34** · horizonExtended **yes** · lastRequired **144**
+- SOFT **12** · HARD **22** · decodeQueue **19** · peak **22**
+- lastDecodedTs **458333** · targetPtsSeen **no**
+- postRecreateSubmitted **35** · postRecreateOutputs **10** · same early output list through 458333
+- **hardHorizonReset yes**
+- recreates **2** · resets **2** · recoveryAttempts **2**
+- gopStart **0** · earlierKeyframeAvailable **no**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- pumpSlice **35-34** empty
+- usefulInputExhausted **no** · FINAL_FLUSH **yes**
+- videoReq/Dec/Enc **191/190/190** · afeFrames **190** · visFrames **0** at stall
+- clip `…Kopie.mp4` · sourceInMs **0** · sourceOutMs **6042** · timelineMs **6333**
+- stalledMs **3000**
+
+## Cause
+
+1. **Same recreate, same death.** AFE-22 correctly fired. The escape is another `recoverGop(gopStart=0)` — close + new `VideoDecoder` + pump from sample 0. After that second recreate the decoder still emits ~10 frames and freezes at 458333. packetParity / configParity **yes**: input is identical; WebView2 output starvation is unchanged. Repeating that recreate cannot help.
+2. **VIDEO-only vs VIDEO+VIS.** A never-recreated first-fill decoder on a cold source can pass 458333 (VIDEO-only). The mix reuses the cached `OpenedDecoder` across VIS and the next video run; transaction-end used `reset()`+reconfigure on the same native decoder, which is the same poison as recreate.
+3. **Not a missing AFE-22 predicate.** `hardHorizonReset yes` / recreates 2. The next escape must be a *different* recovery.
+
+## Fix
+
+1. `identicalPostResetFingerprint` + `mayPostResetLivenessReopen`: after AFE-22 exhausted, if lastDecoded / output band match the pre-reset death, **do not** recoverGop again.
+2. `coldReopenNativeDecoder`: close the native decoder, `ensure()` a new one, **do not** increment `recreateCount`. SOFT window until lastDecoded moves past the death PTS; output-gated HARD; first-fill water only after liveness. Typed stall if the reopen dies at the same PTS.
+3. `mustColdOpenVideoDecoder` + `getDecoder(..., { fresh })`: VIS→VIDEO / black→VIDEO evicts the cached frame source so the mix cold-starts like VIDEO-only. VIDEO-only first run does not evict.
+4. Transaction-end `abandonSpeculativeDecoder` **closes** instead of reset+reconfigure.
+
+No timeout bump, no snap/nearest/drop, no flood to 144, no Mediabunny, no HTMLVideo fallback, no global HARD raise. AFE-20/21/22 predicates unchanged.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest VIDEO-only (expect PASS) then VIDEO+VIS mix on `…Kopie.mp4` sample 28 PTS 1375000 after AFE-22 reset: cold reopen (not a third identical 458333 recreate); exact PTS or typed stall after reopen exhausted; no flood to 144. Dump should show `postResetFingerprintMatch` / `livenessReopen` / `coldOpenAfterVis` when applicable.  
+**HUMAN-PROVEN: NO**
+
+# AFE-24 — liveness reopen did not fire despite fingerprint match
+
+Human Windows EXE on AFE-23 tip (`dea72ca`). Same shape as AFE-22/23. Fixture MODE A still green. VIS-mix still fails.
+
+- sample **28** PTS **1375000** · lastSubmitted **34** · requestedSubmitted **yes**
+- lastDecodedTs **458333** · postRecreateOutputs **10** · HARD **22** · queue **19**
+- hardHorizonReset **yes** · recreates **2** · resets **2** · FINAL_FLUSH
+- **postResetFingerprintMatch yes**
+- **livenessReopen no**
+- **coldOpenAfterVis no**
+- visFrames **0** at stall
+
+## Cause
+
+AFE-23 **detected** the identical post-reset death (`postResetFingerprintMatch yes`) but the scheduler only called `mayPostResetLivenessReopenFor` when `hardHorizonResetExhausted` was true. Exhausted requires `lastDecoded === lastDecodedAtSubmit`. After the AFE-22 reset, WebView2 emits the ~10-frame / 458333 death **after** the last submit, so those timestamps stay unequal, exhausted stays **false**, FINAL_FLUSH runs, then the 3s stall. `mayPostResetLivenessReopen` itself would have returned true if invoked.
+
+`coldOpenAfterVis no` is **correct** on this dump: first video run (`previousPictureKind` null), visFrames 0. VIS is later in the mix. Not a missed VIS→VIDEO evict.
+
+## Fix
+
+1. Invoke liveness reopen whenever fingerprint matches after hardHorizonReset — do **not** require `hardHorizonResetExhausted`.
+2. Also invoke after FINAL_FLUSH (the human path) before the 3s stall.
+3. Dump `livenessReopen yes` / `livenessReopenReason yes` after the path runs; typed reason if blocked.
+
+No timeout bump, no snap, no flood to 144, no Mediabunny. AFE-20/21/22/23 predicates kept.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest VIS-mix on `…Kopie.mp4` sample 28: dump must show `livenessReopen yes` after fingerprint match (not match-yes / reopen-no). Exact PTS or typed stall after reopen exhausted.  
+**HUMAN-PROVEN: NO**
+
+# AFE-25 — EOF / tail differential (sample 142 / PTS 5958333)
+
+Human Windows EXE on AFE-24 tip (`5bec440`). **Not** the 458333 HIGH_WATER / recreate / liveness family.
+
+- requested sample **142** PTS **5958333**
+- lastSubmitted **144** · requestedSubmitted **yes** · current=formula=lastRequired **144**
+- lastDecodedTs **5916667** · targetPtsSeen **no** · decodeQueue **0**
+- resets/recreates/recovery **0** · FINAL_FLUSH **yes** · flushes **1** · usefulInputExhausted **yes**
+- videoReq/Dec/Enc **42/41/41** · unresolved **1**
+- clip `3bf9112a-… - Kopie.mp4` · sourceInMs ~4509.10 · sourceOutMs **6042** · timelineMs ~1366.67
+
+## STEP 1 — tail sample table (24fps / 145 samples / elst 1024 / maxReorder 2)
+
+Analog `tests/fixtures/afe/afe-eof-24-g145-b3.mp4` (same duration/shape as human sourceOut 6042):
+
+| idx | PTS µs | key | presPos | role |
+| --- | --- | --- | --- | --- |
+| 139 | 5916667 | delta | 140 | lastDecoded |
+| 142 | **5958333** | delta (B) | 141 | requested |
+| 143 | 6083333 | delta | 144 | later decode ref (last presentation) |
+| 144 | 6041667 | delta | 143 | later decode ref |
+
+Sample **142 / 5958333 exists**. 143/144 are required by `lastRequired(142)=144`. Human last-frame `sourceTimeSec` selects 142. **Not CASE A.**
+
+## STEP 2 — raw WebCodecs (Chrome)
+
+Every sample 0–144 submitted with AILEXSI PTS µs, then `flush()`. **YES: timestamp 5958333 was emitted**, matched sample 142, during flush, immediately after 5916667 (sample 139). Output count 145 / missing []. AILEXSI `getFrameAt` on Chrome returns the frame.
+
+## STEP 3 — Mediabunny (diagnostic only, not a production dep)
+
+`VideoSampleSink.samples(5.5)` emits 5.958333s (= 5958333 µs). First behavioral gap vs AILEXSI is **not** demux/PTS: both see the sample. Gap is WebView2 hardware decode at EOS vs Chrome/Mediabunny software-capable path. avcC already has `bitstream_restriction_flag=1` / `max_dec_frame_buffering=4` (Mediabunny SPS patch would be a no-op on this family).
+
+## Stage trace (sample 142 / 5958333)
+
+SOURCE_SAMPLE YES → DEMUXED YES → CHUNK_CREATED YES → DECODER_SUBMITTED YES → **DECODER_OUTPUT NO on WebView2** (YES on Chrome) → PTS_MATCHED / STREAM_READY / FRAME_TAKEN / CANVAS / ENCODED follow the first NO.
+
+## Fix (CASE B only)
+
+`decoderConfigOf`: `hardwareAcceleration: "prefer-software"`. No new escape/reset/recreate. No HIGH/LOW/HARD change. No snap / drop 142 / VIS/BLACK. No Mediabunny package.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — retest the Kopie tail clip on this HEAD; dump must show `targetPtsSeen yes` / Enc==Req or typed stall, not 5958333 unseen after FINAL_FLUSH.  
+**HUMAN-PROVEN: NO**
+

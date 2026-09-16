@@ -31,6 +31,7 @@ export type DecoderConfigFingerprint = {
   codedWidth: number;
   codedHeight: number;
   optimizeForLatency: boolean;
+  hardwareAcceleration: string;
   descriptionHash: string;
   hash: string;
 };
@@ -60,6 +61,7 @@ export function fingerprintDecoderConfig(config: {
   codedWidth?: number;
   codedHeight?: number;
   optimizeForLatency?: boolean;
+  hardwareAcceleration?: string;
   description?: unknown;
 }): DecoderConfigFingerprint {
   const description = viewOf(config.description);
@@ -68,16 +70,18 @@ export function fingerprintDecoderConfig(config: {
   const codedWidth = config.codedWidth ?? 0;
   const codedHeight = config.codedHeight ?? 0;
   const optimizeForLatency = config.optimizeForLatency === true;
+  const hardwareAcceleration = config.hardwareAcceleration ?? "no-preference";
   const hash = compactHashString(
     [
       codec,
       String(codedWidth),
       String(codedHeight),
       optimizeForLatency ? "1" : "0",
+      hardwareAcceleration,
       descriptionHash,
     ].join("|"),
   );
-  return { codec, codedWidth, codedHeight, optimizeForLatency, descriptionHash, hash };
+  return { codec, codedWidth, codedHeight, optimizeForLatency, hardwareAcceleration, descriptionHash, hash };
 }
 
 export function fingerprintMovieConfig(movie: AfeMovie): DecoderConfigFingerprint {

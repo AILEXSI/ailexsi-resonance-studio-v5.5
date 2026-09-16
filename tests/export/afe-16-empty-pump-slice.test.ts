@@ -253,7 +253,8 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
       requested: HUMAN.sample,
       budgetEnd: nowMs() + 40,
     });
-    expect(atHigh).toBe(false);
+    /* AFE-17: SOFT HIGH is not a permanent stop while the local target is still unsubmitted. */
+    expect(atHigh).toBe(true);
     mock.drain(HUMAN.high - HUMAN.decodeQueue, false);
     expect(mock.decodeQueueSize).toBe(HUMAN.decodeQueue);
     expect(mock.decodeQueueSize).toBeGreaterThan(decoder.decodeQueueLowWater);

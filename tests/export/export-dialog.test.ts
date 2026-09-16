@@ -158,6 +158,9 @@ describe("export dialog state", () => {
     expect(failed.open).toBe(true);
     expect(failed.phase).toBe("failed");
     expect(failed.success).toBe(false);
+    expect(failed.error).toContain("productVersion 5.5.0");
+    expect(failed.error).toContain("frameEngine AILEXSI");
+    expect(failed.error).toContain("FAIL: empty");
     const done = succeedExportDialog(openExportDialog(job), "out.mp4");
     expect(done.phase).toBe("done");
     expect(done.success).toBe(true);
