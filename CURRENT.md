@@ -66,8 +66,9 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Verdict | **D** — Chromium VideoDecoder drops disposable B PTS **100000** when avcC VUI omits `bitstream_restriction`. Not A/B/C. |
 | First NO | **DECODER_OUTPUT** (submitted yes, output no). |
 | Diff | `decoderConfigOf` applies existing `patchAvcCBitstreamRestriction`. Exact PTS unchanged. |
-| Test | `tests/export/stress-01-clip-start-pts.test.ts` + GOP fixture `tests/fixtures/afe/stress-01-clip-start-gop.mp4`. |
+| Test | `tests/export/stress-01-clip-start-pts.test.ts` + GOP fixture `tests/fixtures/afe/stress-01-clip-start-gop.mp4`. MODE A Chrome post-fix: AILEXSI and `decoderConfigOf` emit 100000; unpatched avcC still misses it. |
 | Human remaining | MODE B EXE, same `…Kopie.mp4`, `sourceInMs 0` — confirm no stall at PTS 100000. **Do not merge from this pass.** |
+| Gates | `tsc --noEmit` clean. Focused STRESS-01 + AFE-25 + ENC-01 **16/16**. AFE files except pre-existing AFE-15 A/N dump-ban. Full suite **1221 passed / 2 failed / 1223** (same AFE-15 A/N as main). `vite build` OK. |
 
 ## Verification paths
 

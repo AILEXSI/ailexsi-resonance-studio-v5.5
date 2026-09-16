@@ -82,20 +82,20 @@ Sample 3 is the second presentation frame after the IDR (pres index 1). elst map
 
 ## STEP 3 — raw decoder differential (same physical MP4, GOP origin 0)
 
-Pre-fix Chrome MODE A (`docs/compliance/stress-01-pre-fix-chrome.json`). Human WebView2 column is the operator dump.
+Pre-fix: `docs/compliance/stress-01-pre-fix-chrome.json`.
+Post-fix: `docs/compliance/stress-01-clip-start-pts-100000.json`.
+Human WebView2 column is the operator dump (unpatched EXE).
 
-| PTS µs | AILEXSI WebView2 (human) | AILEXSI Chrome | Chrome VideoDecoder | Mediabunny diagnostic | Chrome + SPS patch |
+| PTS µs | AILEXSI WebView2 (human) | Chrome unpatched avcC | AILEXSI Chrome after fix | Chrome `decoderConfigOf` | Mediabunny VideoSampleSink* |
 | ---: | :---: | :---: | :---: | :---: | :---: |
-| 66667 | YES | YES | YES | ERR* | YES |
-| **100000** | **NO** | **NO** | **NO** | ERR* | **YES** |
-| 133333 | YES | YES | YES | ERR* | YES |
-| 166667 | YES | YES | YES | ERR* | YES |
-| 200000 | YES | YES | YES | ERR* | YES |
-| … 500000 | YES | YES | YES | ERR* | YES |
+| 66667 | YES | YES | YES | YES | YES (elst 0) |
+| **100000** | **NO** | **NO** | **YES** | **YES** | picture YES (elst **33333**) |
+| 133333 | YES | YES | YES | YES | YES |
+| … 500000 | YES | YES | YES | YES | YES |
 
-\* Mediabunny was loaded from esm.sh as a **diagnostic only**. First attempt (`EncodedPacketSink` → VideoDecoder) failed `A key frame is required after configure()` — not used as a product path. ffmpeg/libavcodec emits the 0.033s B-frame on this file.
+\* Diagnostic only (esm.sh). Mediabunny timestamps are **edit-list** (mediaTime 40 subtracted): sample 3 is 33333 µs, not raw 100000. The sink emits that second presentation frame. ffmpeg/libavcodec also emits the 0.033s B.
 
-`prefer-software` vs `no-preference` Chrome columns were identical (both missing 100000). First divergence vs a working decoder is **100000**.
+First divergence: **PTS 100000** (Chrome unpatched / human WebView2 vs patched AILEXSI / `decoderConfigOf`).
 
 ## STEP 4 — edit-list / presentation validity
 
