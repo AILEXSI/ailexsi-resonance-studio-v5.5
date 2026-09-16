@@ -9,7 +9,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 
 | Feld | Stand |
 | --- | --- |
-| Datum | 2026-09-15 |
+| Datum | 2026-09-16 |
 | Ordner | `C:\\Users\\marti\\ResonanceStudio-V5` |
 | Version | **5.5.0** (package `@ailexsi/resonance-studio-v5.5` / tauri `AILEXSI Resonance Studio V5.5` / Cargo `ailexsi-resonance-studio-v5-5` / toolbar chip **`V5.5.0`**). JSON `schemaVersion` **5**. |
 | main | This V5.5 repo. Source working tree: V5 `4e80162`. Not a merge of V5 PR #23/#24/#25. |
