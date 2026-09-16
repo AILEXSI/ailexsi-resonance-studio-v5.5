@@ -136,7 +136,8 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | First divergence | Export used `mixEnergyAt` (~23 ms LPF / sample-diff) + `syntheticSpectrum()` (64 bins). Preview uses AnalyserNode FFT 2048 / 1024 bins + persistent onset. Kick Δrms **+0.309**; pad Δbass **−0.521**; spectrum **1024 vs 64**. |
 | Diff | Shared core (`assembleAudioFeatures` / `stepOnset` / FFT bands). Adapter A = live AnalyserNode. Adapter B = deterministic offline FFT on mixed PCM. Sequential export state. No `syntheticSpectrum` when PCM exists. Volume still proportional (no normalize). |
 | Untouched | Scenes; AUDIO-01 mix/`expectsAudio`/mux; AFE; ENC-01; STRESS-01..04 mux; Mediabunny/WebM. |
-| Test | `tests/visualizer/vis-sync-01-preview-export-parity.test.ts` — Phase 1 table + tests 1–8. |
+| Test | `tests/visualizer/vis-sync-01-preview-export-parity.test.ts` — Phase 1 table + tests 1–8 (15). |
+| Gates | `tsc --noEmit` clean. Focused VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **114/114**. Full suite **1280 passed / 6 failed / 1286**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
 | Human remaining | Short 1–2 min obvious-beats export vs Studio preview, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-SYNC-01-PREVIEW-EXPORT-PARITY.md`. |
 
 ## Verification paths
