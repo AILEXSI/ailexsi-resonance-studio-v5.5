@@ -1017,3 +1017,23 @@ Windows AFE-15: requested sample 74 PTS 3125000, lastSubmitted 59, lastDecodedTs
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 74 / submitted 59 / queue 7 / LOW 6 / HIGH 12 → producer uses bounded credits toward 74, no empty 60-59 pause, exact PTS, export past VIDEO→VIS.  
 **HUMAN-PROVEN: NO**
 
+# AFE-17 — HIGH_WATER target reachability / bounded dependency credits (V5.5)
+
+Windows AFE-16: requested sample 43 PTS 2000000, lastSubmitted 40, lastRequired 140, decodeQueue 12, LOW 6, HIGH 12, lastDecodedTs 1000000 stuck, `frozenAtHighWater` / `backpressureBlocked` / `noMoreSubmission`, usefulInputExhausted no, FINAL_FLUSH no, packet/config parity yes, firstSubmittedAfterRecreate 0 key, postRecreateSubmitted 41 / outputs 23, targetPtsSeen no. Submit `PUMP_LOOKAHEAD:0-40/q0->12/.../progress` then `PUMP_LOOKAHEAD:41-40/q12->12/.../paused`. Stale dump `pumpSlice 92-97` contradicted the live 41-40 attempt.
+
+## Cause
+
+AFE-16 spends unused SOFT HIGH credits while queue < HIGH. This stall is the producer already **at** SOFT HIGH (12) before the current requested sample (43) and its local decode deps are submitted. Exact PTS cannot resolve: 43 > lastSubmitted 40 and submission is permanently blocked. Transaction-wide lastRequired 140 is not a license to refill to 140.
+
+## Fix
+
+1. LOCAL horizon: `currentTargetRequiredSample` = `lastRequiredDecodeSample(lastRequested=current requested)`, capped by transaction lastRequired. Sample 43 / reorder 2 / prefetch 4 → **49**, not 140.
+2. Two levels: `SOFT_HIGH_WATER` = existing AFE-14/16 HIGH. `HARD_DEPENDENCY_CEILING` = min(CAP, SOFT + min(remaining-to-local, L+B)) after recreate only. Human: SOFT 12, remaining 9, L+B 10 → HARD **21**. First-fill HARD==SOFT.
+3. Borrow HARD credits ONLY when: exact unresolved, useful input remains, currentTarget > lastSubmitted, no output progress, queue already at SOFT. Stop once the local horizon is submitted. If HARD reached with no progress: no more submit (existing recover/stall). No global HIGH raise. No 40/125 flood.
+4. TRACE: `requestedSample`, `currentTargetRequiredSample`, `prefetch`, `softHighWater`, `hardDependencyCeiling`, `submittedMinusOutputs`.
+5. `pumpSlice` in the stall snapshot is the current / last actual submit attempt (begin/endSubmitPhase), never a leftover planned 92-97. Provenance cannot contradict `submitPhases`.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 43 / submitted 40 / queue 12 / HIGH 12 → bounded credits toward local 49, exact PTS 2000000, no flood to 140, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+

@@ -17,6 +17,9 @@ import {
   AFE_POST_RECREATE_OUTPUT_BUDGET_MS,
   AFE_SETTLE_DRAIN_MS,
   mustAdvanceTowardDependencyHorizon,
+  mayBorrowHardDependencyCredits,
+  currentTargetRequiredSample,
+  hardDependencyCeiling,
   classifySampleRole,
   decodeQueueHighWater,
   decodeQueueLowWater,
@@ -47,7 +50,7 @@ import {
 } from "./stall";
 import { sampleDurationToChunkDurationUs, samplePtsToChunkTimestampUs } from "./timestamps";
 import type { AfeMovie, AfeSample } from "./types";
-import { earlierKeyframeOrigin, sampleBytes } from "./mp4-reader";
+import { earlierKeyframeOrigin, nextKeyframeAfter, sampleBytes } from "./mp4-reader";
 
 type FrameWaiter = { resolve: (frame: VideoFrame) => void; reject: (e: Error) => void };
 
@@ -195,6 +198,35 @@ export class AfeVideoDecoder {
   /** Resume target after HIGH_WATER pause. Always < HIGH_WATER. */
   get decodeQueueLowWater(): number {
     return decodeQueueLowWater(this.movie.maxReorderSamples, this.prefetchHint, {
+      afterRecreate: this.recreateCount >= 1,
+    });
+  }
+
+  /** AFE-17: SOFT_HIGH_WATER — normal AFE-14/16 threshold. */
+  get softHighWater(): number {
+    return this.decodeQueueHighWater;
+  }
+
+  /** LOCAL horizon for the current exact requested sample, capped by lastRequired. */
+  currentTargetRequiredFor(requested: number): number {
+    return currentTargetRequiredSample({
+      requested,
+      maxReorderSamples: this.movie.maxReorderSamples,
+      prefetch: this.prefetchHint,
+      sampleCount: this.movie.sampleCount,
+      lastRequiredDecodeSample: this.lastRequiredSample ?? undefined,
+      nextRefOrGop: nextKeyframeAfter(this.movie, requested),
+    });
+  }
+
+  /** Derived HARD_DEPENDENCY_CEILING for the current requested sample. */
+  hardDependencyCeilingFor(requested: number): number {
+    return hardDependencyCeiling({
+      softHighWater: this.decodeQueueHighWater,
+      lastSubmittedSample: this.lastSubmittedSample,
+      currentTargetRequiredSample: this.currentTargetRequiredFor(requested),
+      maxReorderSamples: this.movie.maxReorderSamples,
+      prefetch: this.prefetchHint,
       afterRecreate: this.recreateCount >= 1,
     });
   }
@@ -506,6 +538,9 @@ export class AfeVideoDecoder {
       pausedForCapacity: false,
       outputProgressed: false,
     };
+    /* Current attempt — not a leftover planned slice (AFE-17 provenance). */
+    this.pumpSliceStart = submittedFrom;
+    this.pumpSliceEnd = this.lastSubmittedSample ?? submittedFrom;
   }
 
   endSubmitPhase(): void {
@@ -515,6 +550,8 @@ export class AfeVideoDecoder {
     open.decodeQueueEnd = this.decodeQueueSize;
     open.lastDecodedEnd = this.lastVideoFrameTimestamp;
     open.outputProgressed = open.lastDecodedEnd !== open.lastDecodedStart;
+    this.pumpSliceStart = open.submittedFrom;
+    this.pumpSliceEnd = open.submittedTo;
     this.submitPhaseTraces.push(open);
     if (this.submitPhaseTraces.length > 16) this.submitPhaseTraces.shift();
     this.openSubmitPhase = null;
@@ -529,12 +566,17 @@ export class AfeVideoDecoder {
    * because queue > LOW_WATER. Submitting the requested sample does not
    * close H.264 reorder / B-frame dependencies. Queued input does not
    * necessarily produce further output / the requested PTS.
+   * AFE-17: after recreate, if the queue is already at SOFT HIGH and the
+   * LOCAL target horizon is still unsubmitted, borrow bounded credits up
+   * to HARD_DEPENDENCY_CEILING. Do not use lastRequired=140 as a flood.
+   * Once the local horizon is submitted, emergency credits stop.
+   * If HARD is reached with no output progress: no more submit (recover/stall).
    * No busy loop. No arbitrary sleep. No mid-run flush.
    *
    * Returns false when the caller must not submit more. Before the first
    * recreate, that is a stop-for-STEP-C signal (do not 3s-stall). After
-   * recreate, a still-stuck HIGH_WATER queue returns false after a short
-   * output-progress budget. gopStart==0 does not re-loop AFE-13 escape.
+   * recreate, a still-stuck HIGH_WATER / HARD queue returns false after a
+   * short output-progress budget. gopStart==0 does not re-loop AFE-13 escape.
    */
   async waitForDecodeCapacity(
     signal?: AbortSignal,
@@ -556,6 +598,8 @@ export class AfeVideoDecoder {
     if (requested != null) this.ensureRebuildOwnership(requested);
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
     const mustAdvance = this.dependencyHorizonAdvance(requested, false);
+    const mustBorrow = this.hardDependencyBorrow(requested, false, outputProgressed);
+    const hard = requested != null ? this.hardDependencyCeilingFor(requested) : high;
     if (
       mayResumeDecode({
         decodeQueueSize: this.decodeQueueSize,
@@ -564,6 +608,8 @@ export class AfeVideoDecoder {
         exactReady: false,
         paused: this.windowPaused,
         mustAdvanceTowardDependencyHorizon: mustAdvance,
+        mustBorrowHardDependencyCredits: mustBorrow,
+        hardDependencyCeiling: hard,
       }) &&
       maySubmitEncoded({
         decodeQueueSize: this.decodeQueueSize,
@@ -573,6 +619,8 @@ export class AfeVideoDecoder {
         paused: this.windowPaused,
         exactReady: false,
         mustAdvanceTowardDependencyHorizon: mustAdvance,
+        mustBorrowHardDependencyCredits: mustBorrow,
+        hardDependencyCeiling: hard,
       })
     ) {
       this.noMoreSubmission = false;
@@ -590,19 +638,20 @@ export class AfeVideoDecoder {
     const short = nowMs() + AFE_POST_RECREATE_OUTPUT_BUDGET_MS;
     const deadline = Math.min(short, opts?.budgetEnd ?? short);
     const dec = this.decoder;
-    while (
-      !mayResumeDecode({
+    const resumeArgs = (ready: boolean) => {
+      const progressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
+      return {
         decodeQueueSize: this.decodeQueueSize,
         highWater: high,
         lowWater: low,
-        exactReady: requested != null && this.streamReady.has(requested),
-        paused: true,
-        mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(
-          requested,
-          requested != null && this.streamReady.has(requested),
-        ),
-      })
-    ) {
+        exactReady: ready,
+        paused: true as const,
+        mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(requested, ready),
+        mustBorrowHardDependencyCredits: this.hardDependencyBorrow(requested, ready, progressed),
+        hardDependencyCeiling: requested != null ? this.hardDependencyCeilingFor(requested) : high,
+      };
+    };
+    while (!mayResumeDecode(resumeArgs(requested != null && this.streamReady.has(requested)))) {
       throwIfAborted(signal);
       if (requested != null && this.streamReady.has(requested)) {
         this.windowPaused = false;
@@ -614,19 +663,16 @@ export class AfeVideoDecoder {
       if (this.lastError) throw this.lastError;
       const remain = deadline - nowMs();
       if (remain <= 0) {
-        if (this.lastVideoFrameTimestamp === tsAtPause && this.decodeQueueSize >= high) {
+        const ceiling = requested != null ? this.hardDependencyCeilingFor(requested) : high;
+        if (
+          this.lastVideoFrameTimestamp === tsAtPause &&
+          this.decodeQueueSize >= high
+        ) {
           this.noMoreSubmission = true;
-          this.frozenAfterRecreate = true;
+          this.frozenAfterRecreate = this.decodeQueueSize >= ceiling || this.decodeQueueSize >= high;
           return false;
         }
-        const resume = mayResumeDecode({
-          decodeQueueSize: this.decodeQueueSize,
-          highWater: high,
-          lowWater: low,
-          exactReady: false,
-          paused: true,
-          mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(requested, false),
-        });
+        const resume = mayResumeDecode(resumeArgs(false));
         this.backpressureBlocked = !resume;
         if (resume) this.windowPaused = false;
         return resume;
@@ -639,16 +685,7 @@ export class AfeVideoDecoder {
         this.frozenAfterRecreate = false;
         return true;
       }
-      if (
-        mayResumeDecode({
-          decodeQueueSize: this.decodeQueueSize,
-          highWater: high,
-          lowWater: low,
-          exactReady: false,
-          paused: true,
-          mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(requested, false),
-        })
-      ) {
+      if (mayResumeDecode(resumeArgs(false))) {
         this.windowPaused = false;
         this.noMoreSubmission = false;
         this.frozenAfterRecreate = false;
@@ -683,6 +720,38 @@ export class AfeVideoDecoder {
         sampleCount: this.movie.sampleCount,
         lastRequiredDecodeSample: lastRequired,
       }),
+    });
+  }
+
+  /**
+   * AFE-17: borrow bounded HARD credits only after recreate, only while the
+   * LOCAL target horizon is unsubmitted, only at/above SOFT, only with no
+   * output progress. Stops once currentTargetRequired is submitted or HARD
+   * is reached.
+   */
+  private hardDependencyBorrow(
+    requested: number | undefined,
+    exactReady: boolean,
+    outputProgressed: boolean,
+  ): boolean {
+    if (requested == null || exactReady) return false;
+    if (this.recreateCount < 1) return false;
+    const currentTarget = this.currentTargetRequiredFor(requested);
+    const hard = this.hardDependencyCeilingFor(requested);
+    return mayBorrowHardDependencyCredits({
+      exactReady,
+      usefulInputRemains: hasFurtherUsefulInput({
+        nextDecode: (this.lastSubmittedSample ?? -1) + 1,
+        sampleCount: this.movie.sampleCount,
+        lastRequiredDecodeSample: currentTarget,
+      }),
+      currentTargetRequiredSample: currentTarget,
+      lastSubmittedSample: this.lastSubmittedSample,
+      outputProgressed,
+      decodeQueueSize: this.decodeQueueSize,
+      softHighWater: this.decodeQueueHighWater,
+      hardDependencyCeiling: hard,
+      afterRecreate: true,
     });
   }
 
@@ -1002,6 +1071,22 @@ export class AfeVideoDecoder {
         videoFramesDecoded: dec,
         videoFramesEncoded: enc,
       });
+    const traces = extra?.submitPhaseTraces ?? this.submitPhaseTraces;
+    const lastPhase = this.openSubmitPhase ?? traces[traces.length - 1];
+    const requestedSample =
+      extra?.requestedSample ?? extra?.sourceSampleRequested ?? origin.sourceSampleRequested ?? focus ?? null;
+    const currentTarget =
+      extra?.currentTargetRequiredSample ??
+      (requestedSample != null ? this.currentTargetRequiredFor(requestedSample) : null);
+    const soft = extra?.softHighWater ?? extra?.decodeQueueHighWater ?? this.decodeQueueHighWater;
+    const hard =
+      extra?.hardDependencyCeiling ??
+      (requestedSample != null ? this.hardDependencyCeilingFor(requestedSample) : soft);
+    const submittedMinus =
+      extra?.submittedMinusOutputs ??
+      (this.recreateCount >= 1
+        ? this.postRecreateSubmitted - this.postRecreateOutputs
+        : (this.lastSubmittedSample ?? -1) + 1);
     return emptyStallSnapshot({
       decodeStartSample: this.streamMode ? this.streamDecodeStart : null,
       lastSubmittedSample: this.lastSubmittedSample,
@@ -1038,8 +1123,14 @@ export class AfeVideoDecoder {
       openedRequestedVideoFrames: extra?.openedRequestedVideoFrames ?? opened,
       unresolvedRequestedVideoFrames: extra?.unresolvedRequestedVideoFrames ?? unresolved,
       transactionComplete: extra?.transactionComplete ?? complete,
-      pumpSliceStart: extra?.pumpSliceStart ?? this.pumpSliceStart,
-      pumpSliceEnd: extra?.pumpSliceEnd ?? this.pumpSliceEnd,
+      pumpSliceStart:
+        extra?.pumpSliceStart ??
+        lastPhase?.submittedFrom ??
+        this.pumpSliceStart,
+      pumpSliceEnd:
+        extra?.pumpSliceEnd ??
+        lastPhase?.submittedTo ??
+        this.pumpSliceEnd,
       ptsRegistered: extra?.ptsRegistered ?? ptsRegistered,
       ownershipWaiterActive: extra?.ownershipWaiterActive ?? (waiter != null || rec?.waiterActive === true),
       ownershipRebuilt: extra?.ownershipRebuilt ?? [...this.ownership.values()].some((r) => r.rebuilt),
@@ -1097,6 +1188,12 @@ export class AfeVideoDecoder {
       tailOutputTimestamps: extra?.tailOutputTimestamps ?? [...this.tailOutputTimestamps],
       tailOutputCount: extra?.tailOutputCount ?? this.tailOutputTimestamps.length,
       exactIdentityHolds: extra?.exactIdentityHolds ?? identityHolds,
+      requestedSample,
+      currentTargetRequiredSample: currentTarget,
+      prefetch: extra?.prefetch ?? this.prefetchHint,
+      softHighWater: soft,
+      hardDependencyCeiling: hard,
+      submittedMinusOutputs: submittedMinus,
     });
   }
 
@@ -1271,6 +1368,8 @@ export class AfeVideoDecoder {
     this.needsKeyframe = true;
     this.configured = false;
     this.lastSubmittedSample = null;
+    this.pumpSliceStart = null;
+    this.pumpSliceEnd = null;
     this.lastVideoFrameTimestamp = null;
     this.lastDecodedAtSubmit = null;
     this.submitsWithoutOutputProgress = 0;
@@ -1348,6 +1447,8 @@ export class AfeVideoDecoder {
     this.lastDecodedAtSubmit = null;
     this.submitPhaseTraces = [];
     this.openSubmitPhase = null;
+    this.pumpSliceStart = null;
+    this.pumpSliceEnd = null;
     this.frozenAfterRecreate = false;
     this.windowPaused = false;
     if (!bounds?.keepResolved) {
@@ -1666,6 +1767,10 @@ export class AfeVideoDecoder {
     this.streamPts.push(timestamp, sample.index);
     this.noteIdentity(sample.index, "PTS_INSERT", timestamp);
     this.lastSubmittedSample = sample.index;
+    if (this.openSubmitPhase) {
+      this.pumpSliceStart = this.openSubmitPhase.submittedFrom;
+      this.pumpSliceEnd = sample.index;
+    }
     if (this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit) {
       this.submitsWithoutOutputProgress += 1;
     } else {

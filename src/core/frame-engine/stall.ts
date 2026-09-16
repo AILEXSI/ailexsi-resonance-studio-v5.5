@@ -240,6 +240,24 @@ export type AfeStallSnapshot = {
   tailOutputCount: number;
   /** Live identity: map OR ready exact OR waiter OR active rebuild. */
   exactIdentityHolds: boolean;
+  /** AFE-17: opened / focused requested sample index (alias of source). */
+  requestedSample: number | null;
+  /**
+   * AFE-17: LOCAL decode-order horizon for the current exact requested sample.
+   * min(lastRequired(requested), transaction lastRequired). Not lastRequired=140.
+   */
+  currentTargetRequiredSample: number | null;
+  /** Sequential prefetch hint used for HIGH/LOW / local horizon. */
+  prefetch: number | null;
+  /** AFE-17: normal AFE-14/16 backpressure threshold (decodeQueueHighWater). */
+  softHighWater: number;
+  /**
+   * AFE-17: bounded emergency queue ceiling. Soft + remaining local-horizon
+   * credits, capped by lookahead+prefetch. Never lastRequired=140, never ~125.
+   */
+  hardDependencyCeiling: number;
+  /** Submitted minus emitted (post-recreate when available). */
+  submittedMinusOutputs: number;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -364,6 +382,12 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     tailOutputTimestamps: [],
     tailOutputCount: 0,
     exactIdentityHolds: false,
+    requestedSample: null,
+    currentTargetRequiredSample: null,
+    prefetch: null,
+    softHighWater: 0,
+    hardDependencyCeiling: 0,
+    submittedMinusOutputs: 0,
     ...partial,
   };
 }
@@ -453,7 +477,9 @@ export function decodeQueueLowWater(
  * Queued decoder input does **not** necessarily produce the requested PTS
  * (or any further output). Producer spends remaining HIGH-queue credits
  * toward lastRequired until exact ready, HIGH_WATER, or lastRequired is
- * fully submitted. HIGH_WATER remains the hard cap.
+ * fully submitted. SOFT HIGH_WATER remains the normal cap. AFE-17 may
+ * borrow a bounded HARD_DEPENDENCY_CEILING only after recreate when the
+ * current local target is still unsubmitted and the queue is already at SOFT.
  */
 export function mustAdvanceTowardDependencyHorizon(args: {
   lastSubmittedSample: number | null;
@@ -470,11 +496,105 @@ export function mustAdvanceTowardDependencyHorizon(args: {
 }
 
 /**
+ * LOCAL decode-order horizon for the CURRENT exact requested sample.
+ * lastRequiredDecodeSample(lastRequested=requested), then capped by the
+ * transaction-wide lastRequired so lastRequired=140 cannot authorize a flood.
+ */
+export function currentTargetRequiredSample(args: {
+  requested: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  sampleCount: number;
+  lastRequiredDecodeSample?: number;
+  nextRefOrGop?: number | null;
+}): number {
+  const local = lastRequiredDecodeSample({
+    lastRequested: args.requested,
+    maxReorderSamples: args.maxReorderSamples,
+    prefetch: args.prefetch,
+    sampleCount: args.sampleCount,
+    nextRefOrGop: args.nextRefOrGop,
+  });
+  if (args.lastRequiredDecodeSample == null) return local;
+  return Math.min(local, args.lastRequiredDecodeSample);
+}
+
+/**
+ * HARD_DEPENDENCY_CEILING — emergency queue cap after recreate.
+ *
+ *   extraCap = L + B          // lookahead + prefetch; maxReorder already in SOFT
+ *   extra    = min(remaining to local horizon, extraCap)
+ *   HARD     = min(CAP 48, SOFT + extra)
+ *
+ * First-fill: HARD == SOFT (RECOVERY_FILL already admits the local window).
+ * Never lastRequired=140. Never the old 40/125 flood.
+ */
+export function hardDependencyCeiling(args: {
+  softHighWater: number;
+  lastSubmittedSample: number | null;
+  currentTargetRequiredSample: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  afterRecreate?: boolean;
+}): number {
+  const soft = Math.max(1, args.softHighWater | 0);
+  if (!args.afterRecreate) return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, soft);
+  const submitted = args.lastSubmittedSample ?? -1;
+  const remaining = Math.max(0, args.currentTargetRequiredSample - submitted);
+  const extraCap =
+    decodeWindowLookahead(args.maxReorderSamples, args.prefetch) +
+    decodeWindowBNeed(args.prefetch);
+  const extra = Math.min(remaining, Math.max(0, extraCap));
+  return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, soft + extra);
+}
+
+/**
+ * AFE-17 emergency borrow. All of: exact unresolved, useful input remains,
+ * currentTargetRequired > lastSubmitted, no output progress, queue already
+ * at SOFT_HIGH_WATER, queue still below HARD. First-fill does not borrow.
+ */
+export function mayBorrowHardDependencyCredits(args: {
+  exactReady: boolean;
+  usefulInputRemains: boolean;
+  currentTargetRequiredSample: number;
+  lastSubmittedSample: number | null;
+  outputProgressed: boolean;
+  decodeQueueSize: number;
+  softHighWater: number;
+  hardDependencyCeiling: number;
+  afterRecreate?: boolean;
+}): boolean {
+  if (args.afterRecreate === false) return false;
+  if (args.exactReady) return false;
+  if (!args.usefulInputRemains) return false;
+  if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
+  if (args.outputProgressed) return false;
+  if (args.decodeQueueSize < args.softHighWater) return false;
+  if (args.decodeQueueSize >= args.hardDependencyCeiling) return false;
+  return args.hardDependencyCeiling > args.softHighWater;
+}
+
+/**
+ * Stall pumpSlice must describe the CURRENT / last actual submit attempt.
+ * A planned leftover (e.g. 92-97) must not contradict PUMP_LOOKAHEAD:41-40.
+ */
+export function pumpSliceMatchesSubmitProvenance(args: {
+  pumpSliceStart: number | null;
+  pumpSliceEnd: number | null;
+  submitPhaseTraces: readonly SubmitPhaseTrace[];
+}): boolean {
+  const last = args.submitPhaseTraces[args.submitPhaseTraces.length - 1];
+  if (!last) return true;
+  return args.pumpSliceStart === last.submittedFrom && args.pumpSliceEnd === last.submittedTo;
+}
+
+/**
  * Submit is allowed unless the decoder is at HIGH_WATER.
  * AFE-14: output progress alone does not refill above LOW_WATER.
  * Resume only at LOW_WATER or exact frame ready — not on every dequeue
  * after lastRequired is fully submitted.
  * AFE-16: LOW_WATER must not starve when mustAdvanceTowardDependencyHorizon.
+ * AFE-17: mustBorrowHardDependencyCredits may spend queue slots up to HARD.
  */
 export function maySubmitEncoded(args: {
   decodeQueueSize: number;
@@ -484,8 +604,17 @@ export function maySubmitEncoded(args: {
   paused?: boolean;
   exactReady?: boolean;
   mustAdvanceTowardDependencyHorizon?: boolean;
+  mustBorrowHardDependencyCredits?: boolean;
+  hardDependencyCeiling?: number;
 }): boolean {
   if (args.exactReady) return true;
+  if (
+    args.mustBorrowHardDependencyCredits &&
+    args.hardDependencyCeiling != null &&
+    args.decodeQueueSize < args.hardDependencyCeiling
+  ) {
+    return true;
+  }
   if (args.decodeQueueSize >= args.highWater) return false;
   if (args.mustAdvanceTowardDependencyHorizon) return true;
   if (args.paused && args.lowWater != null && args.decodeQueueSize > args.lowWater) return false;
@@ -499,6 +628,7 @@ export function maySubmitEncoded(args: {
  * A dequeue that leaves the queue between LOW and HIGH must not refill
  * once lastRequired is fully submitted.
  * AFE-16: if mustAdvanceTowardDependencyHorizon, resume whenever queue < HIGH.
+ * AFE-17: mustBorrowHardDependencyCredits resumes while queue < HARD.
  */
 export function mayResumeDecode(args: {
   decodeQueueSize: number;
@@ -507,8 +637,17 @@ export function mayResumeDecode(args: {
   exactReady: boolean;
   paused: boolean;
   mustAdvanceTowardDependencyHorizon?: boolean;
+  mustBorrowHardDependencyCredits?: boolean;
+  hardDependencyCeiling?: number;
 }): boolean {
   if (args.exactReady) return true;
+  if (
+    args.mustBorrowHardDependencyCredits &&
+    args.hardDependencyCeiling != null &&
+    args.decodeQueueSize < args.hardDependencyCeiling
+  ) {
+    return true;
+  }
   if (args.mustAdvanceTowardDependencyHorizon && args.decodeQueueSize < args.highWater) return true;
   if (!args.paused) return args.decodeQueueSize < args.highWater;
   return args.decodeQueueSize <= args.lowWater;
@@ -1075,8 +1214,12 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `videoReq ${d.videoFramesRequested} (frame-count)`,
     `videoDec ${d.videoFramesDecoded} (frame-count)`,
     `videoEnc ${d.videoFramesEncoded} (frame-count)`,
+    `requestedSample ${d.requestedSample ?? d.sourceSampleRequested}`,
     `lastRequestedSample ${d.lastRequestedSample} (sample-index)`,
+    `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
     `lastRequiredDecodeSample ${d.lastRequiredDecodeSample} (sample-index)`,
+    `maxReorderSamples ${d.maxReorderSamples}`,
+    `prefetch ${d.prefetch}`,
     `speculativeSubmitted ${d.speculativeSamplesSubmitted}`,
     `cancelledSpeculativeSamples ${d.cancelledSpeculativeSamples}`,
     `decodeQueueBeforeCancel ${d.decodeQueueBeforeCancel}`,
@@ -1103,6 +1246,9 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `finalFlushArmed ${d.finalFlushArmed ? "yes" : "no"}`,
     `usefulInputExhausted ${d.usefulInputExhausted ? "yes" : "no"}`,
     `decodeQueueHighWater ${d.decodeQueueHighWater}`,
+    `softHighWater ${d.softHighWater || d.decodeQueueHighWater}`,
+    `hardDependencyCeiling ${d.hardDependencyCeiling}`,
+    `submittedMinusOutputs ${d.submittedMinusOutputs}`,
     `decodeQueueLowWater ${d.decodeQueueLowWater}`,
     `decodeQueuePeak ${d.decodeQueuePeak}`,
     `submitsWithoutOutputProgress ${d.submitsWithoutOutputProgress}`,
