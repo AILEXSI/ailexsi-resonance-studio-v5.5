@@ -28,6 +28,7 @@ import {
   resolvePictureSource,
 } from "../transition";
 import { exportVisOf } from "./job";
+import { DEFAULT_AVC_BITRATE, selectAvcEncoderConfig } from "./avc-capability";
 
 export { compositeVideoAt as exportComposite } from "../transition";
 import {
@@ -37,8 +38,6 @@ import {
   visualizerEventAt,
   visualizerEventsOf,
 } from "../visualizer";
-
-const AVC_CODEC = "avc1.42001f";
 
 export function canUseWebCodecs(): boolean {
   return (
@@ -250,16 +249,14 @@ export async function exportWithWebCodecs(
   const width = even(job.width);
   const height = even(job.height);
 
-  const supported = await VideoEncoder.isConfigSupported({
-    codec: AVC_CODEC,
+  const selected = await selectAvcEncoderConfig({
     width,
     height,
-    bitrate: 3_000_000,
-    framerate: job.fps,
-    avc: { format: "avc" },
+    fps: job.fps,
+    bitrate: DEFAULT_AVC_BITRATE,
   });
-  if (!supported.supported) {
-    return fail(job, `FAIL: H.264 encoder not supported (${AVC_CODEC})`);
+  if (!selected.ok) {
+    return fail(job, selected.error);
   }
 
   const canvas = document.createElement("canvas");
@@ -315,12 +312,7 @@ export async function exportWithWebCodecs(
   });
 
   encoder.configure({
-    codec: AVC_CODEC,
-    width,
-    height,
-    bitrate: 3_000_000,
-    framerate: job.fps,
-    avc: { format: "avc" },
+    ...selected.config,
     latencyMode: "quality",
     hardwareAcceleration: "prefer-software",
   });

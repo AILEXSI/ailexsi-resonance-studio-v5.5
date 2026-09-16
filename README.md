@@ -12,7 +12,7 @@ Local-first arrange / cutter / mixer / export. Export is H.264 MP4 via WebCodecs
 
 Preserved from V5: D dynamic audio, E stem import, F track/chapter groups, G volume automation, H write volume, transport, VIS, mixer, save/export `.vN`, AFE-03 decode optimizations.
 
-No new features in this bootstrap. **1080p is an OPEN ISSUE.**
+No new features in this bootstrap. **ENC-01** selects an H.264 level/profile the platform supports (720p keeps `avc1.42001f` when legal). **1080p Windows export is still the open human test** — do not mark it HUMAN-PROVEN from automated selection tests.
 
 ## Start
 

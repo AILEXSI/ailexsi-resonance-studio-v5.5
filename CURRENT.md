@@ -2,7 +2,7 @@
 
 Ein Blick. Kein Wunschzettel.
 
-**V5.5 bootstrap** from V5 AFE-03 `4e80162`. Mediabunny removed. Export = AILEXSI Frame Engine only. **AILEXSI Frame Engine export on Windows WebView2 is HUMAN-PROVEN** (operator EXE, PR **#17** tip `a01576b` merged to main). **AFE-04** B-frame / varying CTTS is in that proven EXE lineage. V5 repo not modified. V5 PR #23/#24/#25 not merged. **1080p OPEN ISSUE.**
+**V5.5 bootstrap** from V5 AFE-03 `4e80162`. Mediabunny removed. Export = AILEXSI Frame Engine only. **AILEXSI Frame Engine export on Windows WebView2 is HUMAN-PROVEN** (operator EXE, PR **#17** tip `a01576b` merged to main). **AFE-04** B-frame / varying CTTS is in that proven EXE lineage. V5 repo not modified. V5 PR #23/#24/#25 not merged. **ENC-01** AVC encoder capability for 1080p is **IMPLEMENTED / AUTOMATED-TESTED** (not HUMAN-PROVEN). Real Windows WebView2 1920×1080 H.264 export remains the open human test.
 
 Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED** | **NOT IMPLEMENTED**.
 **HUMAN-PROVEN** only from MODE B operator EXE acceptance — not from tests, agent screenshots, or Chrome-only runs.
@@ -44,6 +44,18 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Deps / SBOM | Mediabunny **removed**. CycloneDX SBOMs + inventory: `docs/compliance/`. MODE A AFE-25 (tip `a01576b`, still on main after PR #17): **1209 passed / 2 failed / 1211 total in 144 files** (`tsc --noEmit` clean). The 2 failures are the pre-existing AFE-15 A/N dump-ban (`visFrames`/`blackFrames`/`null` trip `/VIS|BLACK|null/`) — still present on main; not a merge regression. AFE-25 file: **4/4**. AFE-24 file: **4/4**. AFE-23 file: **7/7**. AFE-22 file: **7/7**. AFE-21 file: **8/8**. AFE-20 Shape A file: **13/13**. AFE-20 Shape B tail file: **7/7**. AFE-19 file: **7/7**. AFE-18 file: **10/10**. AFE-17 file: **12/12**. MODE A Chrome VIDEO→VIS→VIDEO fixture still **90/90/90** — **AUTOMATED-TESTED**, not HUMAN-PROVEN. Chrome B-frame pixels **1188/1188 EXACT** remain AFE-04/05 MODE A evidence. Windows WebView2 AILEXSI export (VIS-mix / multi-clip + AFE-25 prefer-software) is **HUMAN-PROVEN** at `a01576b` merged. **No LICENSE. No THIRD_PARTY_NOTICES. Does not claim MPL FREE. Licensing is not HUMAN-PROVEN.** |
 | Nächster Slice | Production Pass **I** (44-Track Acceptance) — **PLANNED / NOT IMPLEMENTED**. D + E + F + G + **H** stay HUMAN-PROVEN. Future UI zettel is **not** I. STOP — no I+. |
 | Production Pass | **D HUMAN-PROVEN** (incl. mixer resize/scroll). **E HUMAN-PROVEN** (Stem Import). **F HUMAN-PROVEN** (Track/Chapter Groups collapse UI — create / assign / collapse / rename). **G HUMAN-PROVEN** (Volume Automation — VOL lane). **H HUMAN-PROVEN** (Write Volume **W** — Vite + Root-Exe `24f4337`). **I–N + zettel PLANNED / NOT IMPLEMENTED**. Four Chapters + bis 11 Suno-Stems × 4. Kein Cubase-Klon. VIS-Ausbau-Intent = K–N. Version 5.0.0. AUTO unangetastet. |
+
+## ENC-01 — 1080p AVC encoder capability
+
+**IMPLEMENTED / AUTOMATED-TESTED.** Not HUMAN-PROVEN.
+
+| | |
+| --- | --- |
+| Cause | Export pinned `avc1.42001f` (Baseline / Level 3.1). Level 3.1 cannot legally encode 1920×1080. |
+| Diff | `src/core/exporter/avc-capability.ts` probes `VideoEncoder.isConfigSupported` from the minimum H.264 level for width×height×fps upward (Baseline → Main → High). `webcodecs.ts` uses the selected AVC config. AFE decoder paths untouched. |
+| Test | `tests/export/enc-01-avc-capability.test.ts` — 720p still prefers `avc1.42001f`; 1080p starts at Level 4.0 and escalates; no-support fails with `FAIL:` + `WebM is not a fallback`. |
+| Result | 720p path unchanged when Level 3.1 is supported. 1080p no longer hardcodes Level 3.1-only. |
+| Open human test | Real Windows WebView2 **1920×1080 H.264** export (MODE B EXE). Do not mark 1080p HUMAN-PROVEN from this pass. |
 
 ## Verification paths
 
