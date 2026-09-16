@@ -247,6 +247,11 @@ export type AfeStallSnapshot = {
    * min(lastRequired(requested), transaction lastRequired). Not lastRequired=140.
    */
   currentTargetRequiredSample: number | null;
+  /**
+   * AFE-19: formula lastRequired(requested) before the post-horizon extension.
+   * Production VIDEO→VIS→VIDEO: 67 while live currentTarget is 77.
+   */
+  formulaTargetRequiredSample: number | null;
   /** Sequential prefetch hint used for HIGH/LOW / local horizon. */
   prefetch: number | null;
   /** AFE-17: normal AFE-14/16 backpressure threshold (decodeQueueHighWater). */
@@ -384,6 +389,7 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     exactIdentityHolds: false,
     requestedSample: null,
     currentTargetRequiredSample: null,
+    formulaTargetRequiredSample: null,
     prefetch: null,
     softHighWater: 0,
     hardDependencyCeiling: 0,
@@ -591,6 +597,8 @@ export function mayLocalHorizonFinalFlush(args: {
   unresolvedRequestedVideoFrames: number;
   lastSubmittedSample: number | null;
   currentTargetRequiredSample: number;
+  /** Formula lastRequired(requested). When set, drain is legal at formula — not only at live 77. */
+  formulaTargetRequiredSample?: number;
   exactReady: boolean;
   targetPtsSeen: boolean;
   decodeQueueSize: number;
@@ -604,7 +612,8 @@ export function mayLocalHorizonFinalFlush(args: {
   if (args.exactReady || args.targetPtsSeen) return false;
   if (args.transactionComplete) return false;
   if (args.recoveryRebuilding) return false;
-  if ((args.lastSubmittedSample ?? -1) < args.currentTargetRequiredSample) return false;
+  const flushAt = args.formulaTargetRequiredSample ?? args.currentTargetRequiredSample;
+  if ((args.lastSubmittedSample ?? -1) < flushAt) return false;
   if (args.decodeQueueSize <= 0) return false;
   if (args.outputProgressed) return false;
   if (args.lastDecodedTimestamp == null || args.targetPtsUs == null) return false;
@@ -1281,6 +1290,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `requestedSample ${d.requestedSample ?? d.sourceSampleRequested}`,
     `lastRequestedSample ${d.lastRequestedSample} (sample-index)`,
     `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
+    `formulaTargetRequiredSample ${d.formulaTargetRequiredSample}`,
     `lastRequiredDecodeSample ${d.lastRequiredDecodeSample} (sample-index)`,
     `maxReorderSamples ${d.maxReorderSamples}`,
     `prefetch ${d.prefetch}`,

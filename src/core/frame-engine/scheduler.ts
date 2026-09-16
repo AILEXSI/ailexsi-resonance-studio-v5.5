@@ -422,16 +422,17 @@ export class AfeScheduler {
         this.decoder.clearRecoveryRebuilding([idx]);
         this.decoder.releaseStaleFinalFlushIfLiveHorizonOpen(idx);
         const flushSnap = this.decoder.snapshot(extra);
-        const canFlush = mayFinalFlush({
-          unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
-          nextDecode: this.nextDecode,
-          sampleCount: this.movie.sampleCount,
-          lastRequiredDecodeSample: lastRequired,
-          lastSubmittedSample: this.nextDecode - 1,
-          streamWaiterIndex: flushSnap.streamWaiterIndex,
-          recoveryRebuilding: false,
-          transactionComplete: flushSnap.transactionComplete,
-        });
+        const canFlush =
+          mayFinalFlush({
+            unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
+            nextDecode: this.nextDecode,
+            sampleCount: this.movie.sampleCount,
+            lastRequiredDecodeSample: lastRequired,
+            lastSubmittedSample: this.nextDecode - 1,
+            streamWaiterIndex: flushSnap.streamWaiterIndex,
+            recoveryRebuilding: false,
+            transactionComplete: flushSnap.transactionComplete,
+          }) || this.decoder.mayFormulaHorizonDrain(idx);
         if (!canFlush || this.decoder.finalFlushConsumedThisDecoder) return;
         this.decoder.armFinalFlush([idx]);
         this.decoder.retainExactIdentity(idx, extra.requestedPtsUs);

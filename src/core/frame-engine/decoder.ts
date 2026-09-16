@@ -18,6 +18,7 @@ import {
   AFE_SETTLE_DRAIN_MS,
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
+  mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,
   hardDependencyCeiling,
@@ -280,6 +281,41 @@ export class AfeVideoDecoder {
    * same file). Not a mid-run pressure flush — just forget the stale arm
    * so this request can borrow, then drain once the live horizon is in.
    */
+  /**
+   * AFE-19: requested sample + formula deps are already submitted, exact PTS
+   * still missing, hardware still holding. One ownership-retaining drain —
+   * not a mid-run pressure flush, not a flood to lastRequired 102.
+   * After recreate, require real output (postRecreateOutputs >= lookahead) so
+   * AFE-13 freeze-after-4-emits still stalls without hanging on flush.
+   */
+  mayFormulaHorizonDrain(requested: number): boolean {
+    const formula = this.formulaTargetRequiredFor(requested);
+    const targetPts = this.ownership.get(requested)?.ptsUs ?? this.targetPtsUs;
+    if (
+      !mayLocalHorizonFinalFlush({
+        unresolvedRequestedVideoFrames: this.unresolvedRequestedCount(),
+        lastSubmittedSample: this.lastSubmittedSample,
+        currentTargetRequiredSample: formula,
+        formulaTargetRequiredSample: formula,
+        exactReady: this.streamReady.has(requested),
+        targetPtsSeen:
+          targetPts != null &&
+          (this.outputTimestamps.includes(targetPts) || this.lastVideoFrameTimestamp === targetPts),
+        decodeQueueSize: this.decodeQueueSize,
+        outputProgressed: false,
+        lastDecodedTimestamp: this.lastVideoFrameTimestamp,
+        targetPtsUs: targetPts,
+        recoveryRebuilding: this.ownership.get(requested)?.recoveryRebuilding === true,
+        transactionComplete: false,
+      })
+    ) {
+      return false;
+    }
+    if (this.recreateCount < 1) return true;
+    const look = streamLookaheadSamples(this.movie.maxReorderSamples, this.prefetchHint);
+    return this.postRecreateOutputs >= look;
+  }
+
   releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {
     const live = this.currentTargetRequiredFor(requested);
     if ((this.lastSubmittedSample ?? -1) >= live) return;
@@ -1269,6 +1305,9 @@ export class AfeVideoDecoder {
       exactIdentityHolds: extra?.exactIdentityHolds ?? identityHolds,
       requestedSample,
       currentTargetRequiredSample: currentTarget,
+      formulaTargetRequiredSample:
+        extra?.formulaTargetRequiredSample ??
+        (requestedSample != null ? this.formulaTargetRequiredFor(requestedSample) : null),
       prefetch: extra?.prefetch ?? this.prefetchHint,
       softHighWater: soft,
       hardDependencyCeiling: hard,

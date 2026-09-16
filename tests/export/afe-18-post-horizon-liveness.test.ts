@@ -257,6 +257,20 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
         targetPtsUs: QA.ptsUs,
       }),
     ).toBe(false);
+    expect(
+      mayLocalHorizonFinalFlush({
+        unresolvedRequestedVideoFrames: 1,
+        lastSubmittedSample: QA.lastSubmitted,
+        currentTargetRequiredSample: LIVE,
+        formulaTargetRequiredSample: FORMULA,
+        exactReady: false,
+        targetPtsSeen: false,
+        decodeQueueSize: 20,
+        outputProgressed: false,
+        lastDecodedTimestamp: 1_875_000,
+        targetPtsUs: QA.ptsUs,
+      }),
+    ).toBe(true);
   });
 
   it("F. waitForDecodeCapacity after formula horizon + stuck lastDecoded borrows up to HARD, never 102", async () => {
