@@ -263,6 +263,11 @@ export type AfeStallSnapshot = {
   hardDependencyCeiling: number;
   /** Submitted minus emitted (post-recreate when available). */
   submittedMinusOutputs: number;
+  /**
+   * AFE-21: one HARD-horizon reset+rebuild already used this transaction.
+   * Typed stall only after that escape is exhausted.
+   */
+  hardHorizonResetUsed: boolean;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -394,6 +399,7 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     softHighWater: 0,
     hardDependencyCeiling: 0,
     submittedMinusOutputs: 0,
+    hardHorizonResetUsed: false,
     ...partial,
   };
 }
@@ -673,6 +679,50 @@ export function mayAdvancePastSoftFreeze(args: {
 }
 
 /**
+ * AFE-21: HARD is an absolute decodeQueue cap. Equal is the last legal slot;
+ * greater is an overrun (human dump: queue 21 / peak 22 vs displayed HARD 20).
+ */
+export function queueRespectsHardCeiling(args: {
+  decodeQueueSize: number;
+  hardDependencyCeiling: number;
+}): boolean {
+  if (args.hardDependencyCeiling <= 0) return true;
+  return args.decodeQueueSize <= args.hardDependencyCeiling;
+}
+
+/**
+ * AFE-21: exact unresolved, lastSubmitted < requested < live local horizon,
+ * queue already at/over HARD, no output progress, no earlier I-frame.
+ * One controlled reset+ownership rebuild from gopStart, then output-gated
+ * resubmit (SOFT first; no HARD spend until lastDecoded moves).
+ * Not a flood to lastRequired 140, not a mid-run flush, not a timeout bump.
+ * Typed stall only after this escape has already been used.
+ */
+export function mayHardHorizonReset(args: {
+  exactReady: boolean;
+  lastSubmittedSample: number | null;
+  requestedSample: number;
+  currentTargetRequiredSample: number;
+  decodeQueueSize: number;
+  hardDependencyCeiling: number;
+  outputProgressed: boolean;
+  earlierKeyframeAvailable: boolean;
+  recreateCount: number;
+  hardHorizonResetUsed: boolean;
+}): boolean {
+  if (args.exactReady) return false;
+  if (args.hardHorizonResetUsed) return false;
+  if (args.recreateCount < 1) return false;
+  if (args.earlierKeyframeAvailable) return false;
+  if (args.outputProgressed) return false;
+  if (args.decodeQueueSize < args.hardDependencyCeiling) return false;
+  const submitted = args.lastSubmittedSample ?? -1;
+  if (submitted >= args.requestedSample) return false;
+  if (submitted >= args.currentTargetRequiredSample) return false;
+  return args.requestedSample <= args.currentTargetRequiredSample;
+}
+
+/**
  * Stall pumpSlice must describe the CURRENT / last actual submit attempt.
  * A planned leftover (e.g. 92-97) must not contradict PUMP_LOOKAHEAD:41-40.
  */
@@ -706,6 +756,9 @@ export function maySubmitEncoded(args: {
   hardDependencyCeiling?: number;
 }): boolean {
   if (args.exactReady) return true;
+  if (args.hardDependencyCeiling != null && args.decodeQueueSize >= args.hardDependencyCeiling) {
+    return false;
+  }
   if (
     args.mustBorrowHardDependencyCredits &&
     args.hardDependencyCeiling != null &&
@@ -739,6 +792,9 @@ export function mayResumeDecode(args: {
   hardDependencyCeiling?: number;
 }): boolean {
   if (args.exactReady) return true;
+  if (args.hardDependencyCeiling != null && args.decodeQueueSize >= args.hardDependencyCeiling) {
+    return false;
+  }
   if (
     args.mustBorrowHardDependencyCredits &&
     args.hardDependencyCeiling != null &&
@@ -1270,6 +1326,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `gopStart ${d.gopKeyframeStart}`,
     `earlierKeyframeAvailable ${d.earlierKeyframeAvailable ? "yes" : "no"}`,
     `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
+    `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
     `postRecreateSubmitted ${d.postRecreateSubmitted}`,
     `postRecreateOutputs ${d.postRecreateOutputs}`,
     `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
@@ -1369,6 +1426,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `softHighWater ${d.softHighWater || d.decodeQueueHighWater}`,
     `hardDependencyCeiling ${d.hardDependencyCeiling}`,
     `submittedMinusOutputs ${d.submittedMinusOutputs}`,
+    `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
     `decodeQueueLowWater ${d.decodeQueueLowWater}`,
     `decodeQueuePeak ${d.decodeQueuePeak}`,
     `submitsWithoutOutputProgress ${d.submitsWithoutOutputProgress}`,

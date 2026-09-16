@@ -19,6 +19,7 @@ import {
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
   mayAdvancePastSoftFreeze,
+  mayHardHorizonReset,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,
@@ -176,6 +177,12 @@ export class AfeVideoDecoder {
    * credits can actually be spent.
    */
   private hardBorrowCeiling: number | null = null;
+  /**
+   * AFE-21: one HARD-horizon reset+rebuild this transaction. After it fires,
+   * HARD borrow stays gated until the new decoder emits at least one frame.
+   */
+  private hardHorizonResetUsed = false;
+  private outputGateAfterHardReset = false;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -333,6 +340,7 @@ export class AfeVideoDecoder {
    */
   canBorrowTowardLocalHorizon(requested: number): boolean {
     if (this.streamReady.has(requested)) return false;
+    if (this.outputGateBlocksHardSpend()) return false;
     return mayAdvancePastSoftFreeze({
       frozenAtSoftHighWater:
         this.isFrozenAtHighWaterAfterRecreate() ||
@@ -343,6 +351,50 @@ export class AfeVideoDecoder {
       hardDependencyCeiling: this.effectiveHardCeilingFor(requested),
       exactReady: false,
     });
+  }
+
+  get hardHorizonResetConsumed(): boolean {
+    return this.hardHorizonResetUsed;
+  }
+
+  /** AFE-21: HARD borrow is illegal until the post-reset decoder emits. */
+  outputGateBlocksHardSpend(): boolean {
+    return this.outputGateAfterHardReset && this.postRecreateOutputs === 0;
+  }
+
+  mayHardHorizonResetFor(requested: number): boolean {
+    return mayHardHorizonReset({
+      exactReady: this.streamReady.has(requested),
+      lastSubmittedSample: this.lastSubmittedSample,
+      requestedSample: requested,
+      currentTargetRequiredSample: this.currentTargetRequiredFor(requested),
+      decodeQueueSize: this.decodeQueueSize,
+      hardDependencyCeiling: this.effectiveHardCeilingFor(requested),
+      outputProgressed: this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit,
+      earlierKeyframeAvailable: this.earlierKeyframeIsAvailable(),
+      recreateCount: this.recreateCount,
+      hardHorizonResetUsed: this.hardHorizonResetUsed,
+    });
+  }
+
+  noteHardHorizonReset(): void {
+    this.hardHorizonResetUsed = true;
+    this.outputGateAfterHardReset = true;
+  }
+
+  /**
+   * Escape already used, still lastSubmitted < requested, queue at/over SOFT,
+   * no post-reset output — typed stall, do not sit empty 37-36 for 3s.
+   */
+  hardHorizonResetExhausted(requested: number): boolean {
+    if (!this.hardHorizonResetUsed) return false;
+    if (this.streamReady.has(requested)) return false;
+    if ((this.lastSubmittedSample ?? -1) >= requested) return false;
+    if (this.postRecreateOutputs > 0 && this.canBorrowTowardLocalHorizon(requested)) return false;
+    return (
+      this.decodeQueueSize >= this.decodeQueueHighWater &&
+      this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit
+    );
   }
 
   releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {
@@ -796,7 +848,8 @@ export class AfeVideoDecoder {
         const keepHard =
           requested != null &&
           (this.lastSubmittedSample ?? -1) < (liveTarget ?? requested) &&
-          this.decodeQueueSize < ceiling;
+          this.decodeQueueSize < ceiling &&
+          !this.outputGateBlocksHardSpend();
         if (keepHard) {
           /* Shape A: queue 15 ∈ (SOFT 12, HARD 22), lastSubmitted 82 < 96.
            * Remaining HARD credits must still be spent — SOFT is not terminal. */
@@ -893,7 +946,11 @@ export class AfeVideoDecoder {
       this.hardBorrowCeiling = null;
       return false;
     }
-    const hard = Math.max(computed, this.hardBorrowCeiling ?? computed);
+    /* AFE-21: pin the episode max so remaining-shrink cannot drop HARD
+     * below a live queue (human: HARD 22→20 while queue 21 / peak 22). */
+    this.hardBorrowCeiling = Math.max(this.hardBorrowCeiling ?? 0, computed);
+    const hard = Math.max(computed, this.hardBorrowCeiling);
+    if (this.outputGateBlocksHardSpend()) return false;
     const borrow = mayBorrowHardDependencyCredits({
       exactReady,
       usefulInputRemains: hasFurtherUsefulInput({
@@ -908,8 +965,6 @@ export class AfeVideoDecoder {
       softHighWater: this.decodeQueueHighWater,
       hardDependencyCeiling: hard,
     });
-    if (borrow) this.hardBorrowCeiling = Math.max(this.hardBorrowCeiling ?? 0, computed);
-    else if (this.decodeQueueSize >= hard) this.hardBorrowCeiling = null;
     return borrow;
   }
 
@@ -1356,6 +1411,7 @@ export class AfeVideoDecoder {
       softHighWater: soft,
       hardDependencyCeiling: hard,
       submittedMinusOutputs: submittedMinus,
+      hardHorizonResetUsed: extra?.hardHorizonResetUsed ?? this.hardHorizonResetUsed,
     });
   }
 
@@ -1542,6 +1598,7 @@ export class AfeVideoDecoder {
     this.finalFlushThisDecoder = false;
     this.tailDrainReplayed = false;
     this.hardBorrowCeiling = null;
+    if (this.hardHorizonResetUsed) this.outputGateAfterHardReset = true;
     this.beginPostRecreateTrace();
     if (this.decoder) {
       try {
@@ -1622,6 +1679,8 @@ export class AfeVideoDecoder {
     this.tailDrainReplayed = false;
     this.hardBorrowCeiling = null;
     if (!bounds?.keepResolved) {
+      this.hardHorizonResetUsed = false;
+      this.outputGateAfterHardReset = false;
       this.finalFlushAttempted = false;
       this.gopKeyframeStart = null;
       this.earlierKeyframeRecovered = false;

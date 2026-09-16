@@ -68,6 +68,8 @@ export {
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
   mayAdvancePastSoftFreeze,
+  mayHardHorizonReset,
+  queueRespectsHardCeiling,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,
