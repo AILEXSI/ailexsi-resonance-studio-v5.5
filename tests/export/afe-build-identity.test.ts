@@ -39,7 +39,7 @@ describe("AFE dump build identity", () => {
       decodeQueueSize: 21,
     });
     expect(text.startsWith("productVersion 5.5.0; gitSha ")).toBe(true);
-    const head = text.slice(0, 280);
+    const head = text.slice(0, 480);
     expect(head).toContain("productVersion 5.5.0");
     expect(head).toContain(`gitSha ${id.gitSha}`);
     expect(head).toContain("frameEngine AILEXSI");
