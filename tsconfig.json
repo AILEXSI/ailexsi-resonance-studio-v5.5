@@ -54,6 +54,7 @@
     "tests/export/afe-24-liveness-reopen-invoke.test.ts",
     "tests/export/afe-25-eof-tail-sps.test.ts",
     "tests/export/stress-01-clip-start-pts.test.ts",
-    "tests/export/stress-03-physical-source.test.ts"
+    "tests/export/stress-03-physical-source.test.ts",
+    "tests/export/stress-04-mp4-mux-arg-overflow.test.ts"
   ]
 }

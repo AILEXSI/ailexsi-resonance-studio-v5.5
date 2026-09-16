@@ -108,6 +108,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Diff | `concatParts` / `boxParts` / `fullBoxParts`; STSZ/STSS/STTS written as one pre-sized payload; sample bytes concatenated iteratively. Small fixed-arity `box`/`fullBox` remain. Byte-identical ISO-BMFF (golden small mux). |
 | Untouched | STRESS-02 dump capture kept. No AFE / ENC-01 / STRESS-01 / STRESS-03 semantic change. No fps/duration/sample cap, no export split, no stack-limit raise, no Mediabunny, no fMP4. |
 | Test | `tests/export/stress-04-mp4-mux-arg-overflow.test.ts` — golden A; 25k/50k video; 60k audio; structure; source audit. |
+| Gates | `tsc --noEmit` clean (stress-04 file excluded like other `node:fs` tests). Focused STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **70/70**. Full suite **1247 passed / 6 failed / 1253**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM — not a mux regression). `vite build` OK. |
 | Human remaining | MODE B EXE of this SHA: same ~23 min 1920×1080@30 project. Need `videoReq==videoDec==videoEnc`, mux Fertig, playable MP4. EXE path/SHA left for coordinator. Details: `docs/compliance/STRESS-04-MP4-MUX-ARG-OVERFLOW.md`. |
 
 ## Verification paths

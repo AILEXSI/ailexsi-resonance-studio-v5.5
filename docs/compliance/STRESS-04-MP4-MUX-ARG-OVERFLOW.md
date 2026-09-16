@@ -88,6 +88,8 @@ Do not treat this as HUMAN-PROVEN. MODE B operator EXE is still required.
 
 Existing exporter / ENC / AFE / STRESS-01 / STRESS-02 / STRESS-03 suites are not rewritten.
 
+Gates on this tip: `tsc --noEmit` clean. Focused STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **70/70**. Full suite **1247 passed / 6 failed / 1253** (2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip, absent in the agent VM). `vite build` OK.
+
 ## Operator card — MODE B (coordinator builds the EXE)
 
 You do **not** need a new timeline. Repeat the **same ~23 min 1920×1080@30** project that failed on `04fc687` at mux (`exportFrame 41889`, `videoReq/Dec/Enc 21195`).

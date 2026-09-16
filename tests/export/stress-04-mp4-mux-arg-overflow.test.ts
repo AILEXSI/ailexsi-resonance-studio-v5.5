@@ -1,3 +1,7 @@
+/**
+ * STRESS-04 mux argument-overflow tests.
+ * Uses node:fs for the source audit — excluded from `tsc --noEmit` like STRESS-01 / STRESS-03 physical.
+ */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
