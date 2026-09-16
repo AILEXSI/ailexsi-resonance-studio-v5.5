@@ -69,7 +69,7 @@ Streamed mix/encode so 60–120 min does not hold ~1.2–2.4 GiB of Float32 PCM 
 
 ## Tests
 
-`tests/export/audio-01-long-form-fail-honest.test.ts`
+`tests/export/audio-01-long-form-fail-honest.test.ts` — **17/17**.
 
 - A short audio → AAC trak
 - B video-only → none
@@ -83,6 +83,9 @@ Streamed mix/encode so 60–120 min does not hold ~1.2–2.4 GiB of Float32 PCM 
 - J mux receives audio / `mp4HasAudioTrack`
 - K 25k video mux still valid (STRESS-04 contract)
 - L 75k AAC samples — no arg overflow
+- plus backpressure, no-`withTimeout` audit, fail-dump path, PCM quantification, exact stage names
+
+Gates on this tip: `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **80/80**. Full suite **1264 passed / 6 failed / 1270** (same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip, absent in the agent VM). `vite build` OK.
 
 ## Operator card — MODE B (coordinator builds the EXE)
 
