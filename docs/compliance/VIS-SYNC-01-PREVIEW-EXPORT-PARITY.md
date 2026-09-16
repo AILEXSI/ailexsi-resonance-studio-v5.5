@@ -114,7 +114,7 @@ Same project as the AUDIO-01 long-form VIDEO+VIS+AAC pass (audible soundtrack, V
 5. **Then** (only if short passes): the ~29 min 1080p30 export. Soundtrack must stay audible (AUDIO-01). VIS must stay musically synced for the whole file.
 6. If it fails: say whether short, long, or both; whether audio is still present; whether VIS is late, dead, or only spectrum-wrong.
 
-**Build SHA (this branch tip):** `8d68e06152d68cc38ec4b9888557885d4bc5cb83` (`8d68e06`). Coordinator builds the EXE from this SHA (or the tip after any follow-up commits).
+**Build SHA:** PR tip of `cursor/vis-sync-01-preview-export-parity-2f4e` (implementation `8d68e06`, gates `e5b4295`+). Coordinator builds from the PR HEAD.
 
 **EXE path / EXE SHA256:** left for the coordinator. This agent does not build the Windows EXE.
 
