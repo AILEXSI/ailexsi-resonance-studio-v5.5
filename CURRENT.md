@@ -97,6 +97,19 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Gates | `tsc --noEmit` clean. Focused STRESS-03 + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + AFE-04 parser/B-frame **46/46**. Full suite **1241 passed / 2 failed / 1243** (same pre-existing AFE-15 A/N dump-ban as STRESS-02). |
 | Human remaining | Same long export. Confirm `firstBlockedStage` / `stageTrail` on fail, or Fertig if the clamp holds on WebView2. Details: `docs/compliance/STRESS-03-PRE-REQUEST-SOURCE-OPEN.md`. |
 
+## STRESS-04 — MP4 mux large-sample argument overflow
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Do **not** merge PR #19 / #20 / #21 / this branch.
+
+| | |
+| --- | --- |
+| Verdict | **C — EXCESSIVE SPREAD / ARGUMENT COUNT.** Human stack on `04fc687`: `box` → `fullBox` → `videoTrak` → `buildMoov` → `muxAvcToMp4` at `exportFrame 41889`, `videoReq/Dec/Enc 21195`, stage mux. Not recursion / AFE / ENC backpressure / STRESS-01 / STRESS-03. |
+| Offending sites | **STSZ first** (`fullBox("stsz", …, ...samples.map(u32))`). Same hazard: video/audio `concat(...samples.map(s => s.data))`, audio STSZ, STSS keys, unpacked STTS `fullBox(...parts)`. |
+| Diff | `concatParts` / `boxParts` / `fullBoxParts`; STSZ/STSS/STTS written as one pre-sized payload; sample bytes concatenated iteratively. Small fixed-arity `box`/`fullBox` remain. Byte-identical ISO-BMFF (golden small mux). |
+| Untouched | STRESS-02 dump capture kept. No AFE / ENC-01 / STRESS-01 / STRESS-03 semantic change. No fps/duration/sample cap, no export split, no stack-limit raise, no Mediabunny, no fMP4. |
+| Test | `tests/export/stress-04-mp4-mux-arg-overflow.test.ts` — golden A; 25k/50k video; 60k audio; structure; source audit. |
+| Human remaining | MODE B EXE of this SHA: same ~23 min 1920×1080@30 project. Need `videoReq==videoDec==videoEnc`, mux Fertig, playable MP4. EXE path/SHA left for coordinator. Details: `docs/compliance/STRESS-04-MP4-MUX-ARG-OVERFLOW.md`. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

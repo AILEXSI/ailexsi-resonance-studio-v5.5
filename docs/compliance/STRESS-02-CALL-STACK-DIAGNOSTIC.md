@@ -152,4 +152,6 @@ You do **not** need a new timeline. Repeat the **same long ~25 min stress export
 
 ## Verdict
 
-**Not classified A–F.** Instrumentation + candidate audit only. Open human test above.
+**Not classified A–F** on this diagnostic pass. Instrumentation + candidate audit only.
+
+**Later:** STRESS-04 (branch off `04fc687`) classified the human stack as **C — EXCESSIVE SPREAD / ARGUMENT COUNT** at `videoTrak` STSZ `fullBox` → `box`. Production mux fix is on that branch. **Keep this dump capture.** Do not merge this diagnostic PR as production merely because the fix used its evidence.
