@@ -80,6 +80,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Diff | Outermost export catch + `window.onerror` / `unhandledrejection` record original `name` / `message` / `stack` (never a replacement Error). Context fields go to the scrollable failed-status. Diagnostic MODE-B maps via `AILEXSI_DIAG_SOURCEMAP=1` / `npm run tauri:exe:diag`. Candidate audit in `docs/compliance/STRESS-02-CALL-STACK-DIAGNOSTIC.md` — **CANDIDATE not PROVEN**. |
 | Untouched | STRESS-01 avcC patch, AFE-25 prefer-software, ENC-01 encoder selection, AFE scheduling/timeouts/queues/escapes. No yield hacks. No stack-limit raise. No speculative fix. |
 | Test | `tests/export/stress-02-call-stack-dump.test.ts` — RangeError at export boundary keeps original `.stack` + context. |
+| Gates | `tsc --noEmit` clean. Focused STRESS-02 + STRESS-01 + AFE-25 + ENC-01 **29/29**. Full suite **1229 passed / 2 failed / 1231** (same pre-existing AFE-15 A/N dump-ban as STRESS-01). |
 | Human remaining | Same ~25 min stress on the diagnostic EXE. Need one dump with stack + FIRST application frame + FIRST repeated frame. |
 
 ## Verification paths
