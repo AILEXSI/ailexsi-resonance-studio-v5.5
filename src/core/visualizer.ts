@@ -77,6 +77,7 @@ const SCENE_SHORT: Record<VisualizerSceneId, string> = {
   "nebula-helix": "Helix",
   "accretion-disk": "Disk",
   "crystal-storm": "Crystal",
+  lexi: "LEXI",
 };
 
 /** 120 BPM grid (or `bpm`) from 0 inclusive to duration exclusive. */

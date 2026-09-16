@@ -20,6 +20,7 @@ import { voidLatticeScene } from "./void-lattice";
 import { nebulaHelixScene } from "./nebula-helix";
 import { accretionDiskScene } from "./accretion-disk";
 import { crystalStormScene } from "./crystal-storm";
+import { lexiScene } from "./lexi";
 
 export const builtinScenes: Scene[] = [
   spectrumBarsScene,
@@ -38,6 +39,7 @@ export const builtinScenes: Scene[] = [
   nebulaHelixScene,
   accretionDiskScene,
   crystalStormScene,
+  lexiScene,
 ];
 
 export {
@@ -57,4 +59,5 @@ export {
   nebulaHelixScene,
   accretionDiskScene,
   crystalStormScene,
+  lexiScene,
 };

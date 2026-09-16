@@ -168,6 +168,20 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **134/134**. |
 | Human | **PASSED** 2026-09-17 M.G.M. *perfect*. Short Impact check, MODE B EXE tip `cc3cd08` / SHA256 `4A080D0F1369091F6F96E7A0BB7F9E6DFF74DC2923EBF6EF75FF658EC142CEFB`. Prior 01 soft-PASS (~6 min Lattice 1080p30+AAC). Locked: gain 1.25 / gamma 0.68 / spread 18 / transient 0.38; `scene-impact.ts`; no AGC; Preview=Export. Stack rests on ENC-01, STRESS-01..04, AUDIO-01/01b, VIS-SYNC-01 (~34:18 and ~64 min VIDEO+VIS+AAC). Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
 
+## VIS-SCENE-LEXI — cinematic horizon flow
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — not HUMAN-PROVEN. Do not merge from this pass.
+
+| | |
+| --- | --- |
+| What | New Visualz scene `lexi` (display **LEXI**). Dark field + gold energy horizon + receding terrain. Signature look, not a Lattice/Wave/Gold clone. |
+| Audio | Same `applyVisResponse` packet as every other scene. `bass` → lift; `rms` → glow/amp; `onset`/`beatPulse` → soft accent; spectrum → sheen. Preview === Export. |
+| Params | intensity, glowStrength, lineThickness, waveAmplitude, depthStrength, reactivity, smoothing, particleAmount, colorPrimary, colorSecondary, backgroundLevel. Gold default; other themes data-only. |
+| Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry. |
+| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 17. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC. |
+| Select | Inspector VIS scene → **LEXI**, or cycle VIS until lane says LEXI. Crystal → LEXI → Bars. |
+| Human | Checklist in `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. Preview musical, Export similar, calm/premium, long-form not annoying, distinct. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

@@ -14,6 +14,7 @@ import {
   type TrackId,
   type VisualizerSceneId,
 } from "../../core/models";
+import { sceneShortName } from "../../core/visualizer";
 import { canShowRelink } from "../../core/relink";
 import { snapPlayheadSeek } from "../../core/timeline";
 import {
@@ -178,7 +179,7 @@ export function Inspector({
             >
               {VISUALIZER_SCENE_IDS.map((id) => (
                 <option key={id} value={id}>
-                  {id}
+                  {sceneShortName(id)}
                 </option>
               ))}
             </select>

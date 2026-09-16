@@ -34,6 +34,7 @@ export const VISUALIZER_SCENE_IDS = [
   "nebula-helix",
   "accretion-disk",
   "crystal-storm",
+  "lexi",
 ] as const;
 
 export type VisualizerSceneId = (typeof VISUALIZER_SCENE_IDS)[number];

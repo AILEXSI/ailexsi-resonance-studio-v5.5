@@ -46,6 +46,10 @@ export type { RawAudioFeatures, VisResponseConfig, VisualizerPresentation } from
 export {
   latticeNodePulse,
   latticeWarp,
+  lexiAccent,
+  lexiGlow,
+  lexiHorizonLift,
+  lexiSheen,
   resonanceCoreRadius,
   resonanceMidFreq,
   resonanceRingPulse,
