@@ -12,8 +12,8 @@ import type { ExportJob, ExportProgress, ExportResult } from "../src/core/export
 
 const qs = new URLSearchParams(location.search);
 const RECEIVE = "http://127.0.0.1:" + (qs.get("receive") || "18787");
-const VIDEO = qs.get("video") || "/tests/fixtures/user-video.mp4";
-const AUDIO = qs.get("audio") || "/tests/fixtures/user-audio.mp3";
+const VIDEO = new URL(qs.get("video") || "/tests/fixtures/user-video.mp4", location.origin).href;
+const AUDIO = new URL(qs.get("audio") || "/tests/fixtures/user-audio.mp3", location.origin).href;
 const VARIANT = qs.get("variant") || "primary";
 
 const out = document.getElementById("out") || document.body;
@@ -156,6 +156,9 @@ async function main() {
   const vis = result.visFramesEncoded ?? lastProgress?.visFramesEncoded ?? null;
   const black = result.blackFramesEncoded ?? lastProgress?.blackFramesEncoded ?? null;
   const chainOk = req != null && dec != null && enc != null && req === dec && dec === enc;
+  const expectedVideo = 90;
+  const expectedVis = 30;
+  const pictureOk = req === expectedVideo && vis === expectedVis && (black ?? 0) === 0;
   const unresolvedMatch = /unresolvedRequested (\d+)/.exec(error);
   const unresolvedRequested = unresolvedMatch
     ? Number(unresolvedMatch[1])
@@ -179,6 +182,9 @@ async function main() {
     blackFramesEncoded: black,
     unresolvedRequested,
     chainOk,
+    pictureOk,
+    expectedVideo,
+    expectedVis,
     backend,
     lastProgress,
     bytes: result.success && result.blob ? await bytesFromBlob(result.blob) : null,

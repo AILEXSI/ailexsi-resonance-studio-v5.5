@@ -236,7 +236,13 @@ try {
       error: result.error ? String(result.error).slice(0, 240) : null,
     }),
   );
-  if (!result.success || result.stall || !result.chainOk) {
+  if (
+    !result.success ||
+    result.stall ||
+    !result.chainOk ||
+    result.pictureOk === false ||
+    !result.videoFramesRequested
+  ) {
     process.exitCode = 1;
   }
 } catch (e) {
