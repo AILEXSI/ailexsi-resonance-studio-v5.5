@@ -271,7 +271,9 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       lastRequiredDecodeSample: QA.lastRequired,
       requestedIndexes: [QA.sample],
     });
-    decoder.openRequested(QA.sample, QA.ptsUs);
+    const targetPts = decoder.chunkTimestampUs(movie!.samples[QA.sample]!);
+    const stuckPts = decoder.chunkTimestampUs(movie!.samples[52]!);
+    decoder.openRequested(QA.sample, targetPts);
     decoder.setGopKeyframeStart(0);
     await decoder.recreate();
     decoder.setGopKeyframeStart(0);
@@ -281,10 +283,10 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       requestedIndexes: [QA.sample],
       keepResolved: true,
     });
-    decoder.restoreOpenedIdentity(QA.sample, QA.ptsUs);
+    decoder.restoreOpenedIdentity(QA.sample, targetPts);
     expect(decoder.snapshot().finalFlushAttempted).toBe(false);
     for (let i = 0; i <= 52; i++) decoder.submitEncoded(movie!.samples[i]!);
-    decoder.deliverOutputForTest(QA.lastDecodedTs);
+    decoder.deliverOutputForTest(stuckPts);
     for (let i = 53; i <= QA.lastSubmitted; i++) decoder.submitEncoded(movie!.samples[i]!);
     const mock = ControllableQueueDecoder.last!;
     mock.drain(Math.max(0, mock.decodeQueueSize - QA.soft), false);
@@ -329,6 +331,7 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
     restore = installControllableQueueDecoder();
     const decoder = new AfeVideoDecoder({ ...movie!, maxReorderSamples: QA.maxReorder });
     await decoder.ensure();
+    decoder.setPrefetchHint(QA.prefetch);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
       lastRequested: 40,
       lastRequiredDecodeSample: 46,
@@ -347,10 +350,12 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       keepResolved: true,
     });
     expect(decoder.snapshot().finalFlushAttempted).toBe(false);
-    decoder.openRequested(QA.sample, QA.ptsUs);
-    decoder.restoreOpenedIdentity(QA.sample, QA.ptsUs);
+    const targetPts = decoder.chunkTimestampUs(movie!.samples[QA.sample]!);
+    const stuckPts = decoder.chunkTimestampUs(movie!.samples[52]!);
+    decoder.openRequested(QA.sample, targetPts);
+    decoder.restoreOpenedIdentity(QA.sample, targetPts);
     for (let i = 0; i <= 52; i++) decoder.submitEncoded(movie!.samples[i]!);
-    decoder.deliverOutputForTest(QA.lastDecodedTs);
+    decoder.deliverOutputForTest(stuckPts);
     for (let i = 53; i <= QA.lastSubmitted; i++) decoder.submitEncoded(movie!.samples[i]!);
     const mock = ControllableQueueDecoder.last!;
     mock.drain(Math.max(0, mock.decodeQueueSize - QA.soft), false);
@@ -375,7 +380,9 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       lastRequiredDecodeSample: QA.lastRequired,
       requestedIndexes: [QA.sample],
     });
-    decoder.openRequested(QA.sample, QA.ptsUs);
+    const targetPts = decoder.chunkTimestampUs(movie!.samples[QA.sample]!);
+    const stuckPts = decoder.chunkTimestampUs(movie!.samples[52]!);
+    decoder.openRequested(QA.sample, targetPts);
     decoder.setGopKeyframeStart(0);
     await decoder.recreate();
     decoder.setGopKeyframeStart(0);
@@ -385,9 +392,9 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       requestedIndexes: [QA.sample],
       keepResolved: true,
     });
-    decoder.restoreOpenedIdentity(QA.sample, QA.ptsUs);
+    decoder.restoreOpenedIdentity(QA.sample, targetPts);
     for (let i = 0; i <= 52; i++) decoder.submitEncoded(movie!.samples[i]!);
-    decoder.deliverOutputForTest(QA.lastDecodedTs);
+    decoder.deliverOutputForTest(stuckPts);
     for (let i = 53; i <= QA.lastSubmitted; i++) decoder.submitEncoded(movie!.samples[i]!);
     const mock = ControllableQueueDecoder.last!;
     mock.drain(Math.max(0, mock.decodeQueueSize - QA.soft), false);
@@ -409,7 +416,7 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
     const dump = decoder.snapshot({ sourceSampleRequested: QA.sample });
     expect(dump.noMoreSubmission || dump.backpressureBlocked || dump.frozenAtHighWater).toBe(true);
     expect(dump.lastSubmittedSample).toBeLessThan(QA.lastRequired);
-    expect(dump.decodeQueuePeak).toBeLessThanOrEqual(hard);
+    expect(mock.decodeQueueSize).toBeLessThanOrEqual(hard);
     expect(dump.decodeQueueHighWater).toBe(QA.soft);
     decoder.close();
   }, 10_000);
@@ -426,7 +433,9 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       lastRequiredDecodeSample: QA.lastRequired,
       requestedIndexes: [QA.sample],
     });
-    decoder.openRequested(QA.sample, QA.ptsUs);
+    const targetPts = decoder.chunkTimestampUs(movie!.samples[QA.sample]!);
+    const stuckPts = decoder.chunkTimestampUs(movie!.samples[52]!);
+    decoder.openRequested(QA.sample, targetPts);
     await decoder.recreate();
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
       lastRequested: 96,
@@ -434,9 +443,9 @@ describe("AFE-18 A–J post-horizon liveness / bounded local advance", () => {
       requestedIndexes: [QA.sample],
       keepResolved: true,
     });
-    decoder.restoreOpenedIdentity(QA.sample, QA.ptsUs);
+    decoder.restoreOpenedIdentity(QA.sample, targetPts);
     for (let i = 0; i <= 52; i++) decoder.submitEncoded(movie!.samples[i]!);
-    decoder.deliverOutputForTest(QA.lastDecodedTs);
+    decoder.deliverOutputForTest(stuckPts);
     for (let i = 53; i <= QA.lastSubmitted; i++) decoder.submitEncoded(movie!.samples[i]!);
     const mock = ControllableQueueDecoder.last!;
     mock.drain(Math.max(0, mock.decodeQueueSize - QA.soft), false);

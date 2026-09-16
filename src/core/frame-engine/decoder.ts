@@ -779,10 +779,10 @@ export class AfeVideoDecoder {
   }
 
   /**
-   * AFE-17/18: borrow bounded HARD credits while the LIVE local target is
-   * unsubmitted, only at/above SOFT, only with no output progress. First-fill
-   * may borrow when remaining>0. Stops once currentTargetRequired is
-   * submitted or the frozen HARD is reached.
+   * AFE-17/18: borrow bounded HARD credits after recreate while the LIVE
+   * local target is unsubmitted, only at/above SOFT, only with no output
+   * progress. First-fill stays on SOFT HIGH (AFE-12/16). Stops once
+   * currentTargetRequired is submitted or the frozen HARD is reached.
    */
   private hardDependencyBorrow(
     requested: number | undefined,
@@ -790,6 +790,10 @@ export class AfeVideoDecoder {
     outputProgressed: boolean,
   ): boolean {
     if (requested == null || exactReady) {
+      this.hardBorrowCeiling = null;
+      return false;
+    }
+    if (this.recreateCount < 1) {
       this.hardBorrowCeiling = null;
       return false;
     }

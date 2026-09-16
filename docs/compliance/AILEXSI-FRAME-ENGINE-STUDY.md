@@ -1059,7 +1059,7 @@ HARD computed from shrinking remaining meets a growing queue before 77 (SOFT+rem
 
 1. LIVE local horizon: `postHorizonRequiredSample` extends formula by one lookahead+prefetch window when formula is submitted, lastDecoded < targetPts, exact not ready. Sample 61 → **77**, never 102/140.
 2. HARD uses the live target. At lastSubmitted 67 / live 77: SOFT 12 + min(10, L+B=10) = **22**. Freeze that ceiling for the borrow episode so remaining-shrink cannot stop the advance before 77.
-3. First-fill HARD also derives extra when remaining>0 (secondary; not this dump).
+3. First-fill HARD may derive extra when remaining>0 (diagnostic / secondary). Borrow still requires recreate — first-fill stays on SOFT HIGH 40 (AFE-12/16).
 4. Liveness: recreate / beginStream clear `finalFlushArmed` / `finalFlushAttempted` / `tailDrainReplayed`. If live horizon is still unsubmitted, `releaseStaleFinalFlushIfLiveHorizonOpen` forgets a premature/stale arm so this request can borrow, then drain.
 5. `mayLocalHorizonFinalFlush` after lastSubmitted >= live target, queue held, lastDecoded < target, no progress — ownership-retaining drain, not a mid-run pressure flush. `mayGenuineFinalDrain` accepts `localHorizonExhausted`. Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired.
 6. No timeout bump. No snap/nearest/drop. No global HIGH raise. No Mediabunny. HARD never floods to 102/140.

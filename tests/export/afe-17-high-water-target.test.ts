@@ -611,7 +611,7 @@ describe("AFE-17 A–L HIGH_WATER target reachability / bounded dependency credi
       requested: HUMAN.sample,
       budgetEnd: nowMs() + 40,
     });
-    expect(can).toBe(true);
+    expect(can).toBe(false);
     expect(decoder.snapshot().decodeQueueSize).toBeLessThanOrEqual(hard);
     expect(decoder.decodeQueueHighWater).toBe(high);
     decoder.close();

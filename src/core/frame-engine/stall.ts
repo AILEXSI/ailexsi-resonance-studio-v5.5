@@ -627,6 +627,7 @@ export function mayBorrowHardDependencyCredits(args: {
   hardDependencyCeiling: number;
   afterRecreate?: boolean;
 }): boolean {
+  if (args.afterRecreate === false) return false;
   if (args.exactReady) return false;
   if (!args.usefulInputRemains) return false;
   if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
