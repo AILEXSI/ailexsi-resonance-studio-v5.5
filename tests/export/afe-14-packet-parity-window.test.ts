@@ -154,6 +154,7 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     expect(cfg.hash).toMatch(/^[0-9a-f]{8}$/);
     expect(cfg.descriptionHash).toMatch(/^[0-9a-f]{8}$/);
     expect(cfg.optimizeForLatency).toBe(false);
+    expect(cfg.hardwareAcceleration).toBe("prefer-software");
     const fp = fingerprintSampleChunk(movie!, movie!.samples[0]!, cfg.hash);
     expect(fp.index).toBe(0);
     expect(fp.key).toBe(true);

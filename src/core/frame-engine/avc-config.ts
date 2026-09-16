@@ -41,5 +41,12 @@ export function decoderConfigOf(avc: AfeAvcConfig): VideoDecoderConfig {
     codedHeight: avc.height,
     description: avc.description,
     optimizeForLatency: false,
+    /**
+     * CASE B (AFE-25): WebView2 hardware decode can swallow the last delayed
+     * B-frame at EOS (human: 5958333 never emitted, lastDecoded 5916667)
+     * even when VUI bitstream_restriction is already present. Chrome software
+     * emits the frame. Export-only; exact PTS unchanged.
+     */
+    hardwareAcceleration: "prefer-software",
   };
 }

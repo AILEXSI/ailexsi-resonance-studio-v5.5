@@ -27,6 +27,13 @@ export {
 export type { ParsedBox, ParsedCtts } from "./mp4-reader";
 export { parseAvcC, decoderConfigOf } from "./avc-config";
 export {
+  firstAvcCSps,
+  inspectAvcSpsRestriction,
+  patchAvcCBitstreamRestriction,
+  patchAvcSampleBitstreamRestriction,
+} from "./avc-sps";
+export type { AvcSpsRestrictionInfo } from "./avc-sps";
+export {
   chunkFingerprintMismatchField,
   chunkFingerprintsEqual,
   compactHash,

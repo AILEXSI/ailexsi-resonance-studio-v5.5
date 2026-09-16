@@ -33,6 +33,7 @@ const SPECS = [
   { id: "afe-bframe-30-g30-2s-bpyramid", fps: 30, seconds: 2, gop: 30, bf: 3, profile: "high", pyramid: true },
   { id: "afe-bframe-30-g30-2s-opengop", fps: 30, seconds: 2, gop: 30, bf: 2, profile: "main", openGop: true },
   { id: "afe-bframe-30-g30-2s-closedgop", fps: 30, seconds: 2, gop: 30, bf: 2, profile: "main", openGop: false },
+  { id: "afe-eof-24-g145-b3", fps: 24, seconds: 145 / 24, gop: 145, bf: 3, profile: "high", pyramid: true, bAdapt: 2, timescale: 12288, width: 1280, height: 720 },
 ];
 
 function runFfmpeg(args, stdin) {
@@ -70,7 +71,7 @@ async function encodeSpec(spec) {
   const profile = spec.profile ?? (bf > 0 ? "main" : "baseline");
   const x264Parts = [`keyint=${spec.gop}`, `min-keyint=${spec.gop}`, `scenecut=0`];
   if (bf > 0) {
-    x264Parts.push(`bframes=${bf}`, `b-adapt=0`);
+    x264Parts.push(`bframes=${bf}`, `b-adapt=${spec.bAdapt ?? 0}`);
     x264Parts.push(spec.pyramid ? "b-pyramid=strict" : "b-pyramid=0");
     if (spec.openGop === true) x264Parts.push("open-gop=1");
     if (spec.openGop === false) x264Parts.push("open-gop=0");
@@ -104,6 +105,7 @@ async function encodeSpec(spec) {
       String(spec.gop),
       "-x264-params",
       x264,
+      ...(spec.timescale ? ["-video_track_timescale", String(spec.timescale)] : []),
       "-movflags",
       "+faststart",
       file,

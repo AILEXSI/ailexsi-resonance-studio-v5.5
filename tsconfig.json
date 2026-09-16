@@ -51,6 +51,7 @@
     "tests/export/afe-21-hard-horizon-liveness.test.ts",
     "tests/export/afe-22-submitted-unseen-reset.test.ts",
     "tests/export/afe-23-post-reset-liveness-reopen.test.ts",
-    "tests/export/afe-24-liveness-reopen-invoke.test.ts"
+    "tests/export/afe-24-liveness-reopen-invoke.test.ts",
+    "tests/export/afe-25-eof-tail-sps.test.ts"
   ]
 }

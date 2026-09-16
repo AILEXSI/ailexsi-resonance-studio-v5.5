@@ -1338,3 +1338,47 @@ No timeout bump, no snap, no flood to 144, no Mediabunny. AFE-20/21/22/23 predic
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest VIS-mix on `…Kopie.mp4` sample 28: dump must show `livenessReopen yes` after fingerprint match (not match-yes / reopen-no). Exact PTS or typed stall after reopen exhausted.  
 **HUMAN-PROVEN: NO**
 
+# AFE-25 — EOF / tail differential (sample 142 / PTS 5958333)
+
+Human Windows EXE on AFE-24 tip (`5bec440`). **Not** the 458333 HIGH_WATER / recreate / liveness family.
+
+- requested sample **142** PTS **5958333**
+- lastSubmitted **144** · requestedSubmitted **yes** · current=formula=lastRequired **144**
+- lastDecodedTs **5916667** · targetPtsSeen **no** · decodeQueue **0**
+- resets/recreates/recovery **0** · FINAL_FLUSH **yes** · flushes **1** · usefulInputExhausted **yes**
+- videoReq/Dec/Enc **42/41/41** · unresolved **1**
+- clip `3bf9112a-… - Kopie.mp4` · sourceInMs ~4509.10 · sourceOutMs **6042** · timelineMs ~1366.67
+
+## STEP 1 — tail sample table (24fps / 145 samples / elst 1024 / maxReorder 2)
+
+Analog `tests/fixtures/afe/afe-eof-24-g145-b3.mp4` (same duration/shape as human sourceOut 6042):
+
+| idx | PTS µs | key | presPos | role |
+| --- | --- | --- | --- | --- |
+| 139 | 5916667 | delta | 140 | lastDecoded |
+| 142 | **5958333** | delta (B) | 141 | requested |
+| 143 | 6083333 | delta | 144 | later decode ref (last presentation) |
+| 144 | 6041667 | delta | 143 | later decode ref |
+
+Sample **142 / 5958333 exists**. 143/144 are required by `lastRequired(142)=144`. Human last-frame `sourceTimeSec` selects 142. **Not CASE A.**
+
+## STEP 2 — raw WebCodecs (Chrome)
+
+Every sample 0–144 submitted with AILEXSI PTS µs, then `flush()`. **YES: timestamp 5958333 was emitted**, matched sample 142, during flush, immediately after 5916667 (sample 139). Output count 145 / missing []. AILEXSI `getFrameAt` on Chrome returns the frame.
+
+## STEP 3 — Mediabunny (diagnostic only, not a production dep)
+
+`VideoSampleSink.samples(5.5)` emits 5.958333s (= 5958333 µs). First behavioral gap vs AILEXSI is **not** demux/PTS: both see the sample. Gap is WebView2 hardware decode at EOS vs Chrome/Mediabunny software-capable path. avcC already has `bitstream_restriction_flag=1` / `max_dec_frame_buffering=4` (Mediabunny SPS patch would be a no-op on this family).
+
+## Stage trace (sample 142 / 5958333)
+
+SOURCE_SAMPLE YES → DEMUXED YES → CHUNK_CREATED YES → DECODER_SUBMITTED YES → **DECODER_OUTPUT NO on WebView2** (YES on Chrome) → PTS_MATCHED / STREAM_READY / FRAME_TAKEN / CANVAS / ENCODED follow the first NO.
+
+## Fix (CASE B only)
+
+`decoderConfigOf`: `hardwareAcceleration: "prefer-software"`. No new escape/reset/recreate. No HIGH/LOW/HARD change. No snap / drop 142 / VIS/BLACK. No Mediabunny package.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — retest the Kopie tail clip on this HEAD; dump must show `targetPtsSeen yes` / Enc==Req or typed stall, not 5958333 unseen after FINAL_FLUSH.  
+**HUMAN-PROVEN: NO**
+
