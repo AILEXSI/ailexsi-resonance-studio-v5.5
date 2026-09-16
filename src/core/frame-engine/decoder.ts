@@ -22,6 +22,7 @@ import {
   identicalPostResetFingerprint,
   mayHardHorizonReset,
   mayPostResetLivenessReopen,
+  livenessReopenDumpReason,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,
@@ -1559,6 +1560,19 @@ export class AfeVideoDecoder {
       postResetFingerprintMatch:
         extra?.postResetFingerprintMatch ?? this.postResetFingerprintMatches(),
       livenessReopenUsed: extra?.livenessReopenUsed ?? this.livenessReopenUsed,
+      livenessReopenReason:
+        extra?.livenessReopenReason ??
+        livenessReopenDumpReason({
+          livenessReopenUsed: extra?.livenessReopenUsed ?? this.livenessReopenUsed,
+          hardHorizonResetUsed: extra?.hardHorizonResetUsed ?? this.hardHorizonResetUsed,
+          identicalFingerprint: extra?.postResetFingerprintMatch ?? this.postResetFingerprintMatches(),
+          exactReady: requestedSample != null && this.streamReady.has(requestedSample),
+          targetPtsSeen: extra?.targetPtsSeen ?? targetSeen,
+          earlierKeyframeAvailable:
+            extra?.earlierKeyframeAvailable ?? this.earlierKeyframeIsAvailable(),
+          lastDecodedTimestamp: extra?.lastDecodedTimestamp ?? this.lastVideoFrameTimestamp,
+          targetPtsUs: extra?.targetPtsUs ?? targetPts,
+        }),
       coldOpenAfterVis: extra?.coldOpenAfterVis ?? false,
     });
   }

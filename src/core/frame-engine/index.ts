@@ -83,6 +83,7 @@ export {
   maySubmittedUnseenHorizonReset,
   identicalPostResetFingerprint,
   mayPostResetLivenessReopen,
+  livenessReopenDumpReason,
   mustColdOpenVideoDecoder,
   queueRespectsHardCeiling,
   mayLocalHorizonFinalFlush,

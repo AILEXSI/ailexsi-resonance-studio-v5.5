@@ -278,6 +278,11 @@ export type AfeStallSnapshot = {
   postResetFingerprintMatch: boolean;
   /** AFE-23: one cold native-decoder reopen after identical reset death. */
   livenessReopenUsed: boolean;
+  /**
+   * AFE-24: why reopen ran or was skipped. `yes` after the path executes.
+   * Human @ dea72ca: match yes but reason was pending — scheduler never called it.
+   */
+  livenessReopenReason: string | null;
   /** AFE-23: VIDEO run after VIS/black evicted the cached decoder. */
   coldOpenAfterVis: boolean;
 };
@@ -416,6 +421,7 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     postResetFingerprintOutputs: 0,
     postResetFingerprintMatch: false,
     livenessReopenUsed: false,
+    livenessReopenReason: null,
     coldOpenAfterVis: false,
     ...partial,
   };
@@ -822,10 +828,12 @@ export function identicalPostResetFingerprint(args: {
 }
 
 /**
- * AFE-23: AFE-22 reset already used, exact still unseen, fingerprint
- * identical, queue at/over SOFT or frozen. One different recovery: close
- * the native decoder and reopen cold (first-fill water after liveness),
- * not another gopStart=0 recreate and not a flood to lastRequired 144.
+ * AFE-23/24: AFE-22 reset already used, exact still unseen, fingerprint
+ * identical. Do **not** require lastDecoded===lastDecodedAtSubmit or
+ * hardHorizonResetExhausted — WebView2 emits the 10-frame death *after*
+ * the last submit, so those stay unequal and the human dump never
+ * invoked reopen. Queue/frozen is diagnostic, not a gate.
+ * Close the native decoder and reopen cold; not another gopStart=0 recreate.
  */
 export function mayPostResetLivenessReopen(args: {
   exactReady: boolean;
@@ -846,13 +854,41 @@ export function mayPostResetLivenessReopen(args: {
   if (args.livenessReopenUsed) return false;
   if (args.earlierKeyframeAvailable) return false;
   if (!args.identicalFingerprint) return false;
-  const frozen =
-    args.frozenAtHighWater === true || args.decodeQueueSize >= args.softHighWater;
-  if (!frozen) return false;
+  /* queue / frozen stay on the API for dumps; not a reopen gate (AFE-24). */
+  void args.decodeQueueSize;
+  void args.softHighWater;
+  void args.frozenAtHighWater;
   if (args.lastDecodedTimestamp != null && args.targetPtsUs != null) {
     return args.lastDecodedTimestamp < args.targetPtsUs;
   }
   return true;
+}
+
+/** AFE-24 stall ledger: why reopen ran or was skipped. */
+export function livenessReopenDumpReason(args: {
+  livenessReopenUsed: boolean;
+  hardHorizonResetUsed: boolean;
+  identicalFingerprint: boolean;
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  earlierKeyframeAvailable: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): string {
+  if (args.livenessReopenUsed) return "yes";
+  if (!args.hardHorizonResetUsed) return "reset-not-used";
+  if (!args.identicalFingerprint) return "fingerprint-mismatch";
+  if (args.exactReady) return "exact-ready";
+  if (args.targetPtsSeen) return "target-seen";
+  if (args.earlierKeyframeAvailable) return "earlier-keyframe";
+  if (
+    args.lastDecodedTimestamp != null &&
+    args.targetPtsUs != null &&
+    args.lastDecodedTimestamp >= args.targetPtsUs
+  ) {
+    return "decoded-past-target";
+  }
+  return "pending";
 }
 
 /**
@@ -1487,6 +1523,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
     `postResetFingerprintMatch ${d.postResetFingerprintMatch ? "yes" : "no"}`,
     `livenessReopen ${d.livenessReopenUsed ? "yes" : "no"}`,
+    `livenessReopenReason ${d.livenessReopenReason ?? "n/a"}`,
     `coldOpenAfterVis ${d.coldOpenAfterVis ? "yes" : "no"}`,
     `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
     `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
