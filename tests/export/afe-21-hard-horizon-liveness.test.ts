@@ -327,8 +327,8 @@ describe("AFE-21 A–H HARD ceiling reached before local horizon + post-recreate
     mock.decodeQueueSize = HUMAN.decodeQueue;
     expect(decoder.hardDependencyCeilingFor(HUMAN.sample)).toBe(HARD_AT_STALL);
     expect(decoder.effectiveHardCeilingFor(HUMAN.sample)).toBe(HARD_AT_START);
-    expect(decoder.snapshot().hardDependencyCeiling).toBe(HARD_AT_START);
-    expect(decoder.snapshot().lastSubmittedSample).toBe(HUMAN.lastSubmitted);
+    expect(decoder.snapshot({ sourceSampleRequested: HUMAN.sample }).hardDependencyCeiling).toBe(HARD_AT_START);
+    expect(decoder.snapshot({ sourceSampleRequested: HUMAN.sample }).lastSubmittedSample).toBe(HUMAN.lastSubmitted);
     expect(queueRespectsHardCeiling({
       decodeQueueSize: decoder.decodeQueueSize,
       hardDependencyCeiling: decoder.effectiveHardCeilingFor(HUMAN.sample),
@@ -371,8 +371,9 @@ describe("AFE-21 A–H HARD ceiling reached before local horizon + post-recreate
     decoder.clearRecoveryRebuilding([HUMAN.sample]);
     expect(decoder.hardHorizonResetConsumed).toBe(true);
     expect(decoder.outputGateBlocksHardSpend()).toBe(true);
+    const liveF = ControllableQueueDecoder.last!;
     for (let i = 0; i < SOFT; i++) decoder.submitEncoded(movie!.samples[i]!);
-    mock.decodeQueueSize = SOFT;
+    liveF.decodeQueueSize = SOFT;
     const borrow = await decoder.waitForDecodeCapacity(undefined, {
       requested: HUMAN.sample,
       budgetEnd: nowMs() + 40,
@@ -409,8 +410,9 @@ describe("AFE-21 A–H HARD ceiling reached before local horizon + post-recreate
     const pts = decoder.chunkTimestampUs(movie!.samples[HUMAN.sample]!);
     decoder.restoreOpenedIdentity(HUMAN.sample, pts);
     decoder.clearRecoveryRebuilding([HUMAN.sample]);
+    const liveG = ControllableQueueDecoder.last!;
     for (let i = 0; i < SOFT; i++) decoder.submitEncoded(movie!.samples[i]!);
-    mock.decodeQueueSize = SOFT;
+    liveG.decodeQueueSize = SOFT;
     decoder.deliverOutputForTest(416_667);
     expect(decoder.outputGateBlocksHardSpend()).toBe(false);
     expect(decoder.canBorrowTowardLocalHorizon(HUMAN.sample)).toBe(true);
@@ -424,8 +426,8 @@ describe("AFE-21 A–H HARD ceiling reached before local horizon + post-recreate
       if (!allow) break;
       decoder.submitEncoded(movie!.samples[next]!);
       next += 1;
-      mock.decodeQueueSize = SOFT;
-      expect(mock.decodeQueueSize).toBeLessThanOrEqual(hard);
+      liveG.decodeQueueSize = SOFT;
+      expect(liveG.decodeQueueSize).toBeLessThanOrEqual(hard);
     }
     expect(decoder.snapshot().lastSubmittedSample).toBeGreaterThanOrEqual(HUMAN.sample);
     expect(decoder.snapshot().lastSubmittedSample).toBeLessThan(HUMAN.lastRequired);
@@ -484,8 +486,8 @@ describe("AFE-21 A–H HARD ceiling reached before local horizon + post-recreate
     expect(head).toContain("softHighWater 12");
     expect(head).toContain("hardDependencyCeiling 20");
     expect(head).toContain("decodeQueue 21");
-    expect(head).toContain("hardHorizonReset no");
     expect(head).toContain("pumpSlice 37-36");
+    expect(text).toContain("hardHorizonReset no");
     expect(text).toContain("decodeQueuePeak 22");
     expect(text).not.toMatch(/nearest|snap|allowSkip|Mediabunny|HTMLVideo/i);
   });

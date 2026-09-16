@@ -1326,7 +1326,6 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `gopStart ${d.gopKeyframeStart}`,
     `earlierKeyframeAvailable ${d.earlierKeyframeAvailable ? "yes" : "no"}`,
     `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
-    `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
     `postRecreateSubmitted ${d.postRecreateSubmitted}`,
     `postRecreateOutputs ${d.postRecreateOutputs}`,
     `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,

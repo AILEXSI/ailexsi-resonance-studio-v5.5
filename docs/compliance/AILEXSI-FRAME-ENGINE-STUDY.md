@@ -1188,3 +1188,42 @@ Regression: requested submitted + lastSubmitted>=lastRequired + usefulInputExhau
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `9f994a16-….mp4` sample 134 PTS 5625000 / lastDecoded 5583333 / submitted 140 / queue 2 → exact frame or typed fail with `ptsCurrentlyRegistered` or waiter live; no 3s waiter-null sit.  
 **HUMAN-PROVEN: NO**
 
+# AFE-21 — HARD ceiling reached before local horizon + post-recreate liveness
+
+Human Windows EXE on AFE-20 tip (`aef5ff4` or later). One new picture — AFE-20 Shape A/B stay green.
+
+- requested sample **38** PTS **1625000** · requestedSubmitted **no**
+- lastSubmitted **36** < 38 < currentTarget/formula **44** · lastRequired **140**
+- SOFT **12** · HARD **20** · decodeQueue **21** · peak **22**
+- lastDecodedTs **458333** · targetPtsSeen **no**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- usefulInputExhausted **no**
+- recreates **1** · postRecreateSubmitted **37** · postRecreateOutputs **10** · postRecreateLastDecodedTs **458333**
+- pumpSlice **37-36** empty · `PUMP_LOOKAHEAD:37-36/q21->21/paused`
+- gopStart **0** · earlierKeyframeAvailable **no** · earlierKeyframeRecovered **no**
+- packetParity **yes** · configParity **yes**
+- waiter **null** · ptsCurrentlyRegistered **no** · ownershipState **PTS_REGISTERED**
+- videoReq/Dec/Enc **47/46/46** · visFrames **58** · afeFrames **46**
+- stalledMs **3000**
+
+AFE-20 mid-band HARD spend (queue ∈ (SOFT, HARD)) does not apply: the queue is already at/over HARD while lastSubmitted is still short of requested and the local horizon.
+
+## Cause
+
+1. **HARD overrun.** After recreate, SOFT = RAW = 12 and remaining-to-44 is large, so HARD starts at 12+10 = **22**. Submit while `queue < 22` legally peaks at 22. Remaining then shrinks (36 vs 44 → extra 8) and computed HARD becomes **20**. `hardBorrowCeiling` was cleared when `queue >= HARD`, so the dump reported HARD 20 under a live queue of 21. HARD was not a hard cap.
+2. **Post-recreate liveness.** The decoder after recreate emitted ~10 outputs through 458333 then froze (`submittedMinusOutputs` 27). Cannot borrow more without exceeding HARD. No earlier I-frame (`gopStart` 0). Progressive wrote empty 37-36 and sat the 3s stall.
+
+Not a license to raise SOFT/HARD globally or flood to lastRequired 140. Not a timeout bump. Not snap/nearest/drop/Mediabunny.
+
+## Fix
+
+1. Pin HARD at the borrow-episode max while lastSubmitted < live local horizon. Do not clear the pin because the queue reached the cap. Dump HARD stays 22; queue never exceeds that pin.
+2. `maySubmitEncoded` / `mayResumeDecode`: when HARD is set, `queue >= HARD` never submits.
+3. `mayHardHorizonReset`: exact unresolved + lastSubmitted < requested < currentTarget + queue >= HARD + no output progress + no earlier I + recreate >= 1 + reset not yet used → **one** recreate + ownership rebuild from gopStart, then output-gated refill (SOFT first; no HARD spend until lastDecoded moves). Typed `AFE_DECODE_STALL` only after that escape is exhausted — not an empty 37-36 pump for 3s.
+
+AFE-20 Shape A (queue 15 ∈ (12, 22), lastSubmitted 82 < 90) still spends remaining HARD. Shape B CASE B drain unchanged. AFE-13 lastSubmitted > requested does not fire this reset.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 / lastSubmitted 36 / queue >= HARD / no earlier I → progress toward 38/44 or typed recover; queue never exceeds HARD; no empty 37-36 for 3s.  
+**HUMAN-PROVEN: NO**
+
