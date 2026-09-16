@@ -454,16 +454,16 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     await decoder.ensure();
     decoder.setGopKeyframeStart(0);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
-      lastRequested: 40,
-      lastRequiredDecodeSample: 50,
+      lastRequested: 10,
+      lastRequiredDecodeSample: 10,
       requestedIndexes: [10],
     });
     decoder.openRequested(10, decoder.chunkTimestampUs(movie!.samples[10]!));
     await decoder.recreate();
     decoder.setGopKeyframeStart(0);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
-      lastRequested: 40,
-      lastRequiredDecodeSample: 50,
+      lastRequested: 10,
+      lastRequiredDecodeSample: 10,
       requestedIndexes: [10],
       keepResolved: true,
     });

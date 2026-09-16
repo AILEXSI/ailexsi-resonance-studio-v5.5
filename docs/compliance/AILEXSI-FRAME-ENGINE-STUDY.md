@@ -1004,13 +1004,13 @@ Windows AFE-15: requested sample 74 PTS 3125000, lastSubmitted 59, lastDecodedTs
 
 ## Cause
 
-`progressivePumpSliceEnd` correctly plans 60-65. `pumpThrough` calls `beginSubmitPhase(PUMP_LOOKAHEAD, nextDecode=60)` then `waitForDecodeCapacity`. AFE-14 hysteresis treats paused && queue>LOW as no-submit even when queue<HIGH. Queue 7>LOW 6 with 5 unused HIGH credits. No `decode()`. `endSubmitPhase` sets submittedTo=`lastSubmitted` 59 → empty range 60-59. `progressiveTowardRequired` sees nextDecode unchanged and breaks. Backpressure assumed queued decoder input would produce additional output and drain to LOW_WATER. That is false when the requested PTS lies beyond lastSubmitted.
+`progressivePumpSliceEnd` correctly plans 60-65. `pumpThrough` calls `beginSubmitPhase(PUMP_LOOKAHEAD, nextDecode=60)` then `waitForDecodeCapacity`. AFE-14 hysteresis treats paused && queue>LOW as no-submit even when queue<HIGH. Queue 7>LOW 6 with 5 unused HIGH credits. No `decode()`. `endSubmitPhase` sets submittedTo=`lastSubmitted` 59 → empty range 60-59. `progressiveTowardRequired` sees nextDecode unchanged and breaks. Backpressure assumed queued decoder input would produce additional output and drain to LOW_WATER. That is false while lastSubmitted < lastRequired. Submitting the requested sample does not close H.264 reorder / B-frame dependencies.
 
 ## Fix
 
-1. CAPACITY INVARIANT: if requestedSample>lastSubmittedSample AND useful input remains AND decodeQueueSize<HIGH_WATER AND exact requested frame not ready → backpressure MUST NOT block solely because decodeQueueSize>LOW_WATER.
-2. `capacityTowardRequestedRequired` + `mustAdvanceTowardRequested` on `maySubmitEncoded` / `mayResumeDecode` / `waitForDecodeCapacity`.
-3. LOW_WATER hysteresis remains when lastSubmitted>=requested (reduce refill churn). HIGH_WATER still hard-caps the queue.
+1. CAPACITY INVARIANT: if exact requested frame is not ready AND useful input remains AND lastSubmittedSample<lastRequiredDecodeSample AND decodeQueueSize<HIGH_WATER → backpressure MUST NOT block solely because decodeQueueSize>LOW_WATER.
+2. `mustAdvanceTowardDependencyHorizon` on `maySubmitEncoded` / `mayResumeDecode` / `waitForDecodeCapacity`. Horizon is lastRequired, not requestedSample.
+3. LOW_WATER hysteresis remains only after lastRequired is fully submitted (reduce refill churn). HIGH_WATER still hard-caps the queue.
 4. Do not raise the 3000 ms stall timeout. Do not relax exact PTS. Do not drop/nearest frames. Do not raise queue limits. No MP4 special case. No mid-run flush. No software decode.
 
 **WINDOWS WEBVIEW2 VERIFIED: NO**  

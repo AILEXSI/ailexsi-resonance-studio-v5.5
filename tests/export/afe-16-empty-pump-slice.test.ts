@@ -2,13 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AfeVideoDecoder,
-  capacityTowardRequestedRequired,
   decodeQueueHighWater,
   decodeQueueLowWater,
   formatStallMessage,
   hasFurtherUsefulInput,
   mayResumeDecode,
   maySubmitEncoded,
+  mustAdvanceTowardDependencyHorizon,
   nowMs,
   parseIsoBmff,
   progressivePumpSliceEnd,
@@ -41,8 +41,8 @@ function loadMovie(path: string) {
 }
 
 const STARVE = {
-  requestedSample: HUMAN.sample,
   lastSubmittedSample: HUMAN.lastSubmitted,
+  lastRequiredDecodeSample: 140,
   decodeQueueSize: HUMAN.decodeQueue,
   highWater: HUMAN.high,
   exactReady: false,
@@ -138,8 +138,8 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
     expect(HUMAN.high - HUMAN.decodeQueue).toBe(5);
   });
 
-  it("D. CAPACITY INVARIANT: requested>lastSubmitted, useful input, queue<HIGH, not exact → must advance", () => {
-    expect(capacityTowardRequestedRequired(STARVE)).toBe(true);
+  it("D. CAPACITY INVARIANT: lastSubmitted<lastRequired, useful input, queue<HIGH, not exact → must advance", () => {
+    expect(mustAdvanceTowardDependencyHorizon(STARVE)).toBe(true);
     expect(
       maySubmitEncoded({
         decodeQueueSize: HUMAN.decodeQueue,
@@ -148,7 +148,7 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
         lowWater: HUMAN.low,
         paused: true,
         exactReady: false,
-        mustAdvanceTowardRequested: true,
+        mustAdvanceTowardDependencyHorizon: true,
       }),
     ).toBe(true);
     expect(
@@ -158,14 +158,14 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
         lowWater: HUMAN.low,
         exactReady: false,
         paused: true,
-        mustAdvanceTowardRequested: true,
+        mustAdvanceTowardDependencyHorizon: true,
       }),
     ).toBe(true);
   });
 
-  it("E. HIGH_WATER still blocks; hysteresis holds when requested already submitted", () => {
+  it("E. HIGH_WATER still blocks; override off only after lastRequired is fully submitted", () => {
     expect(
-      capacityTowardRequestedRequired({
+      mustAdvanceTowardDependencyHorizon({
         ...STARVE,
         decodeQueueSize: HUMAN.high,
       }),
@@ -177,14 +177,7 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
         outputProgressed: false,
         lowWater: HUMAN.low,
         paused: true,
-        mustAdvanceTowardRequested: true,
-      }),
-    ).toBe(false);
-    expect(
-      capacityTowardRequestedRequired({
-        ...STARVE,
-        requestedSample: 50,
-        lastSubmittedSample: 59,
+        mustAdvanceTowardDependencyHorizon: true,
       }),
     ).toBe(false);
     expect(
@@ -194,17 +187,17 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
         lowWater: HUMAN.low,
         exactReady: false,
         paused: true,
-        mustAdvanceTowardRequested: false,
+        mustAdvanceTowardDependencyHorizon: false,
       }),
     ).toBe(false);
     expect(
-      capacityTowardRequestedRequired({
+      mustAdvanceTowardDependencyHorizon({
         ...STARVE,
         exactReady: true,
       }),
     ).toBe(false);
     expect(
-      capacityTowardRequestedRequired({
+      mustAdvanceTowardDependencyHorizon({
         ...STARVE,
         usefulInputRemains: false,
       }),
@@ -324,7 +317,8 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
     let next = HUMAN.lastSubmitted + 1;
     let peak = mock.decodeQueueSize;
     decoder.setPumpSlice(60, 65);
-    while (next <= HUMAN.sample) {
+    const lastRequired = 90;
+    while (next <= lastRequired) {
       if (mock.decodeQueueSize >= high) {
         mock.drain(1, false);
         expect(mock.decodeQueueSize).toBeGreaterThan(low);
@@ -340,8 +334,8 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
       peak = Math.max(peak, mock.decodeQueueSize);
       expect(mock.decodeQueueSize).toBeLessThanOrEqual(high);
     }
-    expect(next - 1).toBeGreaterThanOrEqual(HUMAN.sample);
-    expect(decoder.snapshot().lastSubmittedSample).toBeGreaterThanOrEqual(HUMAN.sample);
+    expect(next - 1).toBeGreaterThanOrEqual(lastRequired);
+    expect(decoder.snapshot().lastSubmittedSample).toBeGreaterThanOrEqual(lastRequired);
     expect(peak).toBeLessThanOrEqual(high);
     expect(peak).toBeLessThan(40);
     expect(peak).toBeLessThan(125);
@@ -350,7 +344,7 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
     decoder.close();
   }, 10_000);
 
-  it("I. first-fill: same invariant — unused HIGH credits must feed requested horizon", async () => {
+  it("I. first-fill: same invariant — unused HIGH credits must feed lastRequired horizon", async () => {
     const movie = loadMovie(LONG);
     expect(movie).not.toBeNull();
     restore = installControllableQueueDecoder();
@@ -387,7 +381,50 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
     decoder.close();
   }, 10_000);
 
-  it("J. hysteresis preserved when lastSubmitted >= requested — no refill on every dequeue", async () => {
+  it("J. lastSubmitted==requested still advances while lastSubmitted<lastRequired; hysteresis only after lastRequired", async () => {
+    expect(
+      mustAdvanceTowardDependencyHorizon({
+        lastSubmittedSample: 74,
+        lastRequiredDecodeSample: 140,
+        decodeQueueSize: HUMAN.decodeQueue,
+        highWater: HUMAN.high,
+        exactReady: false,
+        usefulInputRemains: true,
+      }),
+    ).toBe(true);
+    expect(
+      maySubmitEncoded({
+        decodeQueueSize: HUMAN.decodeQueue,
+        highWater: HUMAN.high,
+        outputProgressed: false,
+        lowWater: HUMAN.low,
+        paused: true,
+        exactReady: false,
+        mustAdvanceTowardDependencyHorizon: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      mustAdvanceTowardDependencyHorizon({
+        lastSubmittedSample: 140,
+        lastRequiredDecodeSample: 140,
+        decodeQueueSize: HUMAN.decodeQueue,
+        highWater: HUMAN.high,
+        exactReady: false,
+        usefulInputRemains: true,
+      }),
+    ).toBe(false);
+    expect(
+      mayResumeDecode({
+        decodeQueueSize: HUMAN.decodeQueue,
+        highWater: HUMAN.high,
+        lowWater: HUMAN.low,
+        exactReady: false,
+        paused: true,
+        mustAdvanceTowardDependencyHorizon: false,
+      }),
+    ).toBe(false);
+
     const movie = loadMovie(LONG);
     expect(movie).not.toBeNull();
     restore = installControllableQueueDecoder();
@@ -395,37 +432,52 @@ describe("AFE-16 A–J empty pump slice + LOW_WATER starvation", () => {
     await decoder.ensure();
     decoder.setPrefetchHint(HUMAN.prefetch);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
-      lastRequested: 40,
-      lastRequiredDecodeSample: 50,
-      requestedIndexes: [10],
+      lastRequested: HUMAN.sample,
+      lastRequiredDecodeSample: 140,
+      requestedIndexes: [HUMAN.sample],
     });
-    decoder.openRequested(10, decoder.chunkTimestampUs(movie!.samples[10]!));
+    decoder.openRequested(HUMAN.sample, decoder.chunkTimestampUs(movie!.samples[HUMAN.sample]!));
     decoder.setGopKeyframeStart(0);
     await decoder.recreate();
     decoder.setGopKeyframeStart(0);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
-      lastRequested: 40,
-      lastRequiredDecodeSample: 50,
-      requestedIndexes: [10],
+      lastRequested: HUMAN.sample,
+      lastRequiredDecodeSample: 140,
+      requestedIndexes: [HUMAN.sample],
       keepResolved: true,
     });
-    decoder.restoreOpenedIdentity(10, decoder.chunkTimestampUs(movie!.samples[10]!));
+    decoder.restoreOpenedIdentity(HUMAN.sample, decoder.chunkTimestampUs(movie!.samples[HUMAN.sample]!));
     const high = decoder.decodeQueueHighWater;
     const low = decoder.decodeQueueLowWater;
-    for (let i = 0; i < high; i++) decoder.submitEncoded(movie!.samples[i]!);
-    const mid = await decoder.waitForDecodeCapacity(undefined, {
-      requested: 10,
-      budgetEnd: nowMs() + 40,
-    });
-    expect(mid).toBe(false);
+    for (let i = 0; i <= HUMAN.sample; i++) decoder.submitEncoded(movie!.samples[i]!);
     const mock = ControllableQueueDecoder.last!;
-    mock.drain(1, false);
-    expect(mock.decodeQueueSize).toBeGreaterThan(low);
-    const stillPaused = await decoder.waitForDecodeCapacity(undefined, {
-      requested: 10,
+    if (mock.decodeQueueSize > HUMAN.decodeQueue) mock.drain(mock.decodeQueueSize - HUMAN.decodeQueue, false);
+    expect(mock.decodeQueueSize).toBe(HUMAN.decodeQueue);
+    expect(decoder.snapshot().lastSubmittedSample).toBe(HUMAN.sample);
+    const stillNeedDeps = await decoder.waitForDecodeCapacity(undefined, {
+      requested: HUMAN.sample,
       budgetEnd: nowMs() + 40,
     });
-    expect(stillPaused).toBe(false);
+    expect(stillNeedDeps).toBe(true);
+    decoder.submitEncoded(movie!.samples[HUMAN.sample + 1]!);
+    expect(decoder.snapshot().lastSubmittedSample).toBe(HUMAN.sample + 1);
+
+    for (let i = HUMAN.sample + 2; i <= 140; i++) decoder.submitEncoded(movie!.samples[i]!);
+    mock.drain(mock.decodeQueueSize - high, false);
+    const atHigh = await decoder.waitForDecodeCapacity(undefined, {
+      requested: HUMAN.sample,
+      budgetEnd: nowMs() + 40,
+    });
+    expect(atHigh).toBe(false);
+    mock.drain(high - HUMAN.decodeQueue, false);
+    expect(mock.decodeQueueSize).toBe(HUMAN.decodeQueue);
+    expect(decoder.snapshot().lastSubmittedSample).toBe(140);
+    const afterHorizon = await decoder.waitForDecodeCapacity(undefined, {
+      requested: HUMAN.sample,
+      budgetEnd: nowMs() + 40,
+    });
+    expect(afterHorizon).toBe(false);
+    expect(mock.decodeQueueSize).toBeGreaterThan(low);
     decoder.close();
   }, 10_000);
 });

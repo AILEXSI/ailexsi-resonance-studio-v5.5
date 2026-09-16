@@ -16,7 +16,7 @@ import {
   AFE_FLUSH_WATCHDOG_MS,
   AFE_POST_RECREATE_OUTPUT_BUDGET_MS,
   AFE_SETTLE_DRAIN_MS,
-  capacityTowardRequestedRequired,
+  mustAdvanceTowardDependencyHorizon,
   classifySampleRole,
   decodeQueueHighWater,
   decodeQueueLowWater,
@@ -523,10 +523,12 @@ export class AfeVideoDecoder {
   /**
    * Pause when decodeQueueSize >= HIGH_WATER and there is no output progress.
    * AFE-14: resume only at LOW_WATER or exact-PTS ready — not on every dequeue
-   * when the requested sample is already submitted.
-   * AFE-16: if requested > lastSubmitted and useful input remains and
-   * queue < HIGH, do not block solely because queue > LOW_WATER. Queued
-   * input does not necessarily produce further output / the requested PTS.
+   * after lastRequired is fully submitted.
+   * AFE-16: if exact frame is not ready, useful input remains,
+   * lastSubmitted < lastRequired, and queue < HIGH, do not block solely
+   * because queue > LOW_WATER. Submitting the requested sample does not
+   * close H.264 reorder / B-frame dependencies. Queued input does not
+   * necessarily produce further output / the requested PTS.
    * No busy loop. No arbitrary sleep. No mid-run flush.
    *
    * Returns false when the caller must not submit more. Before the first
@@ -553,7 +555,7 @@ export class AfeVideoDecoder {
     }
     if (requested != null) this.ensureRebuildOwnership(requested);
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
-    const mustAdvance = this.mustAdvanceTowardRequested(requested, false);
+    const mustAdvance = this.dependencyHorizonAdvance(requested, false);
     if (
       mayResumeDecode({
         decodeQueueSize: this.decodeQueueSize,
@@ -561,7 +563,7 @@ export class AfeVideoDecoder {
         lowWater: low,
         exactReady: false,
         paused: this.windowPaused,
-        mustAdvanceTowardRequested: mustAdvance,
+        mustAdvanceTowardDependencyHorizon: mustAdvance,
       }) &&
       maySubmitEncoded({
         decodeQueueSize: this.decodeQueueSize,
@@ -570,7 +572,7 @@ export class AfeVideoDecoder {
         lowWater: low,
         paused: this.windowPaused,
         exactReady: false,
-        mustAdvanceTowardRequested: mustAdvance,
+        mustAdvanceTowardDependencyHorizon: mustAdvance,
       })
     ) {
       this.noMoreSubmission = false;
@@ -595,7 +597,7 @@ export class AfeVideoDecoder {
         lowWater: low,
         exactReady: requested != null && this.streamReady.has(requested),
         paused: true,
-        mustAdvanceTowardRequested: this.mustAdvanceTowardRequested(
+        mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(
           requested,
           requested != null && this.streamReady.has(requested),
         ),
@@ -623,7 +625,7 @@ export class AfeVideoDecoder {
           lowWater: low,
           exactReady: false,
           paused: true,
-          mustAdvanceTowardRequested: this.mustAdvanceTowardRequested(requested, false),
+          mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(requested, false),
         });
         this.backpressureBlocked = !resume;
         if (resume) this.windowPaused = false;
@@ -644,7 +646,7 @@ export class AfeVideoDecoder {
           lowWater: low,
           exactReady: false,
           paused: true,
-          mustAdvanceTowardRequested: this.mustAdvanceTowardRequested(requested, false),
+          mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(requested, false),
         })
       ) {
         this.windowPaused = false;
@@ -662,16 +664,17 @@ export class AfeVideoDecoder {
   }
 
   /**
-   * AFE-16: unresolved requested PTS beyond lastSubmitted, with unused
-   * HIGH_WATER credits and remaining useful input, must not wait on LOW_WATER.
+   * AFE-16: exact frame unresolved, lastSubmitted still behind lastRequired,
+   * unused HIGH_WATER credits, useful input remains — do not wait on LOW_WATER.
+   * Horizon is lastRequiredDecodeSample, not the requested sample index.
    */
-  private mustAdvanceTowardRequested(requested: number | undefined, exactReady: boolean): boolean {
+  private dependencyHorizonAdvance(requested: number | undefined, exactReady: boolean): boolean {
     if (requested == null || exactReady) return false;
     const lastSubmitted = this.lastSubmittedSample ?? -1;
-    const lastRequired = Math.max(this.lastRequiredSample ?? requested, requested);
-    return capacityTowardRequestedRequired({
-      requestedSample: requested,
+    const lastRequired = this.lastRequiredSample ?? requested;
+    return mustAdvanceTowardDependencyHorizon({
       lastSubmittedSample: this.lastSubmittedSample,
+      lastRequiredDecodeSample: lastRequired,
       decodeQueueSize: this.decodeQueueSize,
       highWater: this.decodeQueueHighWater,
       exactReady,
