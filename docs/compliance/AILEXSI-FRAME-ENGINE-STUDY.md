@@ -1,6 +1,6 @@
 # AILEXSI Frame Engine — architecture (V5.5) + historical AFE-01/02/03 study
 
-**V5.5 production:** AILEXSI Frame Engine is the only export frame source. Mediabunny is removed. Preview HTMLVideo is unchanged. AFE-03 optimizations (streaming sequential path, ready queue, precomputed plan, prefetch 4) are kept. **AFE-04** adds B-frame / varying CTTS support (PTS-keyed match, decode order unchanged).
+**V5.5 production:** AILEXSI Frame Engine is the only export frame source. Mediabunny is removed. Preview HTMLVideo is unchanged. AFE-03 optimizations (streaming sequential path, ready queue, precomputed plan, prefetch 4) are kept. **AFE-04** adds B-frame / varying CTTS support (PTS-keyed match, decode order unchanged). **Windows WebView2 AILEXSI export is HUMAN-PROVEN** at PR #17 tip `a01576b` (merged), including VIS-mix / multi-clip and AFE-25 `prefer-software`. Chrome harnesses remain AUTOMATED-TESTED. **1080p OPEN.**
 
 Architecture (current):
 
@@ -1378,7 +1378,6 @@ SOURCE_SAMPLE YES → DEMUXED YES → CHUNK_CREATED YES → DECODER_SUBMITTED YE
 
 `decoderConfigOf`: `hardwareAcceleration: "prefer-software"`. No new escape/reset/recreate. No HIGH/LOW/HARD change. No snap / drop 142 / VIS/BLACK. No Mediabunny package.
 
-**WINDOWS WEBVIEW2 VERIFIED: NO**  
-**WINDOWS HUMAN TEST REQUIRED: YES** — retest the Kopie tail clip on this HEAD; dump must show `targetPtsSeen yes` / Enc==Req or typed stall, not 5958333 unseen after FINAL_FLUSH.  
-**HUMAN-PROVEN: NO**
+**WINDOWS WEBVIEW2 VERIFIED: YES** — operator EXE from tip `a01576b` (PR #17 merged to main).  
+**HUMAN-PROVEN: YES** — Mediabunny-free AILEXSI export on Windows WebView2, including AFE-25 `prefer-software` EOF tail and VIS-mix / multi-clip. Dump identity (`productVersion` / `gitSha`) exercised on that EXE. Chrome 90/90/90 remains AUTOMATED-TESTED only. 1080p still OPEN.
 
