@@ -60,7 +60,7 @@ const LIVE = postHorizonRequiredSample({
   targetPtsUs: QA.ptsUs,
 });
 
-describe("AFE-19 A–F formula-horizon drain when live 77 is unreachable", () => {
+describe("AFE-19 A–G formula-horizon drain when live 77 is unreachable", () => {
   let restore: (() => void) | undefined;
   afterEach(() => {
     restore?.();
@@ -221,7 +221,42 @@ describe("AFE-19 A–F formula-horizon drain when live 77 is unreachable", () =>
     decoder.close();
   }, 10_000);
 
-  it("F. no snap / nearest / lastRequired flood; transaction flush still 67<102", () => {
+  it("F. after recreate, formula in, queue held, lastDecoded null, first chunk key → drain (variant b0)", async () => {
+    const movie = loadMovie(LONG);
+    expect(movie).not.toBeNull();
+    restore = installControllableQueueDecoder();
+    const decoder = new AfeVideoDecoder({ ...movie!, maxReorderSamples: QA.maxReorder });
+    await decoder.ensure();
+    decoder.setPrefetchHint(QA.prefetch);
+    decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
+      lastRequested: 36,
+      lastRequiredDecodeSample: 42,
+      requestedIndexes: [0],
+    });
+    const targetPts = decoder.chunkTimestampUs(movie!.samples[0]!);
+    decoder.openRequested(0, targetPts);
+    decoder.setGopKeyframeStart(0);
+    await decoder.recreate();
+    decoder.setGopKeyframeStart(0);
+    decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
+      lastRequested: 36,
+      lastRequiredDecodeSample: 42,
+      requestedIndexes: [0],
+      keepResolved: true,
+    });
+    decoder.restoreOpenedIdentity(0, targetPts);
+    decoder.clearRecoveryRebuilding([0]);
+    for (let i = 0; i <= 11; i++) decoder.submitEncoded(movie!.samples[i]!);
+    const mock = ControllableQueueDecoder.last!;
+    mock.decodeQueueSize = 12;
+    expect(decoder.snapshot().lastDecodedTimestamp).toBeNull();
+    expect(decoder.snapshot().postRecreateOutputs).toBe(0);
+    expect(decoder.formulaTargetRequiredFor(0)).toBeLessThanOrEqual(11);
+    expect(decoder.mayFormulaHorizonDrain(0)).toBe(true);
+    decoder.close();
+  }, 10_000);
+
+  it("G. no snap / nearest / lastRequired flood; transaction flush still 67<102", () => {
     expect(
       mayFinalFlush({
         unresolvedRequestedVideoFrames: 1,

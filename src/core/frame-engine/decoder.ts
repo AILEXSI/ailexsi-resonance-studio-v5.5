@@ -291,29 +291,38 @@ export class AfeVideoDecoder {
   mayFormulaHorizonDrain(requested: number): boolean {
     const formula = this.formulaTargetRequiredFor(requested);
     const targetPts = this.ownership.get(requested)?.ptsUs ?? this.targetPtsUs;
-    if (
-      !mayLocalHorizonFinalFlush({
-        unresolvedRequestedVideoFrames: this.unresolvedRequestedCount(),
-        lastSubmittedSample: this.lastSubmittedSample,
-        currentTargetRequiredSample: formula,
-        formulaTargetRequiredSample: formula,
-        exactReady: this.streamReady.has(requested),
-        targetPtsSeen:
-          targetPts != null &&
-          (this.outputTimestamps.includes(targetPts) || this.lastVideoFrameTimestamp === targetPts),
-        decodeQueueSize: this.decodeQueueSize,
-        outputProgressed: false,
-        lastDecodedTimestamp: this.lastVideoFrameTimestamp,
-        targetPtsUs: targetPts,
-        recoveryRebuilding: this.ownership.get(requested)?.recoveryRebuilding === true,
-        transactionComplete: false,
-      })
-    ) {
-      return false;
+    const local = mayLocalHorizonFinalFlush({
+      unresolvedRequestedVideoFrames: this.unresolvedRequestedCount(),
+      lastSubmittedSample: this.lastSubmittedSample,
+      currentTargetRequiredSample: formula,
+      formulaTargetRequiredSample: formula,
+      exactReady: this.streamReady.has(requested),
+      targetPtsSeen:
+        targetPts != null &&
+        (this.outputTimestamps.includes(targetPts) || this.lastVideoFrameTimestamp === targetPts),
+      decodeQueueSize: this.decodeQueueSize,
+      outputProgressed: false,
+      lastDecodedTimestamp: this.lastVideoFrameTimestamp,
+      targetPtsUs: targetPts,
+      recoveryRebuilding: this.ownership.get(requested)?.recoveryRebuilding === true,
+      transactionComplete: false,
+    });
+    if (local) {
+      if (this.recreateCount < 1) return true;
+      const look = streamLookaheadSamples(this.movie.maxReorderSamples, this.prefetchHint);
+      return this.postRecreateOutputs >= look;
     }
-    if (this.recreateCount < 1) return true;
-    const look = streamLookaheadSamples(this.movie.maxReorderSamples, this.prefetchHint);
-    return this.postRecreateOutputs >= look;
+    /* Variant b0: after VIS→video recreate the first keyframe is submitted
+     * (formula in, queue held) but WebCodecs emits nothing — lastDecoded stays
+     * null so the helper refuses. One drain; AFE-13 freeze-after-N-emits has
+     * lastDecoded set and is still gated by postRecreateOutputs. */
+    if (this.recreateCount < 1) return false;
+    if (this.lastVideoFrameTimestamp != null) return false;
+    if (this.decodeQueueSize <= 0) return false;
+    if (this.streamReady.has(requested)) return false;
+    if (this.unresolvedRequestedCount() <= 0) return false;
+    if ((this.lastSubmittedSample ?? -1) < formula) return false;
+    return this.firstSubmittedAfterRecreateKey === true;
   }
 
   releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {
