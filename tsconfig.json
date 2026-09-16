@@ -43,6 +43,7 @@
     "tests/export/afe-14-packet-parity-window.test.ts",
     "tests/export/afe-15-exact-pts-tail-ownership.test.ts",
     "tests/export/afe-16-empty-pump-slice.test.ts",
-    "tests/export/afe-17-high-water-target.test.ts"
+    "tests/export/afe-17-high-water-target.test.ts",
+    "tests/export/afe-18-post-horizon-liveness.test.ts"
   ]
 }

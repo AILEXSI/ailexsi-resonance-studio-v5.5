@@ -19,6 +19,7 @@ import {
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
   currentTargetRequiredSample,
+  postHorizonRequiredSample,
   hardDependencyCeiling,
   classifySampleRole,
   decodeQueueHighWater,
@@ -164,6 +165,13 @@ export class AfeVideoDecoder {
   private targetPtsOutputCount = 0;
   private targetPtsLastSeenTs: number | null = null;
   private tailDrainReplayed = false;
+  /**
+   * AFE-18: HARD computed from remaining shrinks as we submit, while the
+   * queue grows — they meet before the live local horizon. Freeze the
+   * ceiling for this borrow episode so SOFT+min(remaining_at_stall, L+B)
+   * credits can actually be spent.
+   */
+  private hardBorrowCeiling: number | null = null;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -207,8 +215,8 @@ export class AfeVideoDecoder {
     return this.decodeQueueHighWater;
   }
 
-  /** LOCAL horizon for the current exact requested sample, capped by lastRequired. */
-  currentTargetRequiredFor(requested: number): number {
+  /** Formula LOCAL horizon (AFE-17) — lastRequired(requested), capped by lastRequired. */
+  formulaTargetRequiredFor(requested: number): number {
     return currentTargetRequiredSample({
       requested,
       maxReorderSamples: this.movie.maxReorderSamples,
@@ -219,7 +227,32 @@ export class AfeVideoDecoder {
     });
   }
 
-  /** Derived HARD_DEPENDENCY_CEILING for the current requested sample. */
+  /**
+   * LIVE local horizon: formula, or AFE-18 one-window extension when the
+   * formula was submitted and lastDecoded is still behind the exact PTS.
+   */
+  currentTargetRequiredFor(requested: number): number {
+    const formula = this.formulaTargetRequiredFor(requested);
+    const rec = this.ownership.get(requested);
+    const targetPts = rec?.ptsUs ?? this.targetPtsUs;
+    return postHorizonRequiredSample({
+      requested,
+      currentTargetRequiredSample: formula,
+      lastSubmittedSample: this.lastSubmittedSample,
+      lastRequiredDecodeSample: this.lastRequiredSample ?? formula,
+      maxReorderSamples: this.movie.maxReorderSamples,
+      prefetch: this.prefetchHint,
+      sampleCount: this.movie.sampleCount,
+      exactReady: this.streamReady.has(requested),
+      targetPtsSeen:
+        targetPts != null &&
+        (this.outputTimestamps.includes(targetPts) || this.lastVideoFrameTimestamp === targetPts),
+      lastDecodedTimestamp: this.lastVideoFrameTimestamp,
+      targetPtsUs: targetPts,
+    });
+  }
+
+  /** Derived HARD_DEPENDENCY_CEILING for the live local target. */
   hardDependencyCeilingFor(requested: number): number {
     return hardDependencyCeiling({
       softHighWater: this.decodeQueueHighWater,
@@ -227,8 +260,30 @@ export class AfeVideoDecoder {
       currentTargetRequiredSample: this.currentTargetRequiredFor(requested),
       maxReorderSamples: this.movie.maxReorderSamples,
       prefetch: this.prefetchHint,
-      afterRecreate: this.recreateCount >= 1,
     });
+  }
+
+  /** Effective HARD: frozen borrow-episode ceiling wins over a shrinking remaining. */
+  effectiveHardCeilingFor(requested: number): number {
+    const computed = this.hardDependencyCeilingFor(requested);
+    if (this.hardBorrowCeiling == null) return computed;
+    return Math.max(this.hardBorrowCeiling, computed);
+  }
+
+  /**
+   * Premature / leftover FINAL_FLUSH while the live local horizon is still
+   * unsubmitted (QA dump: FINAL_FLUSH yes at lastSubmitted 67 after live
+   * target extends to 77, or stale flags from the previous clip on the
+   * same file). Not a mid-run pressure flush — just forget the stale arm
+   * so this request can borrow, then drain once the live horizon is in.
+   */
+  releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {
+    const live = this.currentTargetRequiredFor(requested);
+    if ((this.lastSubmittedSample ?? -1) >= live) return;
+    if (!this.finalFlushAttempted && !this.finalFlushArmed) return;
+    this.finalFlushArmed = false;
+    this.finalFlushAttempted = false;
+    this.tailDrainReplayed = false;
   }
 
   get coldStartChunks(): readonly ChunkFingerprint[] {
@@ -566,7 +621,7 @@ export class AfeVideoDecoder {
    * because queue > LOW_WATER. Submitting the requested sample does not
    * close H.264 reorder / B-frame dependencies. Queued input does not
    * necessarily produce further output / the requested PTS.
-   * AFE-17: after recreate, if the queue is already at SOFT HIGH and the
+   * AFE-17/18: if the queue is already at SOFT HIGH and the
    * LOCAL target horizon is still unsubmitted, borrow bounded credits up
    * to HARD_DEPENDENCY_CEILING. Do not use lastRequired=140 as a flood.
    * Once the local horizon is submitted, emergency credits stop.
@@ -599,7 +654,7 @@ export class AfeVideoDecoder {
     const outputProgressed = this.lastVideoFrameTimestamp !== this.lastDecodedAtSubmit;
     const mustAdvance = this.dependencyHorizonAdvance(requested, false);
     const mustBorrow = this.hardDependencyBorrow(requested, false, outputProgressed);
-    const hard = requested != null ? this.hardDependencyCeilingFor(requested) : high;
+    const hard = requested != null ? this.effectiveHardCeilingFor(requested) : high;
     if (
       mayResumeDecode({
         decodeQueueSize: this.decodeQueueSize,
@@ -648,7 +703,7 @@ export class AfeVideoDecoder {
         paused: true as const,
         mustAdvanceTowardDependencyHorizon: this.dependencyHorizonAdvance(requested, ready),
         mustBorrowHardDependencyCredits: this.hardDependencyBorrow(requested, ready, progressed),
-        hardDependencyCeiling: requested != null ? this.hardDependencyCeilingFor(requested) : high,
+        hardDependencyCeiling: requested != null ? this.effectiveHardCeilingFor(requested) : high,
       };
     };
     while (!mayResumeDecode(resumeArgs(requested != null && this.streamReady.has(requested)))) {
@@ -663,7 +718,7 @@ export class AfeVideoDecoder {
       if (this.lastError) throw this.lastError;
       const remain = deadline - nowMs();
       if (remain <= 0) {
-        const ceiling = requested != null ? this.hardDependencyCeilingFor(requested) : high;
+        const ceiling = requested != null ? this.effectiveHardCeilingFor(requested) : high;
         if (
           this.lastVideoFrameTimestamp === tsAtPause &&
           this.decodeQueueSize >= high
@@ -724,24 +779,33 @@ export class AfeVideoDecoder {
   }
 
   /**
-   * AFE-17: borrow bounded HARD credits only after recreate, only while the
-   * LOCAL target horizon is unsubmitted, only at/above SOFT, only with no
-   * output progress. Stops once currentTargetRequired is submitted or HARD
-   * is reached.
+   * AFE-17/18: borrow bounded HARD credits while the LIVE local target is
+   * unsubmitted, only at/above SOFT, only with no output progress. First-fill
+   * may borrow when remaining>0. Stops once currentTargetRequired is
+   * submitted or the frozen HARD is reached.
    */
   private hardDependencyBorrow(
     requested: number | undefined,
     exactReady: boolean,
     outputProgressed: boolean,
   ): boolean {
-    if (requested == null || exactReady) return false;
-    if (this.recreateCount < 1) return false;
+    if (requested == null || exactReady) {
+      this.hardBorrowCeiling = null;
+      return false;
+    }
+    this.releaseStaleFinalFlushIfLiveHorizonOpen(requested);
     const currentTarget = this.currentTargetRequiredFor(requested);
-    const hard = this.hardDependencyCeilingFor(requested);
-    return mayBorrowHardDependencyCredits({
+    const computed = this.hardDependencyCeilingFor(requested);
+    const submitted = this.lastSubmittedSample ?? -1;
+    if (submitted >= currentTarget) {
+      this.hardBorrowCeiling = null;
+      return false;
+    }
+    const hard = Math.max(computed, this.hardBorrowCeiling ?? computed);
+    const borrow = mayBorrowHardDependencyCredits({
       exactReady,
       usefulInputRemains: hasFurtherUsefulInput({
-        nextDecode: (this.lastSubmittedSample ?? -1) + 1,
+        nextDecode: submitted + 1,
         sampleCount: this.movie.sampleCount,
         lastRequiredDecodeSample: currentTarget,
       }),
@@ -751,8 +815,10 @@ export class AfeVideoDecoder {
       decodeQueueSize: this.decodeQueueSize,
       softHighWater: this.decodeQueueHighWater,
       hardDependencyCeiling: hard,
-      afterRecreate: true,
     });
+    if (borrow) this.hardBorrowCeiling = Math.max(this.hardBorrowCeiling ?? 0, computed);
+    else if (this.decodeQueueSize >= hard) this.hardBorrowCeiling = null;
+    return borrow;
   }
 
   private waitCapacitySignal(
@@ -1081,7 +1147,7 @@ export class AfeVideoDecoder {
     const soft = extra?.softHighWater ?? extra?.decodeQueueHighWater ?? this.decodeQueueHighWater;
     const hard =
       extra?.hardDependencyCeiling ??
-      (requestedSample != null ? this.hardDependencyCeilingFor(requestedSample) : soft);
+      (requestedSample != null ? this.effectiveHardCeilingFor(requestedSample) : soft);
     const submittedMinus =
       extra?.submittedMinusOutputs ??
       (this.recreateCount >= 1
@@ -1376,6 +1442,10 @@ export class AfeVideoDecoder {
     this.backpressureBlocked = false;
     this.noMoreSubmission = false;
     this.frozenAfterRecreate = false;
+    this.finalFlushArmed = false;
+    this.finalFlushAttempted = false;
+    this.tailDrainReplayed = false;
+    this.hardBorrowCeiling = null;
     this.beginPostRecreateTrace();
     if (this.decoder) {
       try {
@@ -1451,6 +1521,10 @@ export class AfeVideoDecoder {
     this.pumpSliceEnd = null;
     this.frozenAfterRecreate = false;
     this.windowPaused = false;
+    this.finalFlushArmed = false;
+    this.finalFlushAttempted = false;
+    this.tailDrainReplayed = false;
+    this.hardBorrowCeiling = null;
     if (!bounds?.keepResolved) {
       this.gopKeyframeStart = null;
       this.earlierKeyframeRecovered = false;
@@ -2017,6 +2091,10 @@ export class AfeVideoDecoder {
       await waitDequeue();
     }
     const snap = this.snapshot();
+    const focus = snap.requestedSample ?? snap.sourceSampleRequested;
+    const localExhausted =
+      focus != null &&
+      (this.lastSubmittedSample ?? -1) >= this.currentTargetRequiredFor(focus);
     const needReplay =
       !this.tailDrainReplayed &&
       mayGenuineFinalDrain({
@@ -2029,6 +2107,7 @@ export class AfeVideoDecoder {
         targetPtsUs: snap.targetPtsUs,
         recoveryRebuilding: snap.recoveryRebuilding,
         transactionComplete: snap.transactionComplete,
+        localHorizonExhausted: localExhausted,
       });
     if (!needReplay) return;
     this.tailDrainReplayed = true;

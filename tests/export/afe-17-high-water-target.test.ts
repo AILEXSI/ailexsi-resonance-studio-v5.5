@@ -226,7 +226,7 @@ describe("AFE-17 A–L HIGH_WATER target reachability / bounded dependency credi
         prefetch: HUMAN.prefetch,
         afterRecreate: false,
       }),
-    ).toBe(HUMAN.high);
+    ).toBe(HARD);
     expect(decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch, { afterRecreate: true })).toBe(12);
     expect(AFE_DECODE_STALL_MS).toBe(3000);
   });
@@ -314,12 +314,6 @@ describe("AFE-17 A–L HIGH_WATER target reachability / bounded dependency credi
       mayBorrowHardDependencyCredits({
         ...REGRESSION,
         usefulInputRemains: false,
-      }),
-    ).toBe(false);
-    expect(
-      mayBorrowHardDependencyCredits({
-        ...REGRESSION,
-        afterRecreate: false,
       }),
     ).toBe(false);
     expect(
@@ -590,7 +584,7 @@ describe("AFE-17 A–L HIGH_WATER target reachability / bounded dependency credi
     decoder.close();
   }, 10_000);
 
-  it("K. first-fill does not borrow; SOFT HIGH / timeout / PREFETCH unchanged", async () => {
+  it("K. first-fill SOFT HIGH / timeout unchanged; HARD may exceed SOFT when target is unsubmitted", async () => {
     expect(decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch)).toBeGreaterThanOrEqual(
       AFE_DECODE_QUEUE_RECOVERY_FILL,
     );
@@ -609,14 +603,17 @@ describe("AFE-17 A–L HIGH_WATER target reachability / bounded dependency credi
     decoder.openRequested(HUMAN.sample, decoder.chunkTimestampUs(movie!.samples[HUMAN.sample]!));
     const high = decoder.decodeQueueHighWater;
     expect(high).toBeGreaterThanOrEqual(40);
-    expect(decoder.hardDependencyCeilingFor(HUMAN.sample)).toBe(high);
     for (let i = 0; i < high; i++) decoder.submitEncoded(movie!.samples[i]!);
-    const blocked = await decoder.waitForDecodeCapacity(undefined, {
+    const hard = decoder.hardDependencyCeilingFor(HUMAN.sample);
+    expect(hard).toBeGreaterThan(high);
+    expect(hard).toBeLessThanOrEqual(AFE_DECODE_QUEUE_HIGH_WATER_CAP);
+    const can = await decoder.waitForDecodeCapacity(undefined, {
       requested: HUMAN.sample,
       budgetEnd: nowMs() + 40,
     });
-    expect(blocked).toBe(false);
-    expect(decoder.snapshot().decodeQueueSize).toBeLessThanOrEqual(high);
+    expect(can).toBe(true);
+    expect(decoder.snapshot().decodeQueueSize).toBeLessThanOrEqual(hard);
+    expect(decoder.decodeQueueHighWater).toBe(high);
     decoder.close();
   }, 10_000);
 

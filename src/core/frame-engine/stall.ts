@@ -477,9 +477,11 @@ export function decodeQueueLowWater(
  * Queued decoder input does **not** necessarily produce the requested PTS
  * (or any further output). Producer spends remaining HIGH-queue credits
  * toward lastRequired until exact ready, HIGH_WATER, or lastRequired is
- * fully submitted. SOFT HIGH_WATER remains the normal cap. AFE-17 may
- * borrow a bounded HARD_DEPENDENCY_CEILING only after recreate when the
- * current local target is still unsubmitted and the queue is already at SOFT.
+ * fully submitted. SOFT HIGH_WATER remains the normal cap. AFE-17/18 may
+ * borrow a bounded HARD_DEPENDENCY_CEILING when the live local target is
+ * still unsubmitted and the queue is already at SOFT. AFE-18 may extend
+ * that local target by one lookahead+prefetch window if the formula
+ * horizon was submitted and the exact PTS still has not appeared.
  */
 export function mustAdvanceTowardDependencyHorizon(args: {
   lastSubmittedSample: number | null;
@@ -520,14 +522,15 @@ export function currentTargetRequiredSample(args: {
 }
 
 /**
- * HARD_DEPENDENCY_CEILING — emergency queue cap after recreate.
+ * HARD_DEPENDENCY_CEILING — emergency queue cap for the LIVE local horizon.
  *
  *   extraCap = L + B          // lookahead + prefetch; maxReorder already in SOFT
- *   extra    = min(remaining to local horizon, extraCap)
+ *   extra    = min(remaining to live local horizon, extraCap)
  *   HARD     = min(CAP 48, SOFT + extra)
  *
- * First-fill: HARD == SOFT (RECOVERY_FILL already admits the local window).
- * Never lastRequired=140. Never the old 40/125 flood.
+ * When remaining is 0 (formula horizon already submitted) HARD==SOFT unless
+ * AFE-18 post-horizon extends the live target. Never lastRequired=140/102.
+ * Never the old 40/125 flood. First-fill also derives extra when remaining>0.
  */
 export function hardDependencyCeiling(args: {
   softHighWater: number;
@@ -538,7 +541,6 @@ export function hardDependencyCeiling(args: {
   afterRecreate?: boolean;
 }): number {
   const soft = Math.max(1, args.softHighWater | 0);
-  if (!args.afterRecreate) return Math.min(AFE_DECODE_QUEUE_HIGH_WATER_CAP, soft);
   const submitted = args.lastSubmittedSample ?? -1;
   const remaining = Math.max(0, args.currentTargetRequiredSample - submitted);
   const extraCap =
@@ -549,9 +551,70 @@ export function hardDependencyCeiling(args: {
 }
 
 /**
- * AFE-17 emergency borrow. All of: exact unresolved, useful input remains,
- * currentTargetRequired > lastSubmitted, no output progress, queue already
- * at SOFT_HIGH_WATER, queue still below HARD. First-fill does not borrow.
+ * AFE-18: formula lastRequired(requested) was submitted but exact PTS still
+ * missing and lastDecoded is behind the target. One more lookahead+prefetch
+ * window past the formula — not transaction lastRequired (102/140).
+ */
+export function postHorizonRequiredSample(args: {
+  requested: number;
+  currentTargetRequiredSample: number;
+  lastSubmittedSample: number | null;
+  lastRequiredDecodeSample: number;
+  maxReorderSamples: number;
+  prefetch: number;
+  sampleCount: number;
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  lastDecodedTimestamp: number | null;
+  targetPtsUs: number | null;
+}): number {
+  const formula = args.currentTargetRequiredSample;
+  if (args.exactReady || args.targetPtsSeen) return formula;
+  const submitted = args.lastSubmittedSample ?? -1;
+  if (submitted < formula) return formula;
+  if (args.lastDecodedTimestamp == null || args.targetPtsUs == null) return formula;
+  if (args.lastDecodedTimestamp >= args.targetPtsUs) return formula;
+  const extra =
+    streamLookaheadSamples(args.maxReorderSamples, args.prefetch) +
+    decodeWindowBNeed(args.prefetch);
+  const extended = formula + Math.max(0, extra);
+  const hi = args.sampleCount > 0 ? args.sampleCount - 1 : extended;
+  return Math.min(hi, args.lastRequiredDecodeSample, extended);
+}
+
+/**
+ * After the live local horizon is submitted, held decodeQueue may still
+ * contain the exact PTS. Allow one ownership-retaining flush/drain — not
+ * a mid-run pressure flush, not a flood to lastRequired.
+ */
+export function mayLocalHorizonFinalFlush(args: {
+  unresolvedRequestedVideoFrames: number;
+  lastSubmittedSample: number | null;
+  currentTargetRequiredSample: number;
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  decodeQueueSize: number;
+  outputProgressed: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+  recoveryRebuilding?: boolean;
+  transactionComplete?: boolean;
+}): boolean {
+  if (args.unresolvedRequestedVideoFrames <= 0) return false;
+  if (args.exactReady || args.targetPtsSeen) return false;
+  if (args.transactionComplete) return false;
+  if (args.recoveryRebuilding) return false;
+  if ((args.lastSubmittedSample ?? -1) < args.currentTargetRequiredSample) return false;
+  if (args.decodeQueueSize <= 0) return false;
+  if (args.outputProgressed) return false;
+  if (args.lastDecodedTimestamp == null || args.targetPtsUs == null) return false;
+  return args.lastDecodedTimestamp < args.targetPtsUs;
+}
+
+/**
+ * AFE-17/18 emergency borrow. All of: exact unresolved, useful input remains,
+ * live currentTargetRequired > lastSubmitted, no output progress, queue already
+ * at SOFT_HIGH_WATER, queue still below HARD.
  */
 export function mayBorrowHardDependencyCredits(args: {
   exactReady: boolean;
@@ -564,7 +627,6 @@ export function mayBorrowHardDependencyCredits(args: {
   hardDependencyCeiling: number;
   afterRecreate?: boolean;
 }): boolean {
-  if (args.afterRecreate === false) return false;
   if (args.exactReady) return false;
   if (!args.usefulInputRemains) return false;
   if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
@@ -1052,9 +1114,10 @@ export function mayGenuineFinalDrain(args: {
   targetPtsUs?: number | null;
   recoveryRebuilding?: boolean;
   transactionComplete?: boolean;
+  localHorizonExhausted?: boolean;
 }): boolean {
   if (args.unresolvedRequestedVideoFrames <= 0) return false;
-  if (!args.usefulInputExhausted) return false;
+  if (!args.usefulInputExhausted && !args.localHorizonExhausted) return false;
   if (!args.finalFlushAttempted) return false;
   if (args.targetPtsSeen) return false;
   if (args.recoveryRebuilding) return false;

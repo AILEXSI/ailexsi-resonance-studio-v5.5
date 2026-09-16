@@ -12,6 +12,7 @@ import {
   lastRequiredDecodeSample,
   mayEarlierKeyframeRecover,
   mayFinalFlush,
+  mayLocalHorizonFinalFlush,
   nowMs,
   progressivePumpSliceEnd,
   pumpMoreSubmitEnd,
@@ -420,17 +421,33 @@ export class AfeScheduler {
 
       const tryFinalFlush = async () => {
         this.decoder.clearRecoveryRebuilding([idx]);
+        this.decoder.releaseStaleFinalFlushIfLiveHorizonOpen(idx);
         const flushSnap = this.decoder.snapshot(extra);
-        const canFlush = mayFinalFlush({
-          unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
-          nextDecode: this.nextDecode,
-          sampleCount: this.movie.sampleCount,
-          lastRequiredDecodeSample: lastRequired,
-          lastSubmittedSample: this.nextDecode - 1,
-          streamWaiterIndex: flushSnap.streamWaiterIndex,
-          recoveryRebuilding: false,
-          transactionComplete: flushSnap.transactionComplete,
-        });
+        const liveTarget = this.decoder.currentTargetRequiredFor(idx);
+        const canFlush =
+          mayFinalFlush({
+            unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
+            nextDecode: this.nextDecode,
+            sampleCount: this.movie.sampleCount,
+            lastRequiredDecodeSample: lastRequired,
+            lastSubmittedSample: this.nextDecode - 1,
+            streamWaiterIndex: flushSnap.streamWaiterIndex,
+            recoveryRebuilding: false,
+            transactionComplete: flushSnap.transactionComplete,
+          }) ||
+          mayLocalHorizonFinalFlush({
+            unresolvedRequestedVideoFrames: this.decoder.unresolvedRequestedCount(),
+            lastSubmittedSample: this.nextDecode - 1,
+            currentTargetRequiredSample: liveTarget,
+            exactReady: this.decoder.isStreamReady(idx),
+            targetPtsSeen: flushSnap.targetPtsSeen,
+            decodeQueueSize: flushSnap.decodeQueueSize,
+            outputProgressed: false,
+            lastDecodedTimestamp: flushSnap.lastDecodedTimestamp,
+            targetPtsUs: extra.requestedPtsUs ?? flushSnap.targetPtsUs,
+            recoveryRebuilding: false,
+            transactionComplete: flushSnap.transactionComplete,
+          });
         if (!canFlush || flushSnap.finalFlushAttempted) return;
         this.decoder.armFinalFlush([idx]);
         this.decoder.retainExactIdentity(idx, extra.requestedPtsUs);

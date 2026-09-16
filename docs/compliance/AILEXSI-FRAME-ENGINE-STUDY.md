@@ -1028,12 +1028,43 @@ AFE-16 spends unused SOFT HIGH credits while queue < HIGH. This stall is the pro
 ## Fix
 
 1. LOCAL horizon: `currentTargetRequiredSample` = `lastRequiredDecodeSample(lastRequested=current requested)`, capped by transaction lastRequired. Sample 43 / reorder 2 / prefetch 4 → **49**, not 140.
-2. Two levels: `SOFT_HIGH_WATER` = existing AFE-14/16 HIGH. `HARD_DEPENDENCY_CEILING` = min(CAP, SOFT + min(remaining-to-local, L+B)) after recreate only. Human: SOFT 12, remaining 9, L+B 10 → HARD **21**. First-fill HARD==SOFT.
+2. Two levels: `SOFT_HIGH_WATER` = existing AFE-14/16 HIGH. `HARD_DEPENDENCY_CEILING` = min(CAP, SOFT + min(remaining-to-live-local, L+B)). Human AFE-17: SOFT 12, remaining 9, L+B 10 → HARD **21**. First-fill also derives extra when remaining>0 (AFE-18).
 3. Borrow HARD credits ONLY when: exact unresolved, useful input remains, currentTarget > lastSubmitted, no output progress, queue already at SOFT. Stop once the local horizon is submitted. If HARD reached with no progress: no more submit (existing recover/stall). No global HIGH raise. No 40/125 flood.
 4. TRACE: `requestedSample`, `currentTargetRequiredSample`, `prefetch`, `softHighWater`, `hardDependencyCeiling`, `submittedMinusOutputs`.
 5. `pumpSlice` in the stall snapshot is the current / last actual submit attempt (begin/endSubmitPhase), never a leftover planned 92-97. Provenance cannot contradict `submitPhases`.
 
 **WINDOWS WEBVIEW2 VERIFIED: NO**  
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 43 / submitted 40 / queue 12 / HIGH 12 → bounded credits toward local 49, exact PTS 2000000, no flood to 140, export past VIDEO→VIS.  
+**HUMAN-PROVEN: NO**
+
+# AFE-18 — post-horizon liveness / bounded local advance (V5.5)
+
+Local Powershell after AFE-17 `@f40fcb9`: requested sample **61** PTS **2583333** (originClip user-video-B / sourceInMs 2500), lastSubmitted **67**, currentTargetRequired **67**, lastRequired **102**, lastDecodedTs **2208333** < target, targetPtsSeen **no**, softHighWater **12**, hardDependencyCeiling **12**, decodeQueue **12** peak **22**, frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**, postRecreateSubmitted **68** / outputs **52** / lastDecoded **2208333**, firstSubmittedAfterRecreate **0** key **yes**, packetParity **yes**, configParity **yes**, submitPhases `PUMP_LOOKAHEAD:0-67/.../progress | 68-67/q12->12/... | 68-67/.../paused`, pumpSlice **68-67**, cancelledSpeculative **15**, submittedMinusOutputs **16**, unresolvedRequested **1**, FINAL_FLUSH **yes**, stalledMs **3000**, videoReq/Dec/Enc mid **46/45/45**.
+
+## Cause
+
+Discarded first-fill HARD==SOFT as the root. Local formula horizon **was** reached: lastSubmitted 67 >= currentTarget 67 >= requested 61. Exact PTS never produced. lastDecoded stuck at 2208333 (~sample 52) with decodeQueue frozen at SOFT HIGH. HARD==SOFT in the dump is remaining=0 on the **formula** 67, not a first-fill gate.
+
+True LOCAL for sample 61 / reorder 2 / prefetch 4:
+
+- formula `lastRequired(61)` = 61 + maxReorder + prefetch = **67**
+- dump proves 67 is insufficient: lastDecoded 2208333 never reached 2583333
+- one structural extra window = streamLookahead(2,4)+prefetch = 6+4 = 10 → live **77**, not transaction lastRequired 102/140
+
+`targetPtsSeen` stays no because WebCodecs never emitted 2583333 — 16 in-flight / queue 12 held, no further `decode()`. FINAL_FLUSH yes at 67<102 is stale leftover after recreate on the same `user-video.mp4` (vA → VIS → vB) or a premature arm; AFE-11 transaction flush is still illegal at 67<102. Stale `finalFlushAttempted` makes the next `tryFinalFlush` a no-op while ownership of sample 61 remains open.
+
+HARD computed from shrinking remaining meets a growing queue before 77 (SOFT+remaining drops as lastSubmitted rises). That is why a formula-only raise of HARD above SOFT cannot be the only fix, and why a leftover HARD==SOFT at remaining=0 cannot spend the extra window.
+
+## Fix
+
+1. LIVE local horizon: `postHorizonRequiredSample` extends formula by one lookahead+prefetch window when formula is submitted, lastDecoded < targetPts, exact not ready. Sample 61 → **77**, never 102/140.
+2. HARD uses the live target. At lastSubmitted 67 / live 77: SOFT 12 + min(10, L+B=10) = **22**. Freeze that ceiling for the borrow episode so remaining-shrink cannot stop the advance before 77.
+3. First-fill HARD also derives extra when remaining>0 (secondary; not this dump).
+4. Liveness: recreate / beginStream clear `finalFlushArmed` / `finalFlushAttempted` / `tailDrainReplayed`. If live horizon is still unsubmitted, `releaseStaleFinalFlushIfLiveHorizonOpen` forgets a premature/stale arm so this request can borrow, then drain.
+5. `mayLocalHorizonFinalFlush` after lastSubmitted >= live target, queue held, lastDecoded < target, no progress — ownership-retaining drain, not a mid-run pressure flush. `mayGenuineFinalDrain` accepts `localHorizonExhausted`. Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired.
+6. No timeout bump. No snap/nearest/drop. No global HIGH raise. No Mediabunny. HARD never floods to 102/140.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 61 / submitted 67 / currentTarget 67 / lastDecoded 2208333 / queue 12 / FINAL_FLUSH yes → live 77 / HARD 22, exact PTS 2583333, no flood to 102, no 3s silent stall.  
 **HUMAN-PROVEN: NO**
 
