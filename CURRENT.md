@@ -94,6 +94,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Diff | Stage trail in stall / export-fail dumps. Narrow clamp: `sampleIndexAtTime` selects the first presentation sample when the mapped request is ≥ 0 but still before the first PTS. Negative times stay null. No scheduling / watermark / timeout / reset / ENC-01 / STRESS-01 avcC / STRESS-02 capture change. |
 | Alone vs after preceding | Same physical file parses and now selects sample 0 at `sourceInMs 0` both alone and after a preceding fixture. jsdom has no VideoDecoder (configure not run here). |
 | Test | `tests/export/stress-03-stage-trace.test.ts` + `tests/export/stress-03-physical-source.test.ts` |
+| Gates | `tsc --noEmit` clean. Focused STRESS-03 + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + AFE-04 parser/B-frame **46/46**. Full suite **1241 passed / 2 failed / 1243** (same pre-existing AFE-15 A/N dump-ban as STRESS-02). |
 | Human remaining | Same long export. Confirm `firstBlockedStage` / `stageTrail` on fail, or Fertig if the clamp holds on WebView2. Details: `docs/compliance/STRESS-03-PRE-REQUEST-SOURCE-OPEN.md`. |
 
 ## Verification paths
