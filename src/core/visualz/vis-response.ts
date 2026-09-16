@@ -33,7 +33,8 @@
  *   shape(x) = clamp01(pow(clamp01(x * gain), gamma))   gain=1.2  gamma=0.75
  *   presence = shape(rms)                               amplitude carrier
  *   visBand  = max(shape(rawBand), presence * mix)      mix = band / sum
- *   spectrum = peak-hold spread then shape; saturated bins inherit presence
+ *   spectrum = peak-hold spread then min(shape(bin), presence)
+ *              (dB-sat peaks cannot outrun RMS; no hard sat cliff)
  *   energy   = 0.5*visRms + 0.5*visBass; +transientBoost on onset
  *   beatPulse= onset ? 1 : shape(raw.beatPulse, 1, gamma)
  */
@@ -70,9 +71,6 @@ export const DEFAULT_VIS_RESPONSE: VisResponseConfig = {
   spectrumSpreadBins: 12,
   transientBoost: 0.24,
 };
-
-/** Analyser byte map saturates near this after dB [-100, -30]. */
-const SPEC_SAT_BIN = 0.82;
 
 export function clamp01(n: number): number {
   if (!Number.isFinite(n) || n <= 0) return 0;
@@ -120,8 +118,8 @@ function shapeSpectrum(
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const v = smeared[i] ?? 0;
-    // Saturated analyser bins have lost amplitude; restore it from RMS presence.
-    out[i] = v >= SPEC_SAT_BIN ? presence : shapeVisLevel(v, cfg.gain, cfg.gamma);
+    // Cap by RMS presence so dB-sat peaks stay amplitude-true and monotonic.
+    out[i] = Math.min(shapeVisLevel(v, cfg.gain, cfg.gamma), presence);
   }
   return out;
 }
@@ -155,13 +153,16 @@ export function applyVisResponse(
   const visBeat = raw.onset ? 1 : shapeVisLevel(raw.beatPulse, 1, cfg.gamma);
   let energy = clamp01(visRms * 0.5 + visBass * 0.5);
   if (raw.onset) energy = clamp01(energy + cfg.transientBoost);
+  // Ceiling is the loudest presented channel so 120 BPM hats (rms=0, treble>0)
+  // still move, while true silence (all channels 0) stays black.
+  const specPresence = clamp01(Math.max(presence, visBass, visMid, visTreble));
   return {
     timeMs: raw.timeMs,
     rms: visRms,
     bass: visBass,
     mid: visMid,
     treble: visTreble,
-    spectrum: shapeSpectrum(raw.spectrum, presence, cfg),
+    spectrum: shapeSpectrum(raw.spectrum, specPresence, cfg),
     onset: raw.onset,
     beatPulse: visBeat,
     tempoBpm: raw.tempoBpm,

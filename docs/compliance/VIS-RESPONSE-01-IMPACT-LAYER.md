@@ -59,8 +59,7 @@ Derived (not extra knobs):
 
 - `presence = shape(rms)` — amplitude carrier (RMS is the truthful level).
 - `visBand = max(shape(rawBand), presence * (rawBand / sum))` — restores level for tonal content; keeps broadband snare bands from being diluted by the mix.
-- Saturated spectrum bins (`≥ 0.82`, the analyser dB ceiling) inherit `presence` so a quiet sine does not paint full-scale bars.
-- Unsaturated bins use `shape(bin)`.
+- Spectrum bins: `min(shape(smeared), presence)` after a 12-bin peak-hold. dB-sat peaks cannot outrun RMS (quiet sine ≠ full-scale bars; no hard sat cliff).
 - `visBeatPulse = onset ? 1 : shape(raw.beatPulse, gain=1, gamma)`
 - `energy = 0.5*visRms + 0.5*visBass`; `+ transientBoost` on onset.
 - `high = visTreble`.
@@ -90,6 +89,21 @@ VIS-SYNC-01 architecture (shared adapters, sequential export state, no `syntheti
 11. Existing scene / visualizer tests green
 
 Plus Phase 1 evidence, raw-not-mutated, monotonicity sweep 0.0..1.0 step 0.1.
+
+`tsc --noEmit` clean. Focused gate **131/131**. Full suite **1297 passed / 6 failed / 1303** (same 2 AFE-15 A/N dump-ban + 4 STRESS-03 missing operator clip). `vite build` OK.
+
+### Before / after (same PCM, raw extractor vs `applyVisResponse`)
+
+| PCM | raw rms | vis rms | raw bass | vis bass | raw energy | vis energy | orbBreath raw | orbBreath vis |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| silence | 0 | 0 | 0 | 0 | 0 | 0 | 1.000 | 1.000 |
+| quiet 220 Hz amp 0.06 | 0.085 | 0.180 | 0.027 | 0.180 | 0.056 | 0.180 | 1.015 | 1.099 |
+| pad 220 Hz amp 0.35 | 0.494 | 0.676 | 0.045 | 0.676 | 0.270 | 0.676 | 1.025 | **1.372** |
+| kick 70 Hz | 0.393 | 0.570 | 0.166 | 0.534 | 0.280 | 0.552 | 1.091 | **1.294** |
+| snare | 0.203 | 0.346 | 0.256 | 0.412 | 0.229 | 0.379 | 1.141 | 1.227 |
+| bass 55 Hz amp 0.55 | 0.770 | 0.943 | 0.045 | **0.943** | 0.408 | 0.943 | 1.025 | **1.518** |
+
+Pad 48-bar peak: raw **0.072** → vis **0.717**. Preview rms == Export rms on the pad (0.676). Amp 0.25 < 0.50 < 1.00. Amp 0.6+ clips because `gain*rms` hits 1 (raw RMS already clips at ~0.8). No downward inversion.
 
 ## Operator card — MODE B (coordinator builds the EXE)
 

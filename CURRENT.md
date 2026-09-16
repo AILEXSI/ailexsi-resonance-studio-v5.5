@@ -148,9 +148,10 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | --- | --- |
 | Human | After VIS-SYNC-01, VIS reacts on the right hits but looks restrained. Not a fake-spectrum rollback. Not per-song normalize. |
 | First cause (measured) | Classification **F** = **B** FFT-average bands stay ~0.03–0.05 on loud tones (dB-sat + 170-bin mean) + **A** 1024-bin peaks saturate / 48-bar sampling misses them + **C** energy pulled down by bass + **E** scene curves need bass ≳ 0.3. **D** beatPulse already ~1 on kicks. Analyser left untouched. |
-| Diff | Shared `applyVisResponse` after raw analysis. `shape(x)=clamp01(pow(clamp01(x*1.2), 0.75))`. Bands: `max(shape(band), shape(rms)*mix)`. Spectrum: 12-bin peak-hold; sat bins inherit RMS presence. Onset adds **0.24** to energy only. One function for Preview and Export. No AGC. |
+| Diff | Shared `applyVisResponse` after raw analysis. `shape(x)=clamp01(pow(clamp01(x*1.2), 0.75))`. Bands: `max(shape(band), shape(rms)*mix)`. Spectrum: 12-bin peak-hold then `min(shape(bin), presence)`. Onset adds **0.24** to energy only. One function for Preview and Export. No AGC. |
 | Untouched | FFT / smoothing / dB / onset core; scenes; AUDIO-01; AFE; ENC-01; STRESS mux; volume semantics. |
-| Test | `tests/visualizer/vis-response-01-impact-layer.test.ts` — Phase 1 table + tests 1–8 + monotonicity. VIS-SYNC-01 + AUDIO-01 + scene tests remain gates. |
+| Test | `tests/visualizer/vis-response-01-impact-layer.test.ts` — Phase 1 table + tests 1–8 + monotonicity (17). |
+| Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE-01 + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **131/131**. Full suite **1297 passed / 6 failed / 1303**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
 | Human remaining | 30–60 s obvious-beat section vs `3b16a09`, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-RESPONSE-01-IMPACT-LAYER.md`. |
 
 ## Verification paths
