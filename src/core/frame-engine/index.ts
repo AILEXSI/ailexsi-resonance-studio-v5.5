@@ -67,6 +67,7 @@ export {
   AFE_WAIT_EXACT_PTS_MS,
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
+  mayAdvancePastSoftFreeze,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,

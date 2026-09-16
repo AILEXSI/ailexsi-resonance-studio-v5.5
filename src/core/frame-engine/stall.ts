@@ -599,6 +599,8 @@ export function mayLocalHorizonFinalFlush(args: {
   currentTargetRequiredSample: number;
   /** Formula lastRequired(requested). When set, drain is legal at formula — not only at live 77. */
   formulaTargetRequiredSample?: number;
+  /** When set, drain is legal once the exact requested sample itself is submitted. */
+  requestedSample?: number;
   exactReady: boolean;
   targetPtsSeen: boolean;
   decodeQueueSize: number;
@@ -612,7 +614,9 @@ export function mayLocalHorizonFinalFlush(args: {
   if (args.exactReady || args.targetPtsSeen) return false;
   if (args.transactionComplete) return false;
   if (args.recoveryRebuilding) return false;
-  const flushAt = args.formulaTargetRequiredSample ?? args.currentTargetRequiredSample;
+  const horizon = args.formulaTargetRequiredSample ?? args.currentTargetRequiredSample;
+  const flushAt =
+    args.requestedSample != null ? Math.min(horizon, args.requestedSample) : horizon;
   if ((args.lastSubmittedSample ?? -1) < flushAt) return false;
   if (args.decodeQueueSize <= 0) return false;
   if (args.outputProgressed) return false;
@@ -644,6 +648,27 @@ export function mayBorrowHardDependencyCredits(args: {
   if (args.decodeQueueSize < args.softHighWater) return false;
   if (args.decodeQueueSize >= args.hardDependencyCeiling) return false;
   return args.hardDependencyCeiling > args.softHighWater;
+}
+
+/**
+ * AFE-20: SOFT freeze after recreate must not kill HARD borrow while the
+ * exact requested sample / its live local horizon is still unsubmitted.
+ * Human sample 81 / queue 15 / lastDecoded 2500000 / earlierKeyframe no:
+ * gopStart 0 makes AFE-13 escape ineligible; progressive must still spend
+ * remaining HARD credits (never lastRequired 102/140, never HIGH 40/125).
+ */
+export function mayAdvancePastSoftFreeze(args: {
+  frozenAtSoftHighWater: boolean;
+  lastSubmittedSample: number | null;
+  currentTargetRequiredSample: number;
+  decodeQueueSize: number;
+  hardDependencyCeiling: number;
+  exactReady: boolean;
+}): boolean {
+  if (args.exactReady) return false;
+  if (!args.frozenAtSoftHighWater) return false;
+  if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
+  return args.decodeQueueSize < args.hardDependencyCeiling;
 }
 
 /**
@@ -1226,8 +1251,28 @@ export function originFromStall(partial: Partial<AfeStallSnapshot>): Partial<Afe
 export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
   const d = emptyStallSnapshot(dump);
   const clip = d.originClipLabel ?? d.sourceClipLabel ?? d.originClipId ?? d.sourceClipId;
+  const requested = d.requestedSample ?? d.sourceSampleRequested ?? d.originRequestedSample;
+  const submitted = d.lastSubmittedSample;
+  const requestedSubmitted = requested != null && submitted != null && submitted >= requested;
   return [
     `requested sample ${d.sourceSampleRequested ?? d.originRequestedSample} PTS ${d.requestedPtsUs ?? d.originRequestedPts}`,
+    `lastSubmittedSample ${submitted}`,
+    `requestedSubmitted ${requestedSubmitted ? "yes" : "no"}`,
+    `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
+    `formulaTargetRequiredSample ${d.formulaTargetRequiredSample}`,
+    `lastRequiredDecodeSample ${d.lastRequiredDecodeSample}`,
+    `softHighWater ${d.softHighWater || d.decodeQueueHighWater}`,
+    `hardDependencyCeiling ${d.hardDependencyCeiling}`,
+    `decodeQueue ${d.decodeQueueSize}`,
+    `lastDecodedTs ${d.lastDecodedTimestamp}`,
+    `targetPtsSeen ${d.targetPtsSeen ? "yes" : "no"}`,
+    `gopStart ${d.gopKeyframeStart}`,
+    `earlierKeyframeAvailable ${d.earlierKeyframeAvailable ? "yes" : "no"}`,
+    `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
+    `postRecreateSubmitted ${d.postRecreateSubmitted}`,
+    `postRecreateOutputs ${d.postRecreateOutputs}`,
+    `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
+    `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
     `originSample ${d.originRequestedSample}`,
     `originPts ${d.originRequestedPts}`,
     `originExportFrame ${d.originExportFrame}`,

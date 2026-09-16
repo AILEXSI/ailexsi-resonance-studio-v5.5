@@ -18,6 +18,7 @@ import {
   AFE_SETTLE_DRAIN_MS,
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
+  mayAdvancePastSoftFreeze,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,
@@ -296,6 +297,7 @@ export class AfeVideoDecoder {
       lastSubmittedSample: this.lastSubmittedSample,
       currentTargetRequiredSample: formula,
       formulaTargetRequiredSample: formula,
+      requestedSample: requested,
       exactReady: this.streamReady.has(requested),
       targetPtsSeen:
         targetPts != null &&
@@ -323,6 +325,24 @@ export class AfeVideoDecoder {
     if (this.unresolvedRequestedCount() <= 0) return false;
     if ((this.lastSubmittedSample ?? -1) < formula) return false;
     return this.firstSubmittedAfterRecreateKey === true;
+  }
+
+  /**
+   * AFE-20: SOFT HIGH freeze after recreate is not terminal while the live
+   * local horizon is still unsubmitted and HARD credits remain.
+   */
+  canBorrowTowardLocalHorizon(requested: number): boolean {
+    if (this.streamReady.has(requested)) return false;
+    return mayAdvancePastSoftFreeze({
+      frozenAtSoftHighWater:
+        this.isFrozenAtHighWaterAfterRecreate() ||
+        this.decodeQueueSize >= this.decodeQueueHighWater,
+      lastSubmittedSample: this.lastSubmittedSample,
+      currentTargetRequiredSample: this.currentTargetRequiredFor(requested),
+      decodeQueueSize: this.decodeQueueSize,
+      hardDependencyCeiling: this.effectiveHardCeilingFor(requested),
+      exactReady: false,
+    });
   }
 
   releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {

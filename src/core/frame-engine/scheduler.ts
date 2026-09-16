@@ -390,12 +390,13 @@ export class AfeScheduler {
       const progressiveTowardRequired = async () => {
         while (
           !frame &&
-          !this.decoder.isFrozenAtHighWaterAfterRecreate() &&
           hasFurtherUsefulInput({
             nextDecode: this.nextDecode,
             sampleCount: this.movie.sampleCount,
             lastRequiredDecodeSample: lastRequired,
-          })
+          }) &&
+          (!this.decoder.isFrozenAtHighWaterAfterRecreate() ||
+            this.decoder.canBorrowTowardLocalHorizon(idx))
         ) {
           this.decoder.markRecoveryRebuilding([idx]);
           this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
@@ -465,6 +466,9 @@ export class AfeScheduler {
         if (await tryEarlierKeyframe()) {
           frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
           if (!frame) await progressiveTowardRequired();
+        } else if (this.decoder.canBorrowTowardLocalHorizon(idx)) {
+          /* gopStart 0 / no earlier I — still spend HARD toward sample 81. */
+          await progressiveTowardRequired();
         }
       }
       if (!frame) await tryFinalFlush();
