@@ -1068,3 +1068,31 @@ HARD computed from shrinking remaining meets a growing queue before 77 (SOFT+rem
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest requested 61 / submitted 67 / currentTarget 67 / lastDecoded 2208333 / queue 12 / FINAL_FLUSH yes → live 77 / HARD 22, exact PTS 2583333, no flood to 102, no 3s silent stall.  
 **HUMAN-PROVEN: NO**
 
+# AFE-19 — formula-horizon drain when live 77 is unreachable (V5.5)
+
+MODE A Chrome on AFE-18 HEAD (`ca48b65` + harness) reproduced VIDEO→VIS→VIDEO at timeline 2500ms / clip B:
+
+- live `currentTargetRequiredSample` **77**, `hardDependencyCeiling` **22** (AFE-18 math worked)
+- `lastSubmittedSample` stayed **67**; pumpSlice **68-67**
+- `decodeQueue` **20**, lastDecodedTs **1875000**, `targetPtsSeen` no
+- `finalFlushArmed` no (cleared because 67<77); transaction `mayFinalFlush` false (67<102)
+- unresolved 1; MP4 0 bytes
+
+Requested sample **61** / PTS **2583333** was already inside the submitted range. HARD credits past 67 were not reachable (queue already 20 / HARD 22). Extending the live target blocked the only legal drain.
+
+Variant b0 (vB sourceInMs 0): sample **0** PTS **83333**, lastDecoded **null**, postRecreateOutputs **0**, queue 12, formula 6 already submitted.
+
+## Fix
+
+1. `mayLocalHorizonFinalFlush` accepts `formulaTargetRequiredSample`. Drain is legal at formula **67**, not only at live **77**.
+2. `tryFinalFlush` also runs when `mayFormulaHorizonDrain`: lastSubmitted>=formula, exact not ready, queue held, lastDecoded < target. Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired.
+3. After recreate, require `postRecreateOutputs >= lookahead` so AFE-13 E/F (freeze after few emits / hang-flush mock) still typed-stall without a mid-run pressure flush.
+4. Zero-output after recreate (b0): one drain if formula is in, queue held, lastDecoded null, first post-recreate chunk is a keyframe.
+5. No timeout bump. No snap/nearest/drop. No global HIGH raise. No Mediabunny.
+
+MODE A Chrome production `exportWithWebCodecs` (Linux, `--headless=new`): primary + b0 both **90/90/90** vis 30 unresolved 0; MP4 1280×720 30fps 4.000s 120 frames. Headless AAC `audio: none`. **Not HUMAN-PROVEN.**
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner EXE VIDEO→VIS→VIDEO past 2500ms / sample 61 PTS 2583333, Req==Dec==Enc, unresolved 0.  
+**HUMAN-PROVEN: NO**
+
