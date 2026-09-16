@@ -472,6 +472,7 @@ export class AfeScheduler {
           /* AFE-21: lastSubmitted < requested, queue >= HARD.
            * AFE-22: requested already submitted, exact PTS unseen, decoder
            * dead after recreate — do not keep borrowing toward 44/144. */
+          this.decoder.capturePostResetFingerprint();
           this.decoder.noteHardHorizonReset();
           const origin = this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx);
           await recoverGop(idx, origin);
@@ -479,7 +480,34 @@ export class AfeScheduler {
           frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
           if (!frame) await progressiveTowardRequired();
           if (!frame && this.decoder.hardHorizonResetExhausted(idx)) {
-            return throwStall(idx);
+            if (this.decoder.mayPostResetLivenessReopenFor(idx)) {
+              /* AFE-23: same 458333 / ~10 fingerprint — another gopStart=0
+               * recreate cannot help. Cold-reopen the native decoder. */
+              this.decoder.noteLivenessReopen();
+              await this.decoder.coldReopenNativeDecoder(signal);
+              this.nextDecode = origin;
+              this.decoder.beginStream(span.needed, span.decodeStart, {
+                lastRequested,
+                lastRequiredDecodeSample: lastRequired,
+                requestedIndexes,
+                keepResolved: true,
+              });
+              this.decoder.setPrefetchHint(PREFETCH);
+              this.decoder.setGopKeyframeStart(origin);
+              this.decoder.bindOrigin(extra);
+              this.decoder.restoreOpenedIdentity(idx, extra.requestedPtsUs);
+              this.decoder.protectSample(idx);
+              this.decoder.confirmPtsRegistered(idx, extra.requestedPtsUs);
+              await pump(idx);
+              await pumpMore(idx);
+              frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
+              if (!frame) await progressiveTowardRequired();
+              if (!frame && this.decoder.livenessReopenExhausted(idx)) {
+                return throwStall(idx);
+              }
+            } else {
+              return throwStall(idx);
+            }
           }
         } else if (this.decoder.canBorrowTowardLocalHorizon(idx)) {
           /* gopStart 0 / no earlier I — still spend HARD toward sample 81. */

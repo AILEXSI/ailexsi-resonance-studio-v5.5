@@ -7,6 +7,7 @@ import {
   hostSafeSourceName,
   isAfeError,
   isExportTransactionComplete,
+  mustColdOpenVideoDecoder,
   nowMs,
   type AfeDumpPictureKind,
   type AfeStallSnapshot,
@@ -414,6 +415,7 @@ export async function exportWithWebCodecs(
   const encodingStage = () =>
     `Encoding H.264 · video ${videoFramesRequested}/${videoFramesDecoded}/${videoFramesEncoded} · vis ${visFramesEncoded} · black ${blackFramesEncoded}`;
 
+  let coldOpenAfterVisForDump = false;
   const stallExtraFromClip = (clip: ExportClip, i: number): Partial<AfeStallSnapshot> => {
     const timeMs = (i / job.fps) * 1000;
     const pictureKind = exportPictureKind(job, timeMs);
@@ -444,10 +446,12 @@ export async function exportWithWebCodecs(
       originClipLabel: clip.label,
       originSourceName: hostSafeSourceName(clip.sourceUrl),
       originPictureKind: pictureKind,
+      coldOpenAfterVis: coldOpenAfterVisForDump,
     };
   };
 
   try {
+    let previousPictureKind: AfeDumpPictureKind | null = null;
     for (const run of runs) {
       if (hooks.signal?.aborted) throw new Error("Export aborted");
       if (encoderError) throw encoderError;
@@ -466,6 +470,7 @@ export async function exportWithWebCodecs(
           await encodeCanvas(i);
           noteEncoded(i, false);
         }
+        previousPictureKind = run.pictureKind;
         continue;
       }
 
@@ -495,11 +500,21 @@ export async function exportWithWebCodecs(
           noteEncoded(i, false);
         }
         if (painted === 0) throw new Error(`missing:${clip.label}`);
+        previousPictureKind = "video";
         continue;
       }
       let decoded;
+      const coldOpenAfterVis = mustColdOpenVideoDecoder({
+        previousPictureKind,
+        nextPictureKind: "video",
+      });
+      coldOpenAfterVisForDump = coldOpenAfterVis;
       try {
-        decoded = await withTimeout(getDecoder(clip.sourceUrl, hooks.signal), 20000, null);
+        decoded = await withTimeout(
+          getDecoder(clip.sourceUrl, hooks.signal, { fresh: coldOpenAfterVis }),
+          20000,
+          null,
+        );
       } catch (e) {
         if (isAfeError(e) && e.code === "AFE_ABORTED") throw e;
         if (isAfeError(e)) throw e;
@@ -656,6 +671,7 @@ export async function exportWithWebCodecs(
       if (painted === 0) {
         throw new Error(`missing:${clip.label}`);
       }
+      previousPictureKind = "video";
     }
 
     await afePerfTimeAsync("videoEncoderWait", () => encoder.flush());

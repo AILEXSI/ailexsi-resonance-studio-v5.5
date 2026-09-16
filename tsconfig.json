@@ -49,6 +49,7 @@
     "tests/export/afe-20-soft-freeze-borrow.test.ts",
     "tests/export/afe-20-final-flush-tail.test.ts",
     "tests/export/afe-21-hard-horizon-liveness.test.ts",
-    "tests/export/afe-22-submitted-unseen-reset.test.ts"
+    "tests/export/afe-22-submitted-unseen-reset.test.ts",
+    "tests/export/afe-23-post-reset-liveness-reopen.test.ts"
   ]
 }

@@ -19,7 +19,9 @@ import {
   mustAdvanceTowardDependencyHorizon,
   mayBorrowHardDependencyCredits,
   mayAdvancePastSoftFreeze,
+  identicalPostResetFingerprint,
   mayHardHorizonReset,
+  mayPostResetLivenessReopen,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
   postHorizonRequiredSample,
@@ -183,6 +185,11 @@ export class AfeVideoDecoder {
    */
   private hardHorizonResetUsed = false;
   private outputGateAfterHardReset = false;
+  /** AFE-23: treat HIGH as first-fill after a cold native reopen. */
+  private forceFirstFillWater = false;
+  private livenessReopenUsed = false;
+  private deathFingerprintTs: number | null = null;
+  private deathFingerprintOutputs = 0;
 
   constructor(private readonly movie: AfeMovie) {
     this.reorderCap = Math.min(
@@ -209,15 +216,30 @@ export class AfeVideoDecoder {
 
   /** Derived HIGH_WATER — tight after recreate, RECOVERY_FILL first fill. */
   get decodeQueueHighWater(): number {
-    return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint, {
-      afterRecreate: this.recreateCount >= 1,
+    const afterRecreate = this.recreateCount >= 1 && !this.forceFirstFillWater;
+    const high = decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint, {
+      afterRecreate,
     });
+    /* AFE-23: after identical reset death, keep the tight SOFT window until
+     * lastDecoded moves past the 458333 fingerprint. Not a flood to 40/144. */
+    if (
+      this.forceFirstFillWater &&
+      this.deathFingerprintTs != null &&
+      (this.lastVideoFrameTimestamp == null ||
+        this.lastVideoFrameTimestamp <= this.deathFingerprintTs)
+    ) {
+      return decodeQueueHighWater(this.movie.maxReorderSamples, this.prefetchHint, {
+        afterRecreate: true,
+      });
+    }
+    return high;
   }
 
   /** Resume target after HIGH_WATER pause. Always < HIGH_WATER. */
   get decodeQueueLowWater(): number {
+    const afterRecreate = this.recreateCount >= 1 && !this.forceFirstFillWater;
     return decodeQueueLowWater(this.movie.maxReorderSamples, this.prefetchHint, {
-      afterRecreate: this.recreateCount >= 1,
+      afterRecreate,
     });
   }
 
@@ -355,6 +377,115 @@ export class AfeVideoDecoder {
 
   get hardHorizonResetConsumed(): boolean {
     return this.hardHorizonResetUsed;
+  }
+
+  get livenessReopenConsumed(): boolean {
+    return this.livenessReopenUsed;
+  }
+
+  capturePostResetFingerprint(): void {
+    this.deathFingerprintTs = this.lastVideoFrameTimestamp;
+    this.deathFingerprintOutputs = this.postRecreateOutputs;
+  }
+
+  postResetFingerprintMatches(): boolean {
+    return identicalPostResetFingerprint({
+      beforeLastDecodedTs: this.deathFingerprintTs,
+      afterLastDecodedTs: this.lastVideoFrameTimestamp,
+      beforeOutputs: this.deathFingerprintOutputs,
+      afterOutputs: this.postRecreateOutputs,
+    });
+  }
+
+  mayPostResetLivenessReopenFor(requested: number): boolean {
+    const rec = this.ownership.get(requested);
+    const targetPts = rec?.ptsUs ?? this.targetPtsUs;
+    return mayPostResetLivenessReopen({
+      exactReady: this.streamReady.has(requested),
+      targetPtsSeen: this.hasTargetPtsBeenSeen(targetPts),
+      hardHorizonResetUsed: this.hardHorizonResetUsed,
+      livenessReopenUsed: this.livenessReopenUsed,
+      earlierKeyframeAvailable: this.earlierKeyframeIsAvailable(),
+      identicalFingerprint: this.postResetFingerprintMatches(),
+      decodeQueueSize: this.decodeQueueSize,
+      softHighWater: this.decodeQueueHighWater,
+      frozenAtHighWater: this.isFrozenAtHighWaterAfterRecreate(),
+      lastDecodedTimestamp: this.lastVideoFrameTimestamp,
+      targetPtsUs: targetPts,
+    });
+  }
+
+  noteLivenessReopen(): void {
+    this.livenessReopenUsed = true;
+    this.forceFirstFillWater = true;
+    this.outputGateAfterHardReset = true;
+  }
+
+  /**
+   * AFE-23: close the native VideoDecoder and open a new one. Not another
+   * gopStart=0 recreate (that already produced the same 458333 / 10 death).
+   * Does not increment recreateCount so water can return to first-fill once
+   * lastDecoded moves past the fingerprint. Output-gated SOFT until then.
+   */
+  async coldReopenNativeDecoder(signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    this.stallPhase = "RESET";
+    this.livenessReopenUsed = true;
+    this.forceFirstFillWater = true;
+    this.outputGateAfterHardReset = true;
+    this.generation += 1;
+    this.transactionId += 1;
+    this.resetCount += 1;
+    this.lastError = null;
+    this.streamWaiter = null;
+    this.closeStreamFrames();
+    this.streamPts.failPending("ABORTED");
+    this.streamPts.clear();
+    this.streamMode = false;
+    this.streamNeeded = null;
+    this.needsKeyframe = true;
+    this.configured = false;
+    this.lastSubmittedSample = null;
+    this.pumpSliceStart = null;
+    this.pumpSliceEnd = null;
+    this.lastVideoFrameTimestamp = null;
+    this.lastDecodedAtSubmit = null;
+    this.submitsWithoutOutputProgress = 0;
+    this.backpressureBlocked = false;
+    this.noMoreSubmission = false;
+    this.frozenAfterRecreate = false;
+    this.finalFlushArmed = false;
+    this.finalFlushThisDecoder = false;
+    this.tailDrainReplayed = false;
+    this.hardBorrowCeiling = null;
+    this.beginPostRecreateTrace();
+    if (this.decoder) {
+      try {
+        this.decoder.close();
+      } catch {
+        /* */
+      }
+      this.decoder = null;
+    }
+    if (!afePerfProbeInstalled()) afePerfCount("decoderResets");
+    await this.ensure(signal);
+  }
+
+  /**
+   * Escape already used, still exact unresolved, queue at/over SOFT, same
+   * 458333 death after the cold reopen — typed stall.
+   */
+  livenessReopenExhausted(requested: number): boolean {
+    if (!this.livenessReopenUsed) return false;
+    if (this.streamReady.has(requested)) return false;
+    if (this.hasTargetPtsBeenSeen()) return false;
+    const stuck =
+      this.decodeQueueSize >= this.decodeQueueHighWater &&
+      this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit;
+    if (!stuck) return false;
+    if (this.lastVideoFrameTimestamp == null) return true;
+    if (this.deathFingerprintTs == null) return true;
+    return this.lastVideoFrameTimestamp <= this.deathFingerprintTs;
   }
 
   /** AFE-21: HARD borrow is illegal until the post-reset decoder emits. */
@@ -1422,6 +1553,13 @@ export class AfeVideoDecoder {
       hardDependencyCeiling: hard,
       submittedMinusOutputs: submittedMinus,
       hardHorizonResetUsed: extra?.hardHorizonResetUsed ?? this.hardHorizonResetUsed,
+      postResetFingerprintTs: extra?.postResetFingerprintTs ?? this.deathFingerprintTs,
+      postResetFingerprintOutputs:
+        extra?.postResetFingerprintOutputs ?? this.deathFingerprintOutputs,
+      postResetFingerprintMatch:
+        extra?.postResetFingerprintMatch ?? this.postResetFingerprintMatches(),
+      livenessReopenUsed: extra?.livenessReopenUsed ?? this.livenessReopenUsed,
+      coldOpenAfterVis: extra?.coldOpenAfterVis ?? false,
     });
   }
 
@@ -1691,6 +1829,10 @@ export class AfeVideoDecoder {
     if (!bounds?.keepResolved) {
       this.hardHorizonResetUsed = false;
       this.outputGateAfterHardReset = false;
+      this.forceFirstFillWater = false;
+      this.livenessReopenUsed = false;
+      this.deathFingerprintTs = null;
+      this.deathFingerprintOutputs = 0;
       this.finalFlushAttempted = false;
       this.gopKeyframeStart = null;
       this.earlierKeyframeRecovered = false;
@@ -1803,23 +1945,19 @@ export class AfeVideoDecoder {
     this.decoderResetForTransactionEnd = true;
     this.resetCount += 1;
     this.lastError = null;
-    if (this.decoder && this.configured) {
+    /* AFE-23: close, do not reset+reconfigure. reset() on WebView2 after a
+     * finished VIDEO run (then VIS, then VIDEO) leaves the same 458333 death
+     * as recreate(). Next ensure() is a new native decoder. */
+    if (this.decoder) {
       try {
-        this.decoder.reset();
-        this.decoder.configure(decoderConfigOf(this.movie.avc));
-        this.needsKeyframe = true;
-        if (!afePerfProbeInstalled()) afePerfCount("decoderResets");
+        this.decoder.close();
       } catch {
-        try {
-          this.decoder.close();
-        } catch {
-          /* */
-        }
-        this.decoder = null;
-        this.configured = false;
-        this.needsKeyframe = true;
+        /* */
       }
+      this.decoder = null;
+      this.configured = false;
     }
+    this.needsKeyframe = true;
   }
 
   drainStream(put: (index: number, frame: VideoFrame) => void): void {

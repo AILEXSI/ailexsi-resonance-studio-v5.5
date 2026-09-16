@@ -270,6 +270,16 @@ export type AfeStallSnapshot = {
    * Typed stall only after that escape is exhausted.
    */
   hardHorizonResetUsed: boolean;
+  /** AFE-23: lastDecodedTs captured before the AFE-22 reset. */
+  postResetFingerprintTs: number | null;
+  /** AFE-23: postRecreateOutputs captured before the AFE-22 reset. */
+  postResetFingerprintOutputs: number;
+  /** AFE-23: post-reset decoder died at the same lastDecoded / output band. */
+  postResetFingerprintMatch: boolean;
+  /** AFE-23: one cold native-decoder reopen after identical reset death. */
+  livenessReopenUsed: boolean;
+  /** AFE-23: VIDEO run after VIS/black evicted the cached decoder. */
+  coldOpenAfterVis: boolean;
 };
 
 /** One pumpThrough / recovery slice — stall dump only, no production spam. */
@@ -402,6 +412,11 @@ export function emptyStallSnapshot(partial?: Partial<AfeStallSnapshot>): AfeStal
     hardDependencyCeiling: 0,
     submittedMinusOutputs: 0,
     hardHorizonResetUsed: false,
+    postResetFingerprintTs: null,
+    postResetFingerprintOutputs: 0,
+    postResetFingerprintMatch: false,
+    livenessReopenUsed: false,
+    coldOpenAfterVis: false,
     ...partial,
   };
 }
@@ -787,6 +802,72 @@ export function mayHardHorizonReset(args: {
   if (submitted >= args.requestedSample) return false;
   if (submitted >= args.currentTargetRequiredSample) return false;
   return args.requestedSample <= args.currentTargetRequiredSample;
+}
+
+/**
+ * AFE-23: same gopStart=0 recreate died at the same lastDecoded / output
+ * band (human 458333 / 10). packetParity/configParity already held — the
+ * native decoder, not the input, is dead. Another identical reset cannot help.
+ */
+export function identicalPostResetFingerprint(args: {
+  beforeLastDecodedTs: number | null;
+  afterLastDecodedTs: number | null;
+  beforeOutputs: number;
+  afterOutputs: number;
+}): boolean {
+  if (args.beforeLastDecodedTs == null || args.afterLastDecodedTs == null) return false;
+  if (args.beforeLastDecodedTs !== args.afterLastDecodedTs) return false;
+  if (args.afterOutputs <= 0) return false;
+  return Math.abs(args.afterOutputs - args.beforeOutputs) <= 2;
+}
+
+/**
+ * AFE-23: AFE-22 reset already used, exact still unseen, fingerprint
+ * identical, queue at/over SOFT or frozen. One different recovery: close
+ * the native decoder and reopen cold (first-fill water after liveness),
+ * not another gopStart=0 recreate and not a flood to lastRequired 144.
+ */
+export function mayPostResetLivenessReopen(args: {
+  exactReady: boolean;
+  targetPtsSeen: boolean;
+  hardHorizonResetUsed: boolean;
+  livenessReopenUsed: boolean;
+  earlierKeyframeAvailable: boolean;
+  identicalFingerprint: boolean;
+  decodeQueueSize: number;
+  softHighWater: number;
+  frozenAtHighWater?: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): boolean {
+  if (args.exactReady) return false;
+  if (args.targetPtsSeen) return false;
+  if (!args.hardHorizonResetUsed) return false;
+  if (args.livenessReopenUsed) return false;
+  if (args.earlierKeyframeAvailable) return false;
+  if (!args.identicalFingerprint) return false;
+  const frozen =
+    args.frozenAtHighWater === true || args.decodeQueueSize >= args.softHighWater;
+  if (!frozen) return false;
+  if (args.lastDecodedTimestamp != null && args.targetPtsUs != null) {
+    return args.lastDecodedTimestamp < args.targetPtsUs;
+  }
+  return true;
+}
+
+/**
+ * AFE-23: VIDEO-only first run stays on the cached decoder (cold first-fill
+ * works). VIDEO after VIS/black must not reuse that wrapper — human mix
+ * dies at 458333; pure VIDEO does not.
+ */
+export function mustColdOpenVideoDecoder(args: {
+  previousPictureKind: AfeDumpPictureKind | null | undefined;
+  nextPictureKind: AfeDumpPictureKind;
+}): boolean {
+  if (args.nextPictureKind !== "video") return false;
+  const prev = args.previousPictureKind;
+  if (prev == null) return false;
+  return prev === "vis" || prev === "black";
 }
 
 /**
@@ -1404,6 +1485,9 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `postRecreateSubmitted ${d.postRecreateSubmitted}`,
     `postRecreateOutputs ${d.postRecreateOutputs}`,
     `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
+    `postResetFingerprintMatch ${d.postResetFingerprintMatch ? "yes" : "no"}`,
+    `livenessReopen ${d.livenessReopenUsed ? "yes" : "no"}`,
+    `coldOpenAfterVis ${d.coldOpenAfterVis ? "yes" : "no"}`,
     `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
     `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
     `originSample ${d.originRequestedSample}`,
