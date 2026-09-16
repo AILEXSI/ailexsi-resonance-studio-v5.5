@@ -5,5 +5,9 @@ Each frame encodes its presentation index as a 4×4 black/white barcode.
 Includes no-B (baseline, `-bf 0`) controls, AFE-04 B-frame / varying-CTTS files,
 and AFE-05 harder B-frame sets (long GOP, consecutive B, b-pyramid, open/closed GOP).
 `afe-eof-24-g145-b3.mp4` is the AFE-25 24fps / 145-sample tail analog (sample 142 = PTS 5958333).
+`stress-01-clip-start-gop.mp4` is the STRESS-01 first-GOP equivalent of
+`6C16E2CA-… - Kopie.mp4` (32 samples, timescale 600, elst mediaTime 40,
+sample 3 = PTS 100000, avcC without bitstream_restriction). Full 7.5MB
+production clip is evidence-only and is not committed.
 FFmpeg is the fixture generator only — not a runtime dependency.
 Test-only. Not for product distribution.

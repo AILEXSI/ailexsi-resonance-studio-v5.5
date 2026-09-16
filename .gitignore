@@ -11,3 +11,4 @@ target/
 artifacts/
 fixtures/user-provided.mp4
 public/fixtures/
+scripts/stress-01-evidence/*.mp4

@@ -57,6 +57,18 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Result | 720p path unchanged when Level 3.1 is supported. 1080p no longer hardcodes Level 3.1-only. |
 | Human (MODE B) | Operator EXE tip `0ec7758`: `C:\Users\marti\ailexsi-resonance-studio-v5.5\AILEXSI Resonance Studio V5.5.exe` SHA256 `0FA47C1E71975D0480699EA972F8897193A247A4061FDA83B2B72B61DFF35678`. Confirmed **1920×1080 H.264 @ 30 / 25 / 24 fps**. Screenshot (30 fps): `docs/enc-01-1080p-acceptance-2026-09-16.png` — Fertig `Untitled_Resonance.v2.mp4`, Frame Engine **AILEXSI**, **1920×1080 / 30 fps**, IN ~00:00.40 · OUT ~06:59.93. |
 
+## STRESS-01 — clip-start exact PTS 100000
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. ENC-01 encoder selection untouched. AFE-25 `prefer-software` kept.
+
+| | |
+| --- | --- |
+| Verdict | **D** — Chromium VideoDecoder drops disposable B PTS **100000** when avcC VUI omits `bitstream_restriction`. Not A/B/C. |
+| First NO | **DECODER_OUTPUT** (submitted yes, output no). |
+| Diff | `decoderConfigOf` applies existing `patchAvcCBitstreamRestriction`. Exact PTS unchanged. |
+| Test | `tests/export/stress-01-clip-start-pts.test.ts` + GOP fixture `tests/fixtures/afe/stress-01-clip-start-gop.mp4`. |
+| Human remaining | MODE B EXE, same `…Kopie.mp4`, `sourceInMs 0` — confirm no stall at PTS 100000. **Do not merge from this pass.** |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |
