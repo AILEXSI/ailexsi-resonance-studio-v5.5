@@ -30,13 +30,18 @@
  *   E scenes    — `1 + bass*0.55` needs bass ≳ 0.3 to read as impact.
  *
  * Response (small model, chosen from that table — not AGC, not per-song peak):
- *   shape(x) = clamp01(pow(clamp01(x * gain), gamma))   gain=1.2  gamma=0.75
+ *   shape(x) = clamp01(pow(clamp01(x * gain), gamma))
  *   presence = shape(rms)                               amplitude carrier
  *   visBand  = max(shape(rawBand), presence * mix)      mix = band / sum
  *   spectrum = peak-hold spread then min(shape(bin), presence)
  *              (dB-sat peaks cannot outrun RMS; no hard sat cliff)
  *   energy   = 0.5*visRms + 0.5*visBass; +transientBoost on onset
  *   beatPulse= onset ? 1 : shape(raw.beatPulse, 1, gamma)
+ *
+ * VIS-RESPONSE-02 (human soft-PASS on 01, more felt kick / mid):
+ *   01 defaults were gain=1.2 gamma=0.75 spread=12 transient=0.24
+ *   02 defaults:   gain=1.25 gamma=0.68 spread=18 transient=0.38
+ *   Pad 0.35 rms 0.494 → shape 0.720 (must stay < 1). Quiet 0.085 → 0.218.
  */
 
 import type { AudioFeatures } from "./types";
@@ -61,15 +66,25 @@ export type VisResponseConfig = {
   transientBoost: number;
 };
 
-/**
- * Locked from Phase 1 numbers. Do not raise gain so a 0.35 pad rms clips to 1.
- * Do not add per-project normalize / AGC knobs.
- */
-export const DEFAULT_VIS_RESPONSE: VisResponseConfig = {
+/** VIS-RESPONSE-01 shipped defaults (human soft-PASS). Kept for before/after tests. */
+export const VIS_RESPONSE_01: VisResponseConfig = {
   gain: 1.2,
   gamma: 0.75,
   spectrumSpreadBins: 12,
   transientBoost: 0.24,
+};
+
+/**
+ * VIS-RESPONSE-02 — more kick / mid, same monotonic model.
+ * gain 1.25 still keeps a 0.35-amp pad (raw rms 0.494) at ~0.72, not 1.
+ * Lower gamma expands mid-lows. Wider spread helps 48-bar / wave sampling.
+ * Stronger transientBoost punches presentation energy on onset only.
+ */
+export const DEFAULT_VIS_RESPONSE: VisResponseConfig = {
+  gain: 1.25,
+  gamma: 0.68,
+  spectrumSpreadBins: 18,
+  transientBoost: 0.38,
 };
 
 export function clamp01(n: number): number {

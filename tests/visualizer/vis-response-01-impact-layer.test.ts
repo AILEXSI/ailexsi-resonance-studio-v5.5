@@ -15,9 +15,15 @@ import {
   createOfflineFeatureExtractor,
 } from "../../src/core/visualz/feature-extractor";
 import {
+  latticeWarp,
+  resonanceCoreRadius,
+  resonanceRingPulse,
+} from "../../src/core/visualz/scene-impact";
+import {
   applyVisResponse,
   DEFAULT_VIS_RESPONSE,
   shapeVisLevel,
+  VIS_RESPONSE_01,
   type RawAudioFeatures,
 } from "../../src/core/visualz/vis-response";
 
@@ -115,10 +121,14 @@ describe("VIS-RESPONSE-01 phase 1 — measured cause (raw analyser, 3b16a09 sema
     expect(ANALYSER_SMOOTHING).toBe(0.75);
     expect(ANALYSER_MIN_DECIBELS).toBe(-100);
     expect(ANALYSER_MAX_DECIBELS).toBe(-30);
-    expect(DEFAULT_VIS_RESPONSE.gain).toBe(1.2);
-    expect(DEFAULT_VIS_RESPONSE.gamma).toBe(0.75);
-    expect(DEFAULT_VIS_RESPONSE.spectrumSpreadBins).toBe(12);
-    expect(DEFAULT_VIS_RESPONSE.transientBoost).toBe(0.24);
+    expect(VIS_RESPONSE_01.gain).toBe(1.2);
+    expect(VIS_RESPONSE_01.gamma).toBe(0.75);
+    expect(VIS_RESPONSE_01.spectrumSpreadBins).toBe(12);
+    expect(VIS_RESPONSE_01.transientBoost).toBe(0.24);
+    expect(DEFAULT_VIS_RESPONSE.gain).toBe(1.25);
+    expect(DEFAULT_VIS_RESPONSE.gamma).toBe(0.68);
+    expect(DEFAULT_VIS_RESPONSE.spectrumSpreadBins).toBe(18);
+    expect(DEFAULT_VIS_RESPONSE.transientBoost).toBe(0.38);
   });
 
   it("B+A+C+E: loud tones have useful RMS but diluted bass / missed bars / tiny orb breath", () => {
@@ -359,7 +369,68 @@ describe("VIS-RESPONSE-01 applyVisResponse", () => {
   });
 });
 
-describe("VIS-RESPONSE-01 scene-useful ranges (shared layer, scenes untouched)", () => {
+describe("VIS-RESPONSE-02 retune vs 01", () => {
+  it("pad 0.35 stays below hard clip; quiet stays well below pad", () => {
+    const pad = visAt(pcm(sineAt(220, 800, 0.35)), 400);
+    const quiet = visAt(pcm(sineAt(220, 800, 0.06)), 400);
+    const rawPad = rawAt(pcm(sineAt(220, 800, 0.35)), 400);
+    expect(rawPad.rms).toBeGreaterThan(0.45);
+    expect(rawPad.rms).toBeLessThan(0.55);
+    expect(pad.rms).toBeGreaterThan(0.55);
+    expect(pad.rms).toBeLessThan(0.9);
+    expect(pad.bass).toBeLessThan(0.9);
+    expect(quiet.rms).toBeLessThan(pad.rms * 0.5);
+    expect(quiet.bass).toBeLessThan(pad.bass * 0.5);
+  });
+
+  it("02 lifts kick energy / mid vs 01 without AGC", () => {
+    const kickData = silence(800);
+    kickAt(kickData, 240);
+    const rawKick = rawAt(pcm(kickData), 260);
+    const v01 = applyVisResponse(rawKick, VIS_RESPONSE_01);
+    const v02 = applyVisResponse(rawKick, DEFAULT_VIS_RESPONSE);
+    expect(v02.energy).toBeGreaterThan(v01.energy);
+    expect(v02.rms).toBeGreaterThan(v01.rms);
+
+    const snareData = silence(800);
+    snareAt(snareData, 240);
+    const rawSnare = rawAt(pcm(snareData), 256);
+    const s01 = applyVisResponse(rawSnare, VIS_RESPONSE_01);
+    const s02 = applyVisResponse(rawSnare, DEFAULT_VIS_RESPONSE);
+    expect(s02.mid).toBeGreaterThan(s01.mid);
+    expect(s02.mid).toBeLessThan(1);
+
+    const rawPad = rawAt(pcm(sineAt(220, 800, 0.35)), 400);
+    const p01 = applyVisResponse(rawPad, VIS_RESPONSE_01);
+    const p02 = applyVisResponse(rawPad, DEFAULT_VIS_RESPONSE);
+    expect(p02.rms).toBeGreaterThan(p01.rms);
+    expect(p02.rms).toBeLessThan(0.9);
+  });
+
+  it("Lattice / Wave kick geometry is stronger than a pad, quiet stays small", () => {
+    const pad = visAt(pcm(sineAt(220, 800, 0.35)), 400);
+    const quiet = visAt(pcm(sineAt(220, 800, 0.06)), 400);
+    const kickData = silence(800);
+    kickAt(kickData, 240);
+    const session = createExportFeatureSession(pcm(kickData), { hopMs: 1000 / 30 });
+    let kick = session.sample(0);
+    for (let t = 1000 / 30; t <= 280; t += 1000 / 30) {
+      const f = session.sample(t);
+      if (f.onset || f.beatPulse > kick.beatPulse) kick = f;
+    }
+    const int = 0.85;
+    expect(resonanceRingPulse(kick, int)).toBeGreaterThan(resonanceRingPulse(pad, int));
+    expect(resonanceRingPulse(quiet, int)).toBeLessThan(resonanceRingPulse(pad, int));
+    expect(resonanceCoreRadius(kick, int)).toBeGreaterThan(resonanceCoreRadius(pad, int));
+    expect(latticeWarp(kick, int)).toBeGreaterThan(latticeWarp(pad, int));
+    expect(latticeWarp(quiet, int)).toBeLessThan(latticeWarp(pad, int) * 0.55);
+    // 01 lattice was bass-only: a loud pad warped more than a kick. 02 must flip that.
+    const oldKickWarp = kick.bass * 0.42 * int;
+    expect(latticeWarp(kick, int)).toBeGreaterThan(oldKickWarp + 0.15);
+  });
+});
+
+describe("VIS-RESPONSE scene-useful ranges", () => {
   it("pad breathes and kick flashes without retuning scenes", () => {
     const pad = visAt(pcm(sineAt(220, 800, 0.35)), 400);
     const quiet = visAt(pcm(sineAt(220, 800, 0.06)), 400);

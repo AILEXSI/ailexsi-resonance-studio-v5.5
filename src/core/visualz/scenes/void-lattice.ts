@@ -4,6 +4,7 @@
 
 import { hexToRgba } from "../color";
 import { cam3, project3, sortFarFirst } from "../project3d";
+import { latticeNodePulse, latticeWarp } from "../scene-impact";
 import type { AudioFeatures, Scene, SceneContext, SceneParams } from "../types";
 
 type Mark = { x: number; y: number; z: number; r: number; color: string };
@@ -32,7 +33,7 @@ export const voidLatticeScene: Scene = {
       far: 13,
     });
     const spacing = 1.15;
-    const warp = features.bass * 0.42 * params.intensity;
+    const warp = latticeWarp(features, params.intensity);
     const half = 3;
     const depth = 9;
     const originZ = Math.floor(fly / spacing) * spacing;
@@ -51,7 +52,7 @@ export const voidLatticeScene: Scene = {
             x: p.x,
             y: p.y,
             z: p.z,
-            r: (node ? 1.6 : 1.05) * (0.45 + p.fog) * (0.7 + features.beatPulse * 0.5),
+            r: (node ? 1.6 : 1.05) * (0.45 + p.fog) * latticeNodePulse(features),
             color: hexToRgba(
               iy === 0 ? "#ffffff" : (params.colorPrimary as string),
               (0.18 + p.fog * 0.7) * params.intensity,
@@ -68,7 +69,10 @@ export const voidLatticeScene: Scene = {
       ctx.fill();
     }
 
-    ctx.strokeStyle = hexToRgba(params.colorPrimary as string, 0.16 + features.rms * 0.18);
+    ctx.strokeStyle = hexToRgba(
+      params.colorPrimary as string,
+      0.16 + features.rms * 0.18 + features.beatPulse * 0.14,
+    );
     ctx.lineWidth = 1;
     for (let ix = -1; ix <= 1; ix++) {
       for (let iy = -1; iy <= 1; iy++) {

@@ -154,6 +154,19 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE-01 + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **131/131**. Full suite **1297 passed / 6 failed / 1303**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
 | Human remaining | 30–60 s obvious-beat section vs `3b16a09`, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-RESPONSE-01-IMPACT-LAYER.md`. |
 
+## VIS-RESPONSE-02 — more felt kick / mid (same layer)
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Continues PR **#25**. Do **not** merge. 01 was HUMAN soft-PASS (*besser vis, rest funktioniert, kannst alles anpassen*).
+
+| | |
+| --- | --- |
+| Human | ~357.8 s 1080p30 lattice-style (orb + horizontal waves). Audio −41…−9 dB, median ~−18. Want more kick / mid; quiet quiet; pads breathe. |
+| Why | 01 `transientBoost` only hit `energy`, which scenes do not read. Wave rings used `beatPulse*0.15`. Lattice warp was bass-only (pad > kick). |
+| Diff | Defaults **gain 1.25 / gamma 0.68 / spread 18 / transient 0.38** (01: 1.2 / 0.75 / 12 / 0.24). Pad 0.35 stays ~0.72, not 1. Shared `scene-impact.ts` for Resonance Wave + Void Lattice. Same `applyVisResponse` for Preview and Export. No AGC. |
+| Untouched | Analyser core; AUDIO-01; AFE; ENC-01; STRESS mux; volume. |
+| Test | Same vis-response file + 02 vs 01 assertions + lattice/wave geometry. |
+| Human remaining | Short obvious-beat section vs 01 EXE, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

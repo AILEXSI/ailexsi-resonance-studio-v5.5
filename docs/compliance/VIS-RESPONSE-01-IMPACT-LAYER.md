@@ -124,4 +124,4 @@ Compare this branch to VIS-SYNC-01 `3b16a09` on the same ~34:18 production proje
 
 **EXE path / EXE SHA256:** left for the coordinator. This agent does not build the Windows EXE.
 
-**HUMAN acceptance pending.**
+**HUMAN acceptance:** soft-PASS (M.G.M. 2026-09-16 — *besser vis, rest funktioniert*). Follow-on retune: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md` (same PR, do not merge).
