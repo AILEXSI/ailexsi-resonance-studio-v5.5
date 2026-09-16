@@ -124,6 +124,8 @@ export class AfeVideoDecoder {
   private pumpSliceEnd: number | null = null;
   private finalFlushAttempted = false;
   private finalFlushArmed = false;
+  /** Cleared on recreate so AFE-11 can flush again; dump bit stays sticky. */
+  private finalFlushThisDecoder = false;
   private decodeQueuePeak = 0;
   private submitsWithoutOutputProgress = 0;
   private lastOutputProgressTimestamp: number | null = null;
@@ -234,6 +236,7 @@ export class AfeVideoDecoder {
   currentTargetRequiredFor(requested: number): number {
     const formula = this.formulaTargetRequiredFor(requested);
     const rec = this.ownership.get(requested);
+    if (rec?.recoveryRebuilding) return formula;
     const targetPts = rec?.ptsUs ?? this.targetPtsUs;
     return postHorizonRequiredSample({
       requested,
@@ -280,10 +283,15 @@ export class AfeVideoDecoder {
   releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {
     const live = this.currentTargetRequiredFor(requested);
     if ((this.lastSubmittedSample ?? -1) >= live) return;
-    if (!this.finalFlushAttempted && !this.finalFlushArmed) return;
+    if (!this.finalFlushAttempted && !this.finalFlushArmed && !this.finalFlushThisDecoder) return;
     this.finalFlushArmed = false;
-    this.finalFlushAttempted = false;
+    this.finalFlushThisDecoder = false;
     this.tailDrainReplayed = false;
+  }
+
+  /** True when this decoder instance already consumed its one FINAL_FLUSH. */
+  get finalFlushConsumedThisDecoder(): boolean {
+    return this.finalFlushThisDecoder;
   }
 
   get coldStartChunks(): readonly ChunkFingerprint[] {
@@ -912,6 +920,7 @@ export class AfeVideoDecoder {
   armFinalFlush(indexes?: Iterable<number>): void {
     this.finalFlushArmed = true;
     this.finalFlushAttempted = true;
+    this.finalFlushThisDecoder = true;
     this.stallPhase = "FINAL_FLUSH";
     const ids = indexes
       ? [...indexes]
@@ -1447,7 +1456,7 @@ export class AfeVideoDecoder {
     this.noMoreSubmission = false;
     this.frozenAfterRecreate = false;
     this.finalFlushArmed = false;
-    this.finalFlushAttempted = false;
+    this.finalFlushThisDecoder = false;
     this.tailDrainReplayed = false;
     this.hardBorrowCeiling = null;
     this.beginPostRecreateTrace();
@@ -1526,10 +1535,11 @@ export class AfeVideoDecoder {
     this.frozenAfterRecreate = false;
     this.windowPaused = false;
     this.finalFlushArmed = false;
-    this.finalFlushAttempted = false;
+    this.finalFlushThisDecoder = false;
     this.tailDrainReplayed = false;
     this.hardBorrowCeiling = null;
     if (!bounds?.keepResolved) {
+      this.finalFlushAttempted = false;
       this.gopKeyframeStart = null;
       this.earlierKeyframeRecovered = false;
       this.earlierKeyframeRecoverCount = 0;
