@@ -2195,11 +2195,21 @@ export class AfeVideoDecoder {
         progressAt = nowMs();
       }
       const plateau = nowMs() - progressAt >= AFE_SETTLE_DRAIN_MS;
-      if (caseB && dec.decodeQueueSize > 0 && !this.hasTargetPtsBeenSeen(exactPts) && plateau) {
+      /* Plateau only after a neighbor has already emerged. A dead hang with
+       * zero outputs still uses the 3s watchdog (AFE-07/11 HangFlushDecoder). */
+      const neighborHeld =
+        this.lastVideoFrameTimestamp != null &&
+        (exactPts == null || this.lastVideoFrameTimestamp !== exactPts);
+      if (
+        caseB &&
+        neighborHeld &&
+        dec.decodeQueueSize > 0 &&
+        !this.hasTargetPtsBeenSeen(exactPts) &&
+        plateau
+      ) {
         return;
       }
       if (nowMs() - started >= AFE_FLUSH_WATCHDOG_MS) {
-        if (caseB && !this.hasTargetPtsBeenSeen(exactPts)) return;
         const dump = this.snapshot({ stalledMs: AFE_FLUSH_WATCHDOG_MS });
         throw new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false);
       }
