@@ -57,6 +57,117 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Result | 720p path unchanged when Level 3.1 is supported. 1080p no longer hardcodes Level 3.1-only. |
 | Human (MODE B) | Operator EXE tip `0ec7758`: `C:\Users\marti\ailexsi-resonance-studio-v5.5\AILEXSI Resonance Studio V5.5.exe` SHA256 `0FA47C1E71975D0480699EA972F8897193A247A4061FDA83B2B72B61DFF35678`. Confirmed **1920×1080 H.264 @ 30 / 25 / 24 fps**. Screenshot (30 fps): `docs/enc-01-1080p-acceptance-2026-09-16.png` — Fertig `Untitled_Resonance.v2.mp4`, Frame Engine **AILEXSI**, **1920×1080 / 30 fps**, IN ~00:00.40 · OUT ~06:59.93. |
 
+## STRESS-01 — clip-start exact PTS 100000
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. ENC-01 encoder selection untouched. AFE-25 `prefer-software` kept.
+
+| | |
+| --- | --- |
+| Verdict | **D** — Chromium VideoDecoder drops disposable B PTS **100000** when avcC VUI omits `bitstream_restriction`. Not A/B/C. |
+| First NO | **DECODER_OUTPUT** (submitted yes, output no). |
+| Diff | `decoderConfigOf` applies existing `patchAvcCBitstreamRestriction`. Exact PTS unchanged. |
+| Test | `tests/export/stress-01-clip-start-pts.test.ts` + GOP fixture `tests/fixtures/afe/stress-01-clip-start-gop.mp4`. MODE A Chrome post-fix: AILEXSI and `decoderConfigOf` emit 100000; unpatched avcC still misses it. |
+| Human remaining | MODE B EXE, same `…Kopie.mp4`, `sourceInMs 0` — confirm no stall at PTS 100000. **Do not merge from this pass.** |
+| Gates | `tsc --noEmit` clean. Focused STRESS-01 + AFE-25 + ENC-01 **16/16**. AFE files except pre-existing AFE-15 A/N dump-ban. Full suite **1221 passed / 2 failed / 1223** (same AFE-15 A/N as main). `vite build` OK. |
+
+## STRESS-02 — call-stack diagnostic (no production fix)
+
+**IMPLEMENTED / AUTOMATED-TESTED** (dump capture only). **Not classified A–F.** Not HUMAN-PROVEN. Do not merge.
+
+| | |
+| --- | --- |
+| Human | PR #19 MODE-B EXE `fc7ab97`: 11 min PASS; ~25 min FAIL `Maximum call stack size exceeded` with no useful stack. STRESS-01 PTS 100000 no longer reproduced. |
+| Diff | Outermost export catch + `window.onerror` / `unhandledrejection` record original `name` / `message` / `stack` (never a replacement Error). Context fields go to the scrollable failed-status. Diagnostic MODE-B maps via `AILEXSI_DIAG_SOURCEMAP=1` / `npm run tauri:exe:diag`. Candidate audit in `docs/compliance/STRESS-02-CALL-STACK-DIAGNOSTIC.md` — **CANDIDATE not PROVEN**. |
+| Untouched | STRESS-01 avcC patch, AFE-25 prefer-software, ENC-01 encoder selection, AFE scheduling/timeouts/queues/escapes. No yield hacks. No stack-limit raise. No speculative fix. |
+| Test | `tests/export/stress-02-call-stack-dump.test.ts` — RangeError at export boundary keeps original `.stack` + context. |
+| Gates | `tsc --noEmit` clean. Focused STRESS-02 + STRESS-01 + AFE-25 + ENC-01 **29/29**. Full suite **1229 passed / 2 failed / 1231** (same pre-existing AFE-15 A/N dump-ban as STRESS-01). |
+| Human remaining | Same ~25 min stress on the diagnostic EXE. Need one dump with stack + FIRST application frame + FIRST repeated frame. |
+
+## STRESS-03 — pre-request source open stall (diagnostic)
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **Not HUMAN-PROVEN**. Do not merge.
+
+| | |
+| --- | --- |
+| Human | Diagnostic EXE `e2c6659`: `AFE_DECODE_STALL` at originTimelineMs 168733.33 / exportFrame 5062 on `1000001827 - Kopie.mp4` (`sourceInMs 0` / `sourceOutMs 5208`). `requestedSample` null, `transactionId` 0, `videoReq/Dec/Enc` 5063/5062/5062. Not STRESS-01 exact-PTS. Not a call-stack overflow. |
+| First blocked | **SAMPLE_SELECT**. First composition PTS 83333µs; clip-start request 16667µs; lookup returned null → VIDEO null-yield stall (`stalledMs 3000` is the throw field, not an open hang). |
+| Diff | Stage trail in stall / export-fail dumps. Narrow clamp: `sampleIndexAtTime` selects the first presentation sample when the mapped request is ≥ 0 but still before the first PTS. Negative times stay null. No scheduling / watermark / timeout / reset / ENC-01 / STRESS-01 avcC / STRESS-02 capture change. |
+| Alone vs after preceding | Same physical file parses and now selects sample 0 at `sourceInMs 0` both alone and after a preceding fixture. jsdom has no VideoDecoder (configure not run here). |
+| Test | `tests/export/stress-03-stage-trace.test.ts` + `tests/export/stress-03-physical-source.test.ts` |
+| Gates | `tsc --noEmit` clean. Focused STRESS-03 + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + AFE-04 parser/B-frame **46/46**. Full suite **1241 passed / 2 failed / 1243** (same pre-existing AFE-15 A/N dump-ban as STRESS-02). |
+| Human remaining | Same long export. Confirm `firstBlockedStage` / `stageTrail` on fail, or Fertig if the clamp holds on WebView2. Details: `docs/compliance/STRESS-03-PRE-REQUEST-SOURCE-OPEN.md`. |
+
+## STRESS-04 — MP4 mux large-sample argument overflow
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Do **not** merge PR #19 / #20 / #21 / this branch.
+
+| | |
+| --- | --- |
+| Verdict | **C — EXCESSIVE SPREAD / ARGUMENT COUNT.** Human stack on `04fc687`: `box` → `fullBox` → `videoTrak` → `buildMoov` → `muxAvcToMp4` at `exportFrame 41889`, `videoReq/Dec/Enc 21195`, stage mux. Not recursion / AFE / ENC backpressure / STRESS-01 / STRESS-03. |
+| Offending sites | **STSZ first** (`fullBox("stsz", …, ...samples.map(u32))`). Same hazard: video/audio `concat(...samples.map(s => s.data))`, audio STSZ, STSS keys, unpacked STTS `fullBox(...parts)`. |
+| Diff | `concatParts` / `boxParts` / `fullBoxParts`; STSZ/STSS/STTS written as one pre-sized payload; sample bytes concatenated iteratively. Small fixed-arity `box`/`fullBox` remain. Byte-identical ISO-BMFF (golden small mux). |
+| Untouched | STRESS-02 dump capture kept. No AFE / ENC-01 / STRESS-01 / STRESS-03 semantic change. No fps/duration/sample cap, no export split, no stack-limit raise, no Mediabunny, no fMP4. |
+| Test | `tests/export/stress-04-mp4-mux-arg-overflow.test.ts` — golden A; 25k/50k video; 60k audio; structure; source audit. |
+| Gates | `tsc --noEmit` clean (stress-04 file excluded like other `node:fs` tests). Focused STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **70/70**. Full suite **1247 passed / 6 failed / 1253**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM — not a mux regression). `vite build` OK. |
+| Human remaining | MODE B EXE of this SHA: same ~23 min 1920×1080@30 project. Need `videoReq==videoDec==videoEnc`, mux Fertig, playable MP4. EXE path/SHA left for coordinator. Details: `docs/compliance/STRESS-04-MP4-MUX-ARG-OVERFLOW.md`. |
+
+## AUDIO-01 — long-form audio must not silently disappear
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Do **not** merge PR #19 / #20 / #21 / #22 or this branch.
+
+| | |
+| --- | --- |
+| Verdict | **A** (12s success timeout) then **F** (post-mux validator). Human EXE `334b150`: mix+AAC finished; `mp4HasAudioTrack` ASCII-scanned only 64 KB and missed `soun` after the video `stsz`. |
+| Human | STRESS-04 EXE: mux Fertig, no audio (timeout). AUDIO-01 EXE `334b150`: `FAIL: MP4 missing AAC audio trak` with `mp4AudioSupplied yes` / `aacOutputCount 75397` / `lastStage AUDIO_MUX_DONE`. |
+| Diff | Fail-honest `expectsAudio`; no 12s success-null; AAC high-water 8; `mp4HasAudioTrack` walks `moov` (not a 64 KB prefix). STRESS-04 mux tables unchanged. |
+| Memory | 29 / 60 / 120 min @ 44.1 kHz stereo Float32 ≈ **585 / 1211 / 2423 MiB** mix PCM. AUDIO-01 stays narrow. AUDIO-02 streaming is future. |
+| 60 / 120 | 29 min **GREEN** (after this fix; human still required). 60 min **YELLOW**. 120 min **RED**. |
+| Test | `tests/export/audio-01-long-form-fail-honest.test.ts` — A–L + F-human 64 KB scan (18). |
+| Gates | `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **81/81**. Full suite **1265 passed / 6 failed / 1271**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
+| Human remaining | Same ~29:11 1080p30 VIDEO+VIS+AUDIO project. Fertig + audible AAC start/mid/end + A/V sync. EXE path/SHA left for coordinator. Details: `docs/compliance/AUDIO-01-LONG-FORM-FAIL-HONEST.md`. |
+
+## VIS-SYNC-01 — preview / export audio-reactivity parity
+
+**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Do **not** merge PR #19–#23 or this branch.
+
+| | |
+| --- | --- |
+| Human | AUDIO-01 long-form MP4: mix+AAC audible. Studio VIS reacts. Exported VIS looks unsynced / dead. Not a volume bug. |
+| First divergence | Export used `mixEnergyAt` (~23 ms LPF / sample-diff) + `syntheticSpectrum()` (64 bins). Preview uses AnalyserNode FFT 2048 / 1024 bins + persistent onset. Kick Δrms **+0.309**; pad Δbass **−0.521**; spectrum **1024 vs 64**. |
+| Diff | Shared core (`assembleAudioFeatures` / `stepOnset` / FFT bands). Adapter A = live AnalyserNode. Adapter B = deterministic offline FFT on mixed PCM. Sequential export state. No `syntheticSpectrum` when PCM exists. Volume still proportional (no normalize). |
+| Untouched | Scenes; AUDIO-01 mix/`expectsAudio`/mux; AFE; ENC-01; STRESS-01..04 mux; Mediabunny/WebM. |
+| Test | `tests/visualizer/vis-sync-01-preview-export-parity.test.ts` — Phase 1 table + tests 1–8 (15). |
+| Gates | `tsc --noEmit` clean. Focused VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **114/114**. Full suite **1280 passed / 6 failed / 1286**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
+| Human remaining | Short 1–2 min obvious-beats export vs Studio preview, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-SYNC-01-PREVIEW-EXPORT-PARITY.md`. |
+
+## VIS-RESPONSE-01 — restore visual impact without breaking parity
+
+**IMPLEMENTED / AUTOMATED-TESTED**. 01 HUMAN **soft-PASS**. 02 on this branch is **HUMAN-PROVEN**. Base: VIS-SYNC-01 `3b16a09`. Ready to consolidate into main (coordinator merges).
+
+| | |
+| --- | --- |
+| Human | After VIS-SYNC-01, VIS reacts on the right hits but looks restrained. Not a fake-spectrum rollback. Not per-song normalize. |
+| First cause (measured) | Classification **F** = **B** FFT-average bands stay ~0.03–0.05 on loud tones (dB-sat + 170-bin mean) + **A** 1024-bin peaks saturate / 48-bar sampling misses them + **C** energy pulled down by bass + **E** scene curves need bass ≳ 0.3. **D** beatPulse already ~1 on kicks. Analyser left untouched. |
+| Diff | Shared `applyVisResponse` after raw analysis. `shape(x)=clamp01(pow(clamp01(x*1.2), 0.75))`. Bands: `max(shape(band), shape(rms)*mix)`. Spectrum: 12-bin peak-hold then `min(shape(bin), presence)`. Onset adds **0.24** to energy only. One function for Preview and Export. No AGC. |
+| Untouched | FFT / smoothing / dB / onset core; scenes; AUDIO-01; AFE; ENC-01; STRESS mux; volume semantics. |
+| Test | `tests/visualizer/vis-response-01-impact-layer.test.ts` — Phase 1 table + tests 1–8 + monotonicity (17). |
+| Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE-01 + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **131/131**. Full suite **1297 passed / 6 failed / 1303**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
+| Human | soft-PASS 2026-09-16 (M.G.M. *besser vis*). Follow-on 02 HUMAN-PROVEN. Details: `docs/compliance/VIS-RESPONSE-01-IMPACT-LAYER.md`. |
+
+## VIS-RESPONSE-02 — more felt kick / mid (same layer)
+
+**HUMAN-PROVEN** 2026-09-17 (M.G.M. *perfect*). Continues PR **#25**. Ready to consolidate into main (coordinator merges). 01 was HUMAN soft-PASS (*besser vis, rest funktioniert, kannst alles anpassen*).
+
+| | |
+| --- | --- |
+| Human | ~357.8 s 1080p30 lattice-style (orb + horizontal waves). Audio −41…−9 dB, median ~−18. Want more kick / mid; quiet quiet; pads breathe. |
+| Why | 01 `transientBoost` only hit `energy`, which scenes do not read. Wave rings used `beatPulse*0.15`. Lattice warp was bass-only (pad > kick). |
+| Diff | Defaults **gain 1.25 / gamma 0.68 / spread 18 / transient 0.38** (01: 1.2 / 0.75 / 12 / 0.24). Pad 0.35 stays ~0.72, not 1. Shared `scene-impact.ts` for Resonance Wave + Void Lattice. Same `applyVisResponse` for Preview and Export. No AGC. |
+| Untouched | Analyser core; AUDIO-01; AFE; ENC-01; STRESS mux; volume. |
+| Test | Same vis-response file + 02 vs 01 assertions + lattice/wave geometry (20). |
+| Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **134/134**. |
+| Human | **PASSED** 2026-09-17 M.G.M. *perfect*. Short Impact check, MODE B EXE tip `cc3cd08` / SHA256 `4A080D0F1369091F6F96E7A0BB7F9E6DFF74DC2923EBF6EF75FF658EC142CEFB`. Prior 01 soft-PASS (~6 min Lattice 1080p30+AAC). Locked: gain 1.25 / gamma 0.68 / spread 18 / transient 0.38; `scene-impact.ts`; no AGC; Preview=Export. Stack rests on ENC-01, STRESS-01..04, AUDIO-01/01b, VIS-SYNC-01 (~34:18 and ~64 min VIDEO+VIS+AAC). Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

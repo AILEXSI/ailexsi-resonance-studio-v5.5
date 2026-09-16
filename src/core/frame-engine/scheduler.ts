@@ -2,6 +2,7 @@ import { DecodedFrameCache } from "./cache";
 import { AfeVideoDecoder } from "./decoder";
 import { AfeError, isAfeError, throwIfAborted } from "./errors";
 import { decodeOrigin, earlierKeyframeOrigin, nextKeyframeAfter, sampleIndexAtTime } from "./mp4-reader";
+import { markStage } from "./stage-trace";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMax } from "./perf";
 import { isMonotonicRun, isPresentationRun, maxDecodeIndex, planDecodeSpan, planSampleIndexes, shouldSplitPresentationRun } from "./plan";
 import {
@@ -133,6 +134,7 @@ export class AfeScheduler {
   async getFrameAt(timeSec: number, signal?: AbortSignal): Promise<DrawableFrame | null> {
     throwIfAborted(signal);
     if (this.closed) throw new AfeError("AFE_DECODE_FAILED", "scheduler closed", false);
+    markStage("SAMPLE_SELECT");
     const index = sampleIndexAtTime(this.movie, timeSec);
     if (index == null) return null;
     afePerfCount("randomPathFrames");
@@ -143,6 +145,7 @@ export class AfeScheduler {
   async *getFramesAt(timesSec: readonly number[], signal?: AbortSignal): AsyncIterable<DrawableFrame | null> {
     throwIfAborted(signal);
     if (this.closed) throw new AfeError("AFE_DECODE_FAILED", "scheduler closed", false);
+    markStage("SAMPLE_SELECT");
     const indexes = planSampleIndexes(this.movie, timesSec);
     let i = 0;
     while (i < indexes.length) {
@@ -214,6 +217,7 @@ export class AfeScheduler {
       lastRequiredDecodeSample: lastRequired,
       requestedIndexes,
     });
+    markStage("TRANSACTION_BEGIN");
 
     const lookahead = streamLookaheadSamples(this.movie.maxReorderSamples, PREFETCH);
     afePerfMax("prefetchWindow", lookahead);
@@ -587,6 +591,7 @@ export class AfeScheduler {
       if (this.nextDecode > upto) return;
       afePerfCount("decodeSpanCalls");
       await this.decoder.ensure(signal);
+      markStage("TRANSACTION_BEGIN");
       for (let s = this.nextDecode; s <= upto; s++) {
         const sample = this.movie.samples[s];
         if (!sample) throw new AfeError("AFE_DECODE_FAILED", `missing sample ${s}`);
@@ -644,6 +649,7 @@ export class AfeScheduler {
   }
 
   private wrap(frame: VideoFrame, sample: AfeSample): AfeDrawable {
+    markStage("FRAME_READY");
     const t0 = afePerfEnabled() ? performance.now() : 0;
     const timestamp = sample.ptsTimescale / this.movie.timescale;
     const duration = sample.durationTimescale / this.movie.timescale;

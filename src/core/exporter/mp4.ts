@@ -1,14 +1,28 @@
-/** Minimal ISO-BMFF muxer for AVC (H.264) WebCodecs output, optional AAC. */
+/** Minimal ISO-BMFF muxer for AVC (H.264) WebCodecs output, optional AAC.
+ *
+ * STRESS-04: sample-count-dependent lists never travel through JS spread /
+ * argument lists. Large tables and mdat payloads use pre-sized iterative writes.
+ */
 
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const len = parts.reduce((n, p) => n + p.length, 0);
+/** Iterative concat: one length pass, one allocation, one copy pass. Never spread. */
+export function concatParts(parts: readonly Uint8Array[]): Uint8Array {
+  let len = 0;
+  for (let i = 0; i < parts.length; i++) {
+    len += parts[i]!.length;
+  }
   const out = new Uint8Array(len);
   let o = 0;
-  for (const p of parts) {
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
     out.set(p, o);
     o += p.length;
   }
   return out;
+}
+
+/** Small fixed-arity helper. Callers must not spread a sample-count list into this. */
+function concat(...parts: Uint8Array[]): Uint8Array {
+  return concatParts(parts);
 }
 
 function u8(...values: number[]): Uint8Array {
@@ -23,17 +37,47 @@ function u32(n: number): Uint8Array {
   return u8((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
 }
 
+function writeU32(out: Uint8Array, offset: number, n: number): void {
+  out[offset] = (n >>> 24) & 0xff;
+  out[offset + 1] = (n >>> 16) & 0xff;
+  out[offset + 2] = (n >>> 8) & 0xff;
+  out[offset + 3] = n & 0xff;
+}
+
 function fourcc(tag: string): Uint8Array {
   return u8(tag.charCodeAt(0), tag.charCodeAt(1), tag.charCodeAt(2), tag.charCodeAt(3));
 }
 
-function box(type: string, ...payloads: Uint8Array[]): Uint8Array {
-  const payload = concat(...payloads);
-  return concat(u32(8 + payload.length), fourcc(type), payload);
+/** Non-variadic box. `payloads` may be large; it is never spread into a call. */
+export function boxParts(type: string, payloads: readonly Uint8Array[]): Uint8Array {
+  const payload = concatParts(payloads);
+  return concatParts([u32(8 + payload.length), fourcc(type), payload]);
 }
 
+/** Non-variadic full box. Large table payloads stay in one array, not rest args. */
+export function fullBoxParts(
+  type: string,
+  version: number,
+  flags: number,
+  payloads: readonly Uint8Array[],
+): Uint8Array {
+  const header = u8(version, (flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff);
+  const all = new Array<Uint8Array>(payloads.length + 1);
+  all[0] = header;
+  for (let i = 0; i < payloads.length; i++) {
+    all[i + 1] = payloads[i]!;
+  }
+  return boxParts(type, all);
+}
+
+/** Small fixed-arity box. Sample-count lists must use boxParts / table helpers. */
+function box(type: string, ...payloads: Uint8Array[]): Uint8Array {
+  return boxParts(type, payloads);
+}
+
+/** Small fixed-arity full box. Sample-count lists must use fullBoxParts / tables. */
 function fullBox(type: string, version: number, flags: number, ...payloads: Uint8Array[]): Uint8Array {
-  return box(type, u8(version, (flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff), ...payloads);
+  return fullBoxParts(type, version, flags, payloads);
 }
 
 function asciiPad(text: string, size: number): Uint8Array {
@@ -132,9 +176,11 @@ function descriptor(tag: number, payload: Uint8Array): Uint8Array {
   );
 }
 
+/** ISO-BMFF stts. Packed run-length; payload is one pre-sized buffer (no per-entry spread). */
 function packedStts(deltas: number[]): Uint8Array {
   const entries: number[] = [];
-  for (const delta of deltas) {
+  for (let i = 0; i < deltas.length; i++) {
+    const delta = deltas[i]!;
     const last = entries.length - 2;
     if (last >= 0 && entries[last + 1] === delta) {
       entries[last] += 1;
@@ -142,11 +188,74 @@ function packedStts(deltas: number[]): Uint8Array {
       entries.push(1, delta);
     }
   }
-  const parts = [u32(entries.length / 2)];
-  for (let i = 0; i < entries.length; i += 2) {
-    parts.push(u32(entries[i]!), u32(entries[i + 1]!));
+  const entryCount = (entries.length / 2) | 0;
+  const payload = new Uint8Array(4 + entries.length * 4);
+  writeU32(payload, 0, entryCount);
+  for (let i = 0; i < entries.length; i++) {
+    writeU32(payload, 4 + i * 4, entries[i]!);
   }
-  return fullBox("stts", 0, 0, ...parts);
+  return fullBoxParts("stts", 0, 0, [payload]);
+}
+
+/** ISO-BMFF stsz with sample_size=0 and N explicit sizes. One DataView payload. */
+function stszBox(sampleByteLengths: readonly number[]): Uint8Array {
+  const n = sampleByteLengths.length;
+  const payload = new Uint8Array(8 + n * 4);
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  view.setUint32(0, 0);
+  view.setUint32(4, n);
+  for (let i = 0; i < n; i++) {
+    view.setUint32(8 + i * 4, sampleByteLengths[i]!);
+  }
+  return fullBoxParts("stsz", 0, 0, [payload]);
+}
+
+function stszBoxFromSamples(samples: readonly { data: Uint8Array }[]): Uint8Array {
+  const n = samples.length;
+  const payload = new Uint8Array(8 + n * 4);
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  view.setUint32(0, 0);
+  view.setUint32(4, n);
+  for (let i = 0; i < n; i++) {
+    view.setUint32(8 + i * 4, samples[i]!.data.length);
+  }
+  return fullBoxParts("stsz", 0, 0, [payload]);
+}
+
+/** ISO-BMFF stss. One pre-sized payload; key count may equal sample count. */
+function stssBox(keySampleNumbers: readonly number[]): Uint8Array {
+  const n = keySampleNumbers.length;
+  const payload = new Uint8Array(4 + n * 4);
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  view.setUint32(0, n);
+  for (let i = 0; i < n; i++) {
+    view.setUint32(4 + i * 4, keySampleNumbers[i]!);
+  }
+  return fullBoxParts("stss", 0, 0, [payload]);
+}
+
+function keySampleNumbers(samples: readonly AvcSample[]): number[] {
+  const keys: number[] = [];
+  for (let i = 0; i < samples.length; i++) {
+    if (samples[i]!.key) keys.push(i + 1);
+  }
+  return keys;
+}
+
+/** Concat sample bytes into one buffer. Length + copy are iterative; no spread. */
+function concatSamplePayloads(samples: readonly { data: Uint8Array }[]): Uint8Array {
+  let len = 0;
+  for (let i = 0; i < samples.length; i++) {
+    len += samples[i]!.data.length;
+  }
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const d = samples[i]!.data;
+    out.set(d, o);
+    o += d.length;
+  }
+  return out;
 }
 
 function esdsFromAsc(asc: Uint8Array, bitrate: number): Uint8Array {
@@ -172,19 +281,9 @@ function videoTrak(opts: {
   chunkOffset: number;
 }): Uint8Array {
   const stts = packedStts(opts.sampleDeltas);
-  const keyIndexes = opts.samples
-    .map((s, i) => (s.key ? i + 1 : 0))
-    .filter((i) => i > 0);
-  const stss = fullBox("stss", 0, 0, u32(keyIndexes.length), ...keyIndexes.map((i) => u32(i)));
+  const stss = stssBox(keySampleNumbers(opts.samples));
   const stsc = fullBox("stsc", 0, 0, u32(1), u32(1), u32(opts.samples.length), u32(1));
-  const stsz = fullBox(
-    "stsz",
-    0,
-    0,
-    u32(0),
-    u32(opts.samples.length),
-    ...opts.samples.map((s) => u32(s.data.length)),
-  );
+  const stsz = stszBoxFromSamples(opts.samples);
   const stco = fullBox("stco", 0, 0, u32(1), u32(opts.chunkOffset));
   const avc1 = box(
     "avc1",
@@ -269,14 +368,7 @@ function audioTrak(opts: {
 }): Uint8Array {
   const stts = packedStts(opts.sampleDeltas);
   const stsc = fullBox("stsc", 0, 0, u32(1), u32(1), u32(opts.samples.length), u32(1));
-  const stsz = fullBox(
-    "stsz",
-    0,
-    0,
-    u32(0),
-    u32(opts.samples.length),
-    ...opts.samples.map((s) => u32(s.data.length)),
-  );
+  const stsz = stszBoxFromSamples(opts.samples);
   const stco = fullBox("stco", 0, 0, u32(1), u32(opts.chunkOffset));
   const mp4a = box(
     "mp4a",
@@ -376,8 +468,8 @@ export function muxAvcToMp4(opts: {
     : 0;
   const durationMovie = Math.max(videoMediaDuration, audioDurationMovie);
 
-  const videoPayload = concat(...opts.samples.map((s) => s.data));
-  const audioPayload = audio ? concat(...audio.samples.map((s) => s.data)) : new Uint8Array(0);
+  const videoPayload = concatSamplePayloads(opts.samples);
+  const audioPayload = audio ? concatSamplePayloads(audio.samples) : new Uint8Array(0);
   const mdat = box("mdat", videoPayload, audioPayload);
   const mdatHeaderSize = 8;
 
@@ -404,10 +496,8 @@ export function muxAvcToMp4(opts: {
       sampleDeltas,
       chunkOffset: videoOffset,
     });
-    const tracks = [video];
-    if (audio) {
-      tracks.push(
-        audioTrak({
+    const audioTrakBox = audio
+      ? audioTrak({
           durationMovie,
           sampleRate: audio.sampleRate,
           channels: audio.channels,
@@ -416,9 +506,8 @@ export function muxAvcToMp4(opts: {
           samples: audio.samples,
           sampleDeltas: audioDeltas,
           chunkOffset: audioOffset,
-        }),
-      );
-    }
+        })
+      : undefined;
     const mvhd = fullBox(
       "mvhd",
       0,
@@ -441,19 +530,147 @@ export function muxAvcToMp4(opts: {
       u32(0),
       u32(nextTrackId),
     );
-    return box("moov", mvhd, ...tracks);
+    return audioTrakBox ? box("moov", mvhd, video, audioTrakBox) : box("moov", mvhd, video);
   };
 
   let moov = buildMoov(0, 0);
   const videoOffset = ftyp.length + moov.length + mdatHeaderSize;
   const audioOffset = videoOffset + videoPayload.length;
   moov = buildMoov(videoOffset, audioOffset);
-  return concat(ftyp, moov, mdat);
+  return concatParts([ftyp, moov, mdat]);
+}
+
+function readU32(bytes: Uint8Array, offset: number): number {
+  return (
+    ((bytes[offset] ?? 0) << 24) |
+    ((bytes[offset + 1] ?? 0) << 16) |
+    ((bytes[offset + 2] ?? 0) << 8) |
+    (bytes[offset + 3] ?? 0)
+  ) >>> 0;
+}
+
+function readFourcc(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(
+    bytes[offset] ?? 0,
+    bytes[offset + 1] ?? 0,
+    bytes[offset + 2] ?? 0,
+    bytes[offset + 3] ?? 0,
+  );
+}
+
+type IsoBox = {
+  type: string;
+  start: number;
+  size: number;
+  payloadStart: number;
+  payloadEnd: number;
+};
+
+/** Local walker — do not import AFE `readBoxes` (muxer stays independent). */
+function readIsoBoxes(bytes: Uint8Array, start: number, end: number): IsoBox[] {
+  const out: IsoBox[] = [];
+  let off = start;
+  while (off + 8 <= end) {
+    const size32 = readU32(bytes, off);
+    const type = readFourcc(bytes, off + 4);
+    let header = 8;
+    let size = size32;
+    if (size32 === 1) {
+      if (off + 16 > end) break;
+      const hi = readU32(bytes, off + 8);
+      const lo = readU32(bytes, off + 12);
+      if (hi > 0x1fffff) break;
+      size = hi * 0x1_0000_0000 + lo;
+      header = 16;
+    } else if (size32 === 0) {
+      size = end - off;
+    }
+    if (size < header || off + size > end) break;
+    out.push({ type, start: off, size, payloadStart: off + header, payloadEnd: off + size });
+    off += size;
+  }
+  return out;
+}
+
+function child(boxes: readonly IsoBox[], type: string): IsoBox | undefined {
+  return boxes.find((b) => b.type === type);
+}
+
+/**
+ * 2-byte AAC-LC AudioSpecificConfig is valid (e.g. 0x12 0x10 = LC / 44.1 kHz / stereo).
+ * Human AUDIO-01 dump had descriptionBytes 2 — that is complete, not truncated.
+ */
+export function aacAudioSpecificConfigIsUsable(desc: Uint8Array | undefined | null): boolean {
+  if (!desc || desc.byteLength < 2) return false;
+  const objectType = desc[0]! >> 3;
+  return objectType >= 1 && objectType <= 31;
+}
+
+export type Mp4SoundTrackInfo = {
+  present: boolean;
+  hasSoun: boolean;
+  hasMp4a: boolean;
+  sampleCount: number;
+};
+
+function soundTrackInfoFromTrak(bytes: Uint8Array, trak: IsoBox): Mp4SoundTrackInfo {
+  const mdia = child(readIsoBoxes(bytes, trak.payloadStart, trak.payloadEnd), "mdia");
+  if (!mdia) return { present: false, hasSoun: false, hasMp4a: false, sampleCount: 0 };
+  const mdiaKids = readIsoBoxes(bytes, mdia.payloadStart, mdia.payloadEnd);
+  const hdlr = child(mdiaKids, "hdlr");
+  const hasSoun = Boolean(
+    hdlr && hdlr.payloadEnd - hdlr.payloadStart >= 12 && readFourcc(bytes, hdlr.payloadStart + 8) === "soun",
+  );
+  const minf = child(mdiaKids, "minf");
+  if (!minf) return { present: false, hasSoun, hasMp4a: false, sampleCount: 0 };
+  const stbl = child(readIsoBoxes(bytes, minf.payloadStart, minf.payloadEnd), "stbl");
+  if (!stbl) return { present: false, hasSoun, hasMp4a: false, sampleCount: 0 };
+  const stblKids = readIsoBoxes(bytes, stbl.payloadStart, stbl.payloadEnd);
+  const stsd = child(stblKids, "stsd");
+  let hasMp4a = false;
+  if (stsd && stsd.payloadEnd - stsd.payloadStart >= 8) {
+    // stsd is a full box + entry_count, then sample entries.
+    hasMp4a = readIsoBoxes(bytes, stsd.payloadStart + 8, stsd.payloadEnd).some((b) => b.type === "mp4a");
+  }
+  const stsz = child(stblKids, "stsz");
+  let sampleCount = 0;
+  if (stsz && stsz.payloadEnd - stsz.payloadStart >= 12) {
+    sampleCount = readU32(bytes, stsz.payloadStart + 8);
+  }
+  const present = hasSoun && hasMp4a && sampleCount > 0;
+  return { present, hasSoun, hasMp4a, sampleCount };
+}
+
+/**
+ * True when moov contains an AAC sound trak (hdlr=soun + stsd mp4a + stsz entry_count>0).
+ *
+ * Must walk boxes. A 64 KB ASCII prefix scan is a false negative on long 1080p30
+ * files: video stsz (~4N) sits in the first trak and pushes `soun`/`mp4a` past 64 KB.
+ * Human AUDIO-01 EXE `334b150`: mp4AudioSupplied yes, aacOutputCount 75397,
+ * lastStage AUDIO_MUX_DONE, mp4HasAudioTrack no — trak was written, validator missed it.
+ */
+export function mp4SoundTrackInfo(bytes: Uint8Array): Mp4SoundTrackInfo {
+  const empty: Mp4SoundTrackInfo = { present: false, hasSoun: false, hasMp4a: false, sampleCount: 0 };
+  const moov = child(readIsoBoxes(bytes, 0, bytes.length), "moov");
+  if (!moov) return empty;
+  const traks = readIsoBoxes(bytes, moov.payloadStart, moov.payloadEnd).filter((b) => b.type === "trak");
+  for (const trak of traks) {
+    const info = soundTrackInfoFromTrak(bytes, trak);
+    if (info.hasSoun || info.hasMp4a) return info;
+  }
+  return empty;
 }
 
 export function mp4HasAudioTrack(bytes: Uint8Array): boolean {
-  const text = Array.from(bytes.subarray(0, Math.min(bytes.length, 64_000)))
-    .map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : "."))
-    .join("");
-  return text.includes("mp4a") && text.includes("soun");
+  const info = mp4SoundTrackInfo(bytes);
+  return info.present;
 }
+
+/** Exported for STRESS-04 tests that assert table construction without a full movie. */
+export const mp4MuxInternals = {
+  packedStts,
+  stszBox,
+  stszBoxFromSamples,
+  stssBox,
+  concatSamplePayloads,
+};

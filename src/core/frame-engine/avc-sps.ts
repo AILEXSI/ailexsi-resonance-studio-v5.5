@@ -2,9 +2,10 @@
  * AVC SPS VUI bitstream_restriction — Chromium / WebView2 tail B-frames.
  *
  * When VUI omits bitstream_restriction, some Chromium VideoDecoder builds
- * infer max_dec_frame_buffering as if there were no B-frames and drop the
- * last delayed pictures at EOS. Communicate the inferred DPB size in avcC
- * and in-band SPS. Exact PTS mapping is unchanged.
+ * infer max_dec_frame_buffering as if there were no B-frames and drop delayed
+ * pictures (AFE-25: last B at EOS; STRESS-01: first disposable B after IDR,
+ * human/Chrome PTS 100000). Communicate the inferred DPB size in avcC and
+ * in-band SPS. Exact PTS mapping is unchanged.
  */
 
 const HIGH_PROFILES = new Set([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]);

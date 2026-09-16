@@ -73,6 +73,19 @@ export {
   addTimescale,
 } from "./frame-match";
 export {
+  STRESS03_STAGE_NAMES,
+  firstBlockedStage,
+  formatStageTraceForDump,
+  formatStageTraceLines,
+  getStageTraceContext,
+  markStage,
+  nextExpectedStage,
+  resetStageTrace,
+  setStageTraceContext,
+  stageTraceEntries,
+} from "./stage-trace";
+export type { StageTraceContext, StageTraceEntry, Stress03StageName } from "./stage-trace";
+export {
   AFE_DECODE_STALL_MS,
   AFE_DECODE_QUEUE_HIGH_WATER_CAP,
   AFE_DECODE_QUEUE_RECOVERY_FILL,

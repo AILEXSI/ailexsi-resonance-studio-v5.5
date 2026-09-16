@@ -12,8 +12,15 @@ import {
 import { contextFromProject, resolvePictureSource } from "./transition";
 import { getRegisteredScene } from "./visualz";
 import type { AudioFeatures } from "./visualz";
-import { isSilentEnergy, stepOnset } from "./visualz/feature-extractor";
+import {
+  createOfflineFeatureExtractor,
+  isSilentEnergy,
+  offlineExtractorFor,
+  type MixPcm as ExtractorMixPcm,
+  type OfflineFeatureExtractor,
+} from "./visualz/feature-extractor";
 import { preferLiveFeatures } from "./visualz/playback-tap";
+import { applyVisResponse } from "./visualz/vis-response";
 
 export const DEFAULT_VIS_EVENT_MS = 4000;
 
@@ -101,9 +108,8 @@ function clamp01(n: number): number {
 
 /**
  * SYNTHETIC fallback AudioFeatures from a 120 BPM beat grid (and its 2× hats).
- * This is not an FFT of A1/A2. Preview prefers a live AnalyserNode tap when
- * playback audio is present; export and tests always use this grid so scenes
- * still animate without Web Audio.
+ * This is not an FFT of A1/A2. Used only when no mix PCM exists (empty project).
+ * Preview prefers a live AnalyserNode tap; export uses the shared offline FFT.
  */
 export function featuresAt(timeMs: number, durationMs: number): VisualizerFeatures {
   const span = Math.max(0, durationMs);
@@ -116,19 +122,17 @@ export function featuresAt(timeMs: number, durationMs: number): VisualizerFeatur
   const high = clamp01(hats * (0.35 + 0.65 * (1 - energy)));
   const spectrum = syntheticSpectrum(bass, mid, high, timeMs, energy);
   const onset = energy > 0.92;
-  return {
+  return presentVisualizerFeatures({
     timeMs,
-    energy,
     rms: energy,
     bass,
     mid,
-    high,
     treble: high,
     spectrum,
     onset,
     beatPulse: energy,
     tempoBpm: DEFAULT_VISUALIZER_BPM,
-  };
+  });
 }
 
 /** Fake 64-bin spectrum so Visualz scenes that read `spectrum` still move. */
@@ -150,91 +154,24 @@ function syntheticSpectrum(
   return spec;
 }
 
-export type MixPcm = Pick<AudioBuffer, "sampleRate" | "length" | "numberOfChannels" | "getChannelData">;
+export type MixPcm = ExtractorMixPcm;
 
-function mixEnergyAt(buf: MixPcm, timeMs: number): {
-  rms: number;
-  bass: number;
-  mid: number;
-  treble: number;
-  energy: number;
-} {
-  const sr = buf.sampleRate > 0 ? buf.sampleRate : 44100;
-  const chans = Math.max(1, buf.numberOfChannels);
-  const win = Math.min(buf.length, Math.max(64, Math.round(sr * 0.023)));
-  const center = Math.round((Math.max(0, timeMs) / 1000) * sr);
-  const start = Math.max(0, Math.min(Math.max(0, buf.length - win), center - Math.floor(win / 2)));
-  const channels = Array.from({ length: chans }, (_, i) => buf.getChannelData(i));
-  let sumSq = 0;
-  let lowSq = 0;
-  let highSq = 0;
-  let prev = 0;
-  let lp = 0;
-  for (let i = 0; i < win; i++) {
-    let s = 0;
-    for (const ch of channels) s += ch[start + i] ?? 0;
-    s /= chans;
-    sumSq += s * s;
-    lp = lp * 0.9 + s * 0.1;
-    lowSq += lp * lp;
-    const d = s - prev;
-    highSq += d * d;
-    prev = s;
-  }
-  const n = Math.max(1, win);
-  const rms = clamp01(Math.sqrt(sumSq / n) * 2);
-  const bass = clamp01(Math.sqrt(lowSq / n) * 2.4);
-  const treble = clamp01(Math.sqrt(highSq / n) * 2);
-  const mid = clamp01(rms * 0.55 + treble * 0.45);
-  const energy = clamp01(rms * 0.5 + bass * 0.5);
-  return { rms, bass, mid, treble, energy };
-}
-
-const MIX_HOP_MS = 10;
-
-function lastMixOnsetMs(buf: MixPcm, timeMs: number): number {
-  const hop = MIX_HOP_MS;
-  const from = Math.max(0, timeMs - 400);
-  let prevEnergy = mixEnergyAt(buf, from - hop).energy;
-  let last = Number.NEGATIVE_INFINITY;
-  for (let t = from; t < timeMs - 1e-6; t += hop) {
-    const energy = mixEnergyAt(buf, t).energy;
-    const stepped = stepOnset({ energy, prevEnergy, timeMs: t, lastOnsetTime: last });
-    if (stepped.onset) last = t;
-    prevEnergy = stepped.prevEnergy;
-  }
-  return last;
+/**
+ * Single Preview/Export presentation hook. Analysis stays in the extractor;
+ * scenes only see this packet. Same raw + DEFAULT_VIS_RESPONSE ⇒ same result.
+ */
+export function presentVisualizerFeatures(raw: AudioFeatures): VisualizerFeatures {
+  return applyVisResponse(raw);
 }
 
 /**
- * Feature packet from mixed / A1 PCM using the standalone Visualz onset step.
- * Quiet windows stay near 0. Never invents a 120 BPM grid — tempoBpm stays null.
+ * Feature packet from mixed / A1 PCM using the shared Preview analyser core
+ * (fftSize 2048, Blackman, dB [-100,-30], smoothing 0.75, same band split
+ * and onset step). Never invents a 120 BPM grid — tempoBpm stays null.
+ * Sequential calls on the same buffer keep prevEnergy / lastOnset / smoothing.
  */
 export function featuresFromMix(buf: MixPcm, timeMs: number): VisualizerFeatures {
-  const hop = MIX_HOP_MS;
-  const cur = mixEnergyAt(buf, timeMs);
-  if (isSilentEnergy(cur.rms, cur.bass)) return quietVisualizerFeatures(timeMs);
-  const prev = mixEnergyAt(buf, timeMs - hop);
-  const lastOnsetTime = lastMixOnsetMs(buf, timeMs);
-  const stepped = stepOnset({
-    energy: cur.energy,
-    prevEnergy: prev.energy,
-    timeMs,
-    lastOnsetTime,
-  });
-  return {
-    timeMs,
-    energy: cur.energy,
-    rms: cur.rms,
-    bass: cur.bass,
-    mid: cur.mid,
-    high: cur.treble,
-    treble: cur.treble,
-    spectrum: syntheticSpectrum(cur.bass, cur.mid, cur.treble, timeMs, cur.energy),
-    onset: stepped.onset,
-    beatPulse: stepped.beatPulse,
-    tempoBpm: null,
-  };
+  return presentVisualizerFeatures(offlineExtractorFor(buf).sample(timeMs));
 }
 
 export function quietVisualizerFeatures(timeMs: number): VisualizerFeatures {
@@ -253,23 +190,64 @@ export function quietVisualizerFeatures(timeMs: number): VisualizerFeatures {
   };
 }
 
+export type ExportFeatureSession = {
+  sample(timeMs: number): VisualizerFeatures;
+  reset(): void;
+  /** Session sample() already ran applyVisResponse — do not shape again. */
+  readonly presented: true;
+};
+
+/**
+ * Sequential export analysis. Frame N+1 advances smoothing / prevEnergy /
+ * lastOnset from frame N. Same-time re-sample is cached (VIS is painted twice
+ * per canvas encode). `timeMs` is export-range local (same clock as the mixed
+ * AudioBuffer and remapped VIS events). `timelineOriginMs` is only for the
+ * no-audio 120 BPM fallback.
+ */
+export function createExportFeatureSession(
+  mix: MixPcm | null | undefined,
+  opts?: { hopMs?: number; durationMs?: number; timelineOriginMs?: number },
+): ExportFeatureSession {
+  const extractor: OfflineFeatureExtractor | null =
+    mix && mix.length >= 8 ? createOfflineFeatureExtractor(mix, { hopMs: opts?.hopMs }) : null;
+  const origin = opts?.timelineOriginMs ?? 0;
+  const durationMs = opts?.durationMs ?? 0;
+  return {
+    presented: true,
+    sample(timeMs: number) {
+      if (extractor) return presentVisualizerFeatures(extractor.sample(timeMs));
+      return featuresAt(origin + timeMs, origin + durationMs);
+    },
+    reset() {
+      extractor?.reset();
+    },
+  };
+}
+
 /** Preview=export: loaded mix PCM is the clock. No-audio only falls back to 120 BPM. */
 export function visFeaturesForExport(
   timeMs: number,
   durationMs: number,
   mix?: MixPcm | null,
-  opts?: { timelineOriginMs?: number },
+  opts?: { timelineOriginMs?: number; extractor?: OfflineFeatureExtractor | ExportFeatureSession },
 ): VisualizerFeatures {
   const origin = opts?.timelineOriginMs ?? 0;
+  if (opts?.extractor) {
+    if ("presented" in opts.extractor && opts.extractor.presented) {
+      return opts.extractor.sample(timeMs);
+    }
+    return presentVisualizerFeatures(opts.extractor.sample(timeMs));
+  }
   if (mix && mix.length >= 8) return featuresFromMix(mix, timeMs);
   return featuresAt(origin + timeMs, origin + durationMs);
 }
 
 /**
- * Preview clock: A1/mix PCM first, else live tap, else quiet if the project
- * audio path is active (including a silent gap at the playhead), else the
- * empty-project 120 BPM fallback. `featuresAt` must not run while real audio
- * exists but is currently silent / missing at t.
+ * Preview clock: live AnalyserNode when a clip is under the playhead and the
+ * tap has energy (Studio playback). Else mix-PCM through the shared offline
+ * FFT (paused / seek / no tap). Else quiet if the project audio path is
+ * active (including a silent gap). Else the empty-project 120 BPM fallback.
+ * `featuresAt` must not run while real audio exists but is currently silent.
  */
 export function visFeaturesForPreview(opts: {
   timeMs: number;
@@ -281,19 +259,23 @@ export function visFeaturesForPreview(opts: {
   hasClipAtPlayhead?: boolean;
 }): VisualizerFeatures {
   const clipHere = opts.hasClipAtPlayhead ?? Boolean(opts.mix && opts.mix.length >= 8);
+  if (opts.hasClipAtPlayhead === false && opts.audioLoaded) {
+    return quietVisualizerFeatures(opts.timeMs);
+  }
+  if (clipHere && opts.live && !isSilentEnergy(opts.live.rms, opts.live.bass)) {
+    return presentVisualizerFeatures(opts.live);
+  }
   if (clipHere && opts.mix && opts.mix.length >= 8) {
     return featuresFromMix(opts.mix, opts.timeMs);
   }
   if (opts.audioLoaded) {
-    if (opts.hasClipAtPlayhead === false) return quietVisualizerFeatures(opts.timeMs);
     const live = preferLiveFeatures(opts.live, quietVisualizerFeatures(opts.timeMs));
-    return {
-      ...live,
-      energy: clamp01(live.rms * 0.5 + live.bass * 0.5),
-      high: live.treble,
-    };
+    return presentVisualizerFeatures(live);
   }
-  return preferLiveFeatures(opts.live, featuresAt(opts.timeMs, opts.durationMs)) as VisualizerFeatures;
+  const fallback = preferLiveFeatures(opts.live, featuresAt(opts.timeMs, opts.durationMs));
+  // featuresAt is already presented; a live tap still needs the same transform.
+  if (fallback === opts.live) return presentVisualizerFeatures(fallback);
+  return fallback as VisualizerFeatures;
 }
 
 export function nextSceneId(current: VisualizerSceneId): VisualizerSceneId {

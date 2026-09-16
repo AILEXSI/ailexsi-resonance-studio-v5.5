@@ -1,4 +1,13 @@
-import { encodeAac, mixJobAudio, probeAac, withTimeout, type AacProbe } from "./audio";
+import {
+  AudioExportError,
+  finalizeExportAudio,
+  formatAudioFail,
+  markAudioStage,
+  prepareJobAudioMix,
+  snapshotAudioExportReport,
+  updateAudioExportReport,
+  withTimeout,
+} from "./audio";
 import { clearFrameSources, getDecoder, sourceTimeSec, type DrawableFrame } from "./frame-source";
 import {
   AfeError,
@@ -7,8 +16,11 @@ import {
   hostSafeSourceName,
   isAfeError,
   isExportTransactionComplete,
+  markStage,
   mustColdOpenVideoDecoder,
   nowMs,
+  resetStageTrace,
+  setStageTraceContext,
   type AfeDumpPictureKind,
   type AfeStallSnapshot,
 } from "../frame-engine";
@@ -18,7 +30,7 @@ import { validateMp4Ftyp } from "./ftyp";
 import { videoClipAt } from "./job";
 import { clearMediaCache, isPlayableSource } from "./media";
 import { clearStillCache, paintStillUrl } from "../still";
-import { audioInputForMux, mp4HasAudioTrack, muxAvcToMp4, type AvcSample } from "./mp4";
+import { mp4HasAudioTrack, muxAvcToMp4, type AvcSample } from "./mp4";
 import type { ExportClip, ExportHooks, ExportJob, ExportResult } from "./types";
 import { videoAlphaAtClipTime } from "../fades";
 import {
@@ -29,10 +41,20 @@ import {
 } from "../transition";
 import { exportVisOf } from "./job";
 import { DEFAULT_AVC_BITRATE, selectAvcEncoderConfig } from "./avc-capability";
+import {
+  beginExportFailSession,
+  captureThrownValue,
+  exportResultFromCaughtThrow,
+  isStackOverflowThrown,
+  mergeStallSnapshotIntoExportFailContext,
+  updateExportFailContext,
+} from "./export-fail-dump";
 
 export { compositeVideoAt as exportComposite } from "../transition";
 import {
+  createExportFeatureSession,
   visFeaturesForExport,
+  type ExportFeatureSession,
   type MixPcm,
   renderVisualizerScene,
   visualizerEventAt,
@@ -52,6 +74,7 @@ export function webCodecsUnavailableMessage(): string {
 }
 
 function fail(job: ExportJob, error: string, aborted = false): ExportResult {
+  const audioReport = snapshotAudioExportReport();
   return {
     success: false,
     aborted,
@@ -59,7 +82,15 @@ function fail(job: ExportJob, error: string, aborted = false): ExportResult {
     fileName: job.fileName,
     durationMs: job.durationMs,
     fileSizeBytes: 0,
+    expectsAudio: audioReport.expectsAudio,
+    audioReport,
   };
+}
+
+function failAudio(job: ExportJob, error: string): ExportResult {
+  updateExportFailContext({ stage: "audio" });
+  const msg = error.startsWith("FAIL:") ? error : `FAIL: ${error}`;
+  return fail(job, formatAudioFail(msg));
 }
 
 function aborted(job: ExportJob): ExportResult {
@@ -122,6 +153,7 @@ function paintVisualizer(
   timeMs: number,
   dt: number,
   mix?: MixPcm | null,
+  session?: ExportFeatureSession | null,
 ): void {
   if (resolvePictureSource(exportPictureCtx(job), timeMs).kind !== "vis") return;
   const covering = visualizerEventAt(job.visualizer, timeMs);
@@ -133,6 +165,7 @@ function paintVisualizer(
   if (!sceneId) return;
   const features = visFeaturesForExport(timeMs, job.durationMs, mix, {
     timelineOriginMs: job.startMs,
+    extractor: session ?? undefined,
   });
   renderVisualizerScene(ctx, job.width, job.height, sceneId, features, dt);
 }
@@ -243,6 +276,8 @@ export async function exportWithWebCodecs(
   job: ExportJob,
   hooks: ExportHooks = {},
 ): Promise<ExportResult> {
+  beginExportFailSession(job);
+  resetStageTrace();
   if (!canUseWebCodecs()) return fail(job, webCodecsUnavailableMessage());
   if (job.durationMs <= 0) return fail(job, "FAIL: empty export range");
 
@@ -266,20 +301,18 @@ export async function exportWithWebCodecs(
   if (!ctx) return fail(job, "FAIL: 2D canvas unavailable");
 
   hooks.onProgress?.({ percent: 4, stage: "Mixing audio" });
-  let aacProbe: AacProbe | null = null;
+  let audioExpected = false;
+  let aacProbe = null as Awaited<ReturnType<typeof prepareJobAudioMix>>["probe"];
   let mixed: AudioBuffer | null = null;
   try {
-    aacProbe = await withTimeout(probeAac(), 4000, null);
-  } catch {
-    aacProbe = null;
-  }
-  const mixLayout = aacProbe ?? { sampleRate: 44100, channels: 2, bitrate: 128_000 };
-  if (job.visualizer.enabled && !job.visualizer.muted) {
-    try {
-      mixed = await withTimeout(mixJobAudio(job, mixLayout, hooks.signal), 12000, null);
-    } catch {
-      mixed = null;
-    }
+    const prepared = await prepareJobAudioMix(job, hooks);
+    audioExpected = prepared.expects;
+    aacProbe = prepared.probe;
+    mixed = prepared.mixed;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (hooks.signal?.aborted || /abort/i.test(msg)) return aborted(job);
+    return failAudio(job, e instanceof AudioExportError ? e.message : msg);
   }
 
   hooks.onProgress?.({ percent: 6, stage: "Encoding H.264" });
@@ -321,6 +354,11 @@ export async function exportWithWebCodecs(
   const frameDurUs = Math.round(1_000_000 / job.fps);
   const dt = 1 / job.fps;
   const runs = groupFrameRuns(job, frameCount, job.fps);
+  const visSession = createExportFeatureSession(mixed, {
+    hopMs: 1000 / Math.max(1, job.fps),
+    durationMs: job.durationMs,
+    timelineOriginMs: job.startMs,
+  });
 
   const waitForQueue = async () => {
     if (!afePerfEnabled()) {
@@ -354,7 +392,7 @@ export async function exportWithWebCodecs(
 
   const encodeCanvas = async (i: number) => {
     const timeMs = (i / job.fps) * 1000;
-    paintVisualizer(ctx, job, timeMs, dt, mixed);
+    paintVisualizer(ctx, job, timeMs, dt, mixed, visSession);
     await waitForQueue();
     const frame = new VideoFrame(canvas, {
       timestamp: i * frameDurUs,
@@ -367,7 +405,7 @@ export async function exportWithWebCodecs(
   const paintFallback = (i: number) => {
     const timeMs = (i / job.fps) * 1000;
     beginExportFrame(ctx, width, height, job, timeMs);
-    paintVisualizer(ctx, job, timeMs, dt, mixed);
+    paintVisualizer(ctx, job, timeMs, dt, mixed, visSession);
   };
 
   let visFrames = 0;
@@ -411,6 +449,25 @@ export async function exportWithWebCodecs(
   const stallExtraFromClip = (clip: ExportClip, i: number): Partial<AfeStallSnapshot> => {
     const timeMs = (i / job.fps) * 1000;
     const pictureKind = exportPictureKind(job, timeMs);
+    updateExportFailContext({
+      exportFrame: i,
+      timelineMs: timeMs,
+      fps: job.fps,
+      resolution: `${width}x${height}`,
+      clipId: clip.id,
+      clipName: clip.label,
+      sourceId: hostSafeSourceName(clip.sourceUrl),
+      sourceInMs: clip.sourceInMs ?? null,
+      sourceOutMs: clip.sourceOutMs ?? null,
+      pictureMode: pictureKind,
+      videoReq: videoFramesRequested,
+      videoDec: videoFramesDecoded,
+      videoEnc: videoFramesEncoded,
+      afeFrames,
+      visFrames,
+      blackFrames,
+      encoderQueue: encoder.encodeQueueSize,
+    });
     return {
       exportFrameIndex: i,
       exportTimestampSec: i / job.fps,
@@ -442,6 +499,16 @@ export async function exportWithWebCodecs(
     };
   };
 
+  const bindStageTrace = (clip: ExportClip, i: number): void => {
+    setStageTraceContext({
+      timelineMs: (i / job.fps) * 1000,
+      exportFrame: i,
+      clipId: clip.id,
+      clipName: clip.label,
+      sourceId: hostSafeSourceName(clip.sourceUrl),
+    });
+  };
+
   try {
     let previousPictureKind: AfeDumpPictureKind | null = null;
     for (const run of runs) {
@@ -452,6 +519,22 @@ export async function exportWithWebCodecs(
         for (let k = 0; k < run.count; k++) {
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           const i = run.startIndex + k;
+          updateExportFailContext({
+            exportFrame: i,
+            timelineMs: (i / job.fps) * 1000,
+            fps: job.fps,
+            resolution: `${width}x${height}`,
+            clipId: clip?.id ?? null,
+            clipName: clip?.label ?? null,
+            pictureMode: run.pictureKind,
+            videoReq: videoFramesRequested,
+            videoDec: videoFramesDecoded,
+            videoEnc: videoFramesEncoded,
+            afeFrames,
+            visFrames,
+            blackFrames,
+            encoderQueue: encoder.encodeQueueSize,
+          });
           hooks.onProgress?.({
             percent: Math.round((i / frameCount) * 80) + 8,
             stage: encodingStage(),
@@ -501,6 +584,10 @@ export async function exportWithWebCodecs(
         nextPictureKind: "video",
       });
       coldOpenAfterVisForDump = coldOpenAfterVis;
+      bindStageTrace(clip, run.startIndex);
+      markStage("FRAME_REQUESTED");
+      markStage("CLIP_SELECTED");
+      markStage("SOURCE_RESOLVED");
       try {
         decoded = await withTimeout(
           getDecoder(clip.sourceUrl, hooks.signal, { fresh: coldOpenAfterVis }),
@@ -525,6 +612,12 @@ export async function exportWithWebCodecs(
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           if (encoderError) throw encoderError;
           videoFramesRequested += 1;
+          if (k > 0) {
+            bindStageTrace(clip, run.startIndex + k);
+            markStage("FRAME_REQUESTED");
+            markStage("CLIP_SELECTED");
+            markStage("SOURCE_RESOLVED");
+          }
           const stallFields = {
             ...stallExtraFromClip(clip, run.startIndex + k),
             videoFramesRequested,
@@ -626,6 +719,16 @@ export async function exportWithWebCodecs(
           k += 1;
         }
       } catch (e) {
+        captureThrownValue(e);
+        const liveDump =
+          decoded?.stallSnapshot({
+            ...stallExtraFromClip(clip, run.startIndex + k),
+            encoderEncodeQueueSize: encoder.encodeQueueSize,
+            lastProgressUpdateMs: lastProgressAt,
+            stalledMs: AFE_DECODE_STALL_MS,
+          }) ?? null;
+        if (liveDump) mergeStallSnapshotIntoExportFailContext(liveDump);
+        if (isStackOverflowThrown(e)) throw e;
         const msg = e instanceof Error ? e.message : String(e);
         if (isAfeError(e) && e.code === "AFE_DECODE_STALL") {
           const dump =
@@ -677,11 +780,14 @@ export async function exportWithWebCodecs(
     clearFrameSources();
     clearMediaCache();
     clearStillCache();
+    captureThrownValue(e);
     const msg = e instanceof Error ? e.message : String(e);
     if (hooks.signal?.aborted || /abort/i.test(msg) || (isAfeError(e) && e.code === "AFE_ABORTED")) {
       return aborted(job);
     }
+    if (isStackOverflowThrown(e)) return exportResultFromCaughtThrow(job, e);
     if (isAfeError(e) || msg.startsWith("AFE_")) return failAfe(job, e);
+    if (e instanceof Error && e.stack) return exportResultFromCaughtThrow(job, e);
     const prefixed = msg.startsWith("FAIL:") || msg.startsWith("missing:") ? msg : `FAIL: ${msg}`;
     return fail(job, prefixed.startsWith("missing:") ? `FAIL: ${prefixed}` : prefixed);
   }
@@ -698,25 +804,20 @@ export async function exportWithWebCodecs(
   let audioTrack: Parameters<typeof muxAvcToMp4>[0]["audio"];
   let audioKind: "aac" | "none" = "none";
   try {
-    const aacProbe = await withTimeout(probeAac(), 4000, null);
-    if (aacProbe) {
-      if (!mixed) {
-        mixed = await withTimeout(mixJobAudio(job, aacProbe, hooks.signal), 12000, null);
-      }
-      if (mixed) {
-        const encoded = await withTimeout(encodeAac(mixed, aacProbe, hooks), 12000, null);
-        audioTrack = audioInputForMux(encoded, aacProbe);
-        if (audioTrack) audioKind = "aac";
-      }
-    }
+    const finalized = await finalizeExportAudio(job, mixed, aacProbe, hooks);
+    audioTrack = finalized.audioTrack;
+    if (audioTrack) audioKind = "aac";
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (hooks.signal?.aborted || /abort/i.test(msg)) return aborted(job);
-    audioKind = "none";
+    return failAudio(job, e instanceof AudioExportError ? e.message : `AAC encode failed: ${msg}`);
   }
 
   if (hooks.signal?.aborted) return aborted(job);
   hooks.onProgress?.({ percent: 95, stage: "Muxing MP4" });
+  updateExportFailContext({ stage: "mux" });
+  if (audioTrack) markAudioStage("AUDIO_MUX_BEGIN");
+  updateAudioExportReport({ mp4AudioSupplied: Boolean(audioTrack) });
   let bytes: Uint8Array;
   try {
     const mux0 = afePerfEnabled() ? performance.now() : 0;
@@ -730,15 +831,31 @@ export async function exportWithWebCodecs(
     });
     if (mux0) afePerfAdd("mux", performance.now() - mux0);
   } catch (e) {
+    captureThrownValue(e);
+    if (isStackOverflowThrown(e) || (e instanceof Error && e.stack && /call stack|recursion/i.test(e.message))) {
+      updateExportFailContext({ stage: "mux" });
+      return exportResultFromCaughtThrow(job, e);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     return fail(job, `FAIL: mux ${msg}`);
   }
+  if (audioTrack) markAudioStage("AUDIO_MUX_DONE");
 
   const check = validateMp4Ftyp(bytes);
   if (!check.ok) return fail(job, `FAIL: ${check.error}`);
-  if (audioKind === "aac" && !mp4HasAudioTrack(bytes)) {
+  const hasAudioTrak = mp4HasAudioTrack(bytes);
+  updateAudioExportReport({ mp4HasAudioTrack: hasAudioTrak });
+  if (audioKind === "aac" || audioExpected) {
+    if (!hasAudioTrak) {
+      updateAudioExportReport({ resultAudio: "none" });
+      return failAudio(job, "MP4 missing AAC audio trak (expectsAudio)");
+    }
+    markAudioStage("AUDIO_TRACK_VALIDATED");
+    audioKind = "aac";
+  } else {
     audioKind = "none";
   }
+  updateAudioExportReport({ resultAudio: audioKind });
 
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -753,6 +870,8 @@ export async function exportWithWebCodecs(
     blob,
     brands: check.brands,
     audio: audioKind,
+    expectsAudio: audioExpected,
+    audioReport: snapshotAudioExportReport(),
     videoFramesRequested,
     videoFramesDecoded,
     videoFramesEncoded,

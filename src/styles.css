@@ -1638,6 +1638,9 @@ body.media-asset-dragging .project-overlay-drawer {
 .export-dialog[data-phase="failed"] {
   width: min(640px, calc(100vw - 32px));
 }
+.export-dialog[data-phase="failed"] .export-dialog-status {
+  max-height: 50vh;
+}
 .export-dialog-status {
   margin: 8px 0 12px;
   font-size: 12px;

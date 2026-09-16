@@ -9,6 +9,7 @@ import {
   AfeError,
   createFrameSourceBackend,
   isAfeError,
+  markStage,
   type AfeStallSnapshot,
   type DrawableFrame,
   type FrameSourceBackendId,
@@ -16,6 +17,7 @@ import {
 } from "../frame-engine";
 import type { ExportClip } from "./types";
 import { isPlayableSource } from "./media";
+import { captureThrownValue, isStackOverflowThrown } from "./export-fail-dump";
 
 export type { DrawableFrame, FrameSourceBackendId };
 
@@ -84,6 +86,7 @@ function wrapOpened(source: OpenedFrameSource): OpenedDecoder {
 }
 
 async function openPreferred(src: string, signal?: AbortSignal): Promise<OpenedDecoder> {
+  markStage("OPEN_PREFERRED_BEGIN");
   if (frameSourceBackend === "htmlvideo") {
     throw new AfeError("AFE_UNSUPPORTED_CONTAINER", "HTMLVideo is not an export frame source");
   }
@@ -94,6 +97,8 @@ async function openPreferred(src: string, signal?: AbortSignal): Promise<OpenedD
   try {
     return wrapOpened(await createFrameSourceBackend("ailexsi").open(src, signal));
   } catch (e) {
+    captureThrownValue(e);
+    if (isStackOverflowThrown(e)) throw e;
     if (isAfeError(e)) throw e;
     throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
   }

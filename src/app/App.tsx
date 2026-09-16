@@ -58,6 +58,7 @@ import {
   succeedExportDialog,
   wavFileName,
   ExportPlanError,
+  exportResultFromCaughtThrow,
 } from "../core/exporter";
 import { wavExportPickerOptions } from "../core/project-file";
 import { MediaBrowser } from "../ui/media-browser/MediaBrowser";
@@ -764,9 +765,9 @@ export function App() {
           setSession((s) => ({ ...s, status: "Export cancelled", error: null }));
           return;
         }
-        const msg = e instanceof ExportPlanError || e instanceof Error ? e.message : String(e);
-        setExportDialog((d) => failExportDialog(d, `FAIL: ${msg}`));
-        setSession((s) => ({ ...s, error: `FAIL: ${msg}`, status: "Export failed" }));
+        const dump = exportResultFromCaughtThrow(planned, e).error ?? String(e);
+        setExportDialog((d) => failExportDialog(d, dump));
+        setSession((s) => ({ ...s, error: dump, status: "Export failed" }));
       } finally {
         setExporting(false);
         exportBusyRef.current = false;

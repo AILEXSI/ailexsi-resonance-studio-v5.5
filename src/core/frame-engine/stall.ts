@@ -1,4 +1,5 @@
 import { formatBuildIdentityLedger } from "../build-info";
+import { formatStageTraceForDump } from "./stage-trace";
 
 /**
  * AFE-05/07 — B-frame export stall diagnostics + recover-without-mid-run-flush.
@@ -1495,7 +1496,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
   const requested = d.requestedSample ?? d.sourceSampleRequested ?? d.originRequestedSample;
   const submitted = d.lastSubmittedSample;
   const requestedSubmitted = requested != null && submitted != null && submitted >= requested;
-  return [
+  const lines = [
     ...formatBuildIdentityLedger(),
     `requested sample ${d.sourceSampleRequested ?? d.originRequestedSample} PTS ${d.requestedPtsUs ?? d.originRequestedPts}`,
     `lastSubmittedSample ${submitted}`,
@@ -1639,7 +1640,10 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `lastOutputProgressTs ${d.lastOutputProgressTimestamp}`,
     `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
     `stalledMs ${d.stalledMs}`,
-  ].join("; ");
+  ];
+  const trail = formatStageTraceForDump();
+  if (trail) lines.push(trail);
+  return lines.join("; ");
 }
 
 function formatSubmitPhaseTraces(traces: readonly SubmitPhaseTrace[]): string {

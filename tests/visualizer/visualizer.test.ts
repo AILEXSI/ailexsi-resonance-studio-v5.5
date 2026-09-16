@@ -108,7 +108,7 @@ describe("visualizer energy", () => {
   });
 
   it("visFeaturesForExport prefers loud mix PCM over the 120 BPM grid (P56)", () => {
-    const loud = new Float32Array(2048);
+    const loud = new Float32Array(Math.round(44100 * 0.5));
     for (let i = 0; i < loud.length; i++) loud[i] = Math.sin((i / 44100) * 220 * Math.PI * 2);
     const mix = {
       sampleRate: 44100,
@@ -118,7 +118,7 @@ describe("visualizer energy", () => {
     };
     const fromMix = featuresFromMix(mix, 250);
     expect(fromMix.rms).toBeGreaterThan(0.15);
-    expect(fromMix.spectrum).toHaveLength(64);
+    expect(fromMix.spectrum).toHaveLength(1024);
     const exported = visFeaturesForExport(250, 10_000, mix);
     expect(exported.rms).toBeGreaterThan(0.15);
     expect(exported.tempoBpm).not.toBe(120);

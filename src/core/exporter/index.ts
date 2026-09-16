@@ -1,4 +1,5 @@
 import { canUseWebCodecs, exportWithWebCodecs, webCodecsUnavailableMessage } from "./webcodecs";
+import { beginExportFailSession, exportResultFromCaughtThrow } from "./export-fail-dump";
 import { missingOnlyVideoLabel } from "./job";
 import type { ExportHooks, ExportJob, ExportResult } from "./types";
 
@@ -21,7 +22,16 @@ export {
   succeedExportDialog,
   type ExportDialogState,
 } from "./dialog";
-export { jobFromProject, ExportPlanError, summarizeJob, videoClipAt, missingOnlyVideoLabel } from "./job";
+export {
+  jobFromProject,
+  ExportPlanError,
+  summarizeJob,
+  videoClipAt,
+  missingOnlyVideoLabel,
+  expectsAudio,
+  exportableAudioClips,
+  clipIsExportableAudio,
+} from "./job";
 export { runExportWithDestination, type ExportDestinationOutcome } from "./destination";
 export {
   existingExportNamesFromMemory,
@@ -59,8 +69,55 @@ export {
   unsupportedAvcEncoderMessage,
 } from "./avc-capability";
 export { validateMp4Ftyp, looksLikeWebm, hexHeader } from "./ftyp";
-export { audioInputForMux, mp4HasAudioTrack } from "./mp4";
+export {
+  aacAudioSpecificConfigIsUsable,
+  audioInputForMux,
+  mp4HasAudioTrack,
+  mp4SoundTrackInfo,
+  muxAvcToMp4,
+} from "./mp4";
+export {
+  AAC_ENCODE_QUEUE_HIGH_WATER,
+  AudioExportError,
+  AUDIO_STAGE_NAMES,
+  beginJobAudioReport,
+  classifyOfflineAudioMemory,
+  encodeAac,
+  finalizeExportAudio,
+  formatAudioExportReport,
+  formatAudioFail,
+  getAudioExportReport,
+  mixJobAudio,
+  pcmBytesForDuration,
+  prepareJobAudioMix,
+  probeAac,
+  requireAacForMixed,
+  resetAudioExportReport,
+  snapshotAudioExportReport,
+  waitForAudioEncodeQueue,
+  withTimeout,
+} from "./audio";
+export type { AacProbe, AudioExportReport, AudioStageName } from "./audio";
+export type { Mp4SoundTrackInfo } from "./mp4";
 export { downloadWav, encodeWavPcm, exportMixWav, readWavPcm, wavFileName } from "./wav";
+export {
+  beginExportFailSession,
+  captureThrownValue,
+  clearExportFailDiagnostics,
+  diagnosticSourcemapEnabled,
+  exportResultFromCaughtThrow,
+  formatExportFailDump,
+  getExportFailContext,
+  installExportFailDiagnostics,
+  uninstallExportFailDiagnostics,
+  isStackOverflowThrown,
+  lastCapturedThrown,
+  lastGlobalExportFail,
+  resetExportFailContext,
+  updateExportFailContext,
+  EXPORT_FAIL_DUMP_TITLE,
+} from "./export-fail-dump";
+export type { CapturedThrown, ExportFailContext } from "./export-fail-dump";
 
 function fail(job: ExportJob | undefined, error: string, aborted = false): ExportResult {
   return {
@@ -102,7 +159,12 @@ export async function exportTimeline(
   if (!canUseWebCodecs()) {
     return fail(job, webCodecsUnavailableMessage());
   }
-  return exportWithWebCodecs(job, hooks);
+  beginExportFailSession(job);
+  try {
+    return await exportWithWebCodecs(job, hooks);
+  } catch (e) {
+    return exportResultFromCaughtThrow(job, e);
+  }
 }
 
 export function downloadMp4(result: ExportResult): void {

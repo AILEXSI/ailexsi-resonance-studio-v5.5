@@ -16,10 +16,38 @@ export { createVisualEngine, ensureBuiltinsRegistered, getRegisteredScene, regis
 export type { VisualEngine } from "./engine";
 export { builtinScenes } from "./scenes";
 export {
+  ANALYSER_FFT_SIZE,
+  ANALYSER_MAX_DECIBELS,
+  ANALYSER_MIN_DECIBELS,
+  ANALYSER_SMOOTHING,
   applySilenceGate,
+  assembleAudioFeatures,
+  bandsFromSpectrum,
   createFeatureExtractor,
+  createFeatureState,
+  createOfflineFeatureExtractor,
+  featuresFromAnalyserBytes,
   isSilentEnergy,
+  offlineExtractorFor,
+  rmsFromTimeDomain,
   SILENCE_BASS,
   SILENCE_RMS,
 } from "./feature-extractor";
-export type { FeatureExtractor } from "./feature-extractor";
+export type { FeatureExtractor, OfflineFeatureExtractor } from "./feature-extractor";
+export { analyserSpectrumFromWindow, binFrequencyHz } from "./fft";
+export {
+  applyVisResponse,
+  clamp01 as clampVis01,
+  DEFAULT_VIS_RESPONSE,
+  shapeVisLevel,
+  VIS_RESPONSE_01,
+} from "./vis-response";
+export type { RawAudioFeatures, VisResponseConfig, VisualizerPresentation } from "./vis-response";
+export {
+  latticeNodePulse,
+  latticeWarp,
+  resonanceCoreRadius,
+  resonanceMidFreq,
+  resonanceRingPulse,
+  resonanceWaveKickAmp,
+} from "./scene-impact";

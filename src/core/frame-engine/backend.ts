@@ -3,6 +3,7 @@ import { AfeError, throwIfAborted } from "./errors";
 import { parseIsoBmff } from "./mp4-reader";
 import { afePerfTime, afePerfTimeAsync } from "./perf";
 import { AfeScheduler } from "./scheduler";
+import { markStage } from "./stage-trace";
 import type {
   AfeMemoryStats,
   DrawableFrame,
@@ -138,9 +139,13 @@ export class AilexsiFrameSourceBackend implements FrameSourceBackend {
   readonly identity = "ailexsi" as const;
 
   async open(src: string, signal?: AbortSignal): Promise<OpenedFrameSource> {
+    markStage("BACKEND_OPEN_BEGIN");
+    markStage("MP4_READ_BEGIN");
     const bytes = await loadSourceBytes(src, signal);
+    markStage("MP4_READ_DONE");
     throwIfAborted(signal);
     const movie = parseIsoBmff(bytes);
+    markStage("TRACK_PARSED");
     return new AilexsiOpened(movie);
   }
 }

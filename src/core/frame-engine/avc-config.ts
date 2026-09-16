@@ -1,4 +1,5 @@
 import { AfeError } from "./errors";
+import { patchAvcCBitstreamRestriction } from "./avc-sps";
 import type { AfeAvcConfig } from "./types";
 
 function hex2(n: number): string {
@@ -39,7 +40,14 @@ export function decoderConfigOf(avc: AfeAvcConfig): VideoDecoderConfig {
     codec: avc.codec,
     codedWidth: avc.width,
     codedHeight: avc.height,
-    description: avc.description,
+    /**
+     * STRESS-01: Chromium VideoDecoder drops the first disposable B after an
+     * IDR (human/Chrome: PTS 100000 absent, later timestamps emitted) when
+     * VUI bitstream_restriction is missing. Communicate inferred DPB / reorder
+     * depth in avcC. No-op when the flag is already present (AFE-25 analog).
+     * Exact PTS mapping is unchanged.
+     */
+    description: patchAvcCBitstreamRestriction(avc.description),
     optimizeForLatency: false,
     /**
      * CASE B (AFE-25): WebView2 hardware decode can swallow the last delayed

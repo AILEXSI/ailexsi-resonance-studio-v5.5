@@ -469,7 +469,15 @@ export function mapTimestampIntoTimescale(timeSec: number, timescale: number, ed
   return mapped + editListOffset;
 }
 
-/** Last sample in presentation order whose PTS ≤ request. Null if before the first sample. */
+/**
+ * Last sample in presentation order whose PTS ≤ request.
+ * Null only when source time is negative (seek before origin).
+ * STRESS-03: a clip-start request at sourceInMs 0 (export center ~16.7ms) can
+ * still sit before the first composition PTS (this file: 83333µs, CTTS delay,
+ * editListOffset 0). That used to return null → silent VIDEO null-yield /
+ * AFE_DECODE_STALL with transactionId 0. A request at or after 0 that is still
+ * before the first PTS selects the first presentation sample.
+ */
 export function sampleIndexAtTime(movie: AfeMovie, timeSec: number): number | null {
   afePerfCount("sampleIndexLookups");
   if (afePerfEnabled()) {
@@ -499,7 +507,11 @@ function sampleIndexAtTimeUnmetered(movie: AfeMovie, timeSec: number): number | 
       hi = mid - 1;
     }
   }
-  return ans === -1 ? null : pts[ans]!.index;
+  if (ans === -1) {
+    if (timeSec < 0 || pts.length === 0) return null;
+    return pts[0]!.index;
+  }
+  return pts[ans]!.index;
 }
 
 export function keyframeAtOrBefore(movie: AfeMovie, decodeIndex: number): number {

@@ -4,6 +4,12 @@
  */
 
 import { hexToRgba } from "../color";
+import {
+  resonanceCoreRadius,
+  resonanceMidFreq,
+  resonanceRingPulse,
+  resonanceWaveKickAmp,
+} from "../scene-impact";
 import type { AudioFeatures, Scene, SceneContext, SceneParams } from "../types";
 
 let phase = 0;
@@ -35,20 +41,22 @@ export const resonanceWaveScene: Scene = {
     const ringCount = 4;
     for (let r = 0; r < ringCount; r++) {
       const base = Math.min(width, height) * (0.12 + r * 0.1);
-      const pulse = 1 + features.bass * 0.25 * params.intensity + features.beatPulse * 0.15;
+      const pulse = resonanceRingPulse(features, params.intensity);
       const radius = base * pulse;
       const alpha = (0.12 - r * 0.02) * params.intensity * (0.5 + features.rms);
 
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.strokeStyle = hexToRgba(params.colorPrimary as string, alpha);
-      ctx.lineWidth = 1.5 + features.beatPulse * 2;
+      ctx.lineWidth = 1.5 + features.beatPulse * 3.5;
       ctx.stroke();
     }
 
     for (let layer = 0; layer < layers; layer++) {
-      const amp = (height * 0.08 + features.rms * height * 0.12) * params.intensity;
-      const freq = 2 + layer * 1.4 + features.mid * 2;
+      const amp =
+        (height * 0.08 + features.rms * height * 0.12 + height * resonanceWaveKickAmp(features)) *
+        params.intensity;
+      const freq = resonanceMidFreq(features) + layer * 1.4;
       const yOff = (layer - (layers - 1) / 2) * (height * 0.06);
       const layerPhase = phase * (1 + layer * 0.15) + layer * 0.7;
 
@@ -73,7 +81,7 @@ export const resonanceWaveScene: Scene = {
       ctx.stroke();
     }
 
-    const coreR = 6 + features.bass * 18 * params.intensity + features.beatPulse * 10;
+    const coreR = resonanceCoreRadius(features, params.intensity);
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2);
     g.addColorStop(0, "rgba(255,255,255,0.9)");
     g.addColorStop(0.4, hexToRgba(params.colorPrimary as string, 0.7));

@@ -10,7 +10,13 @@ import {
 } from "../models";
 import { vClipMixesOwnAudio } from "../link";
 import { clampPan, mixLinearGain } from "../volume";
-import { remapVolumeAutomation, volumeAutomationOf } from "../volume-automation";
+import {
+  automationValueAt,
+  remapVolumeAutomation,
+  volumeAutomationIsActive,
+  volumeAutomationOf,
+} from "../volume-automation";
+import { isPlayableSource } from "./media";
 import { exportRangeMs } from "../timeline";
 import {
   compositeVideoAt,
@@ -46,7 +52,15 @@ export function jobFromProject(project: Project, opts: JobOptions = {}): ExportJ
     const audible = isTrackAudible(project, track.id);
     const keepPicture = kindOfTrack(track.id) === "video";
     if (!audible && !keepPicture) {
-      return { id: track.id, kind: track.kind, pan: clampPan(track.pan ?? 0), clips: [] };
+      return {
+        id: track.id,
+        kind: track.kind,
+        pan: clampPan(track.pan ?? 0),
+        muted: track.muted === true,
+        solo: track.solo === true,
+        volume: track.volume ?? 1,
+        clips: [],
+      };
     }
     const clips: ExportClip[] = project.clips
       .filter((c) => c.trackId === track.id && c.enabled !== false)
@@ -83,12 +97,16 @@ export function jobFromProject(project: Project, opts: JobOptions = {}): ExportJ
           linkId: c.linkId,
           still: asset?.kind === "image",
           skipMix: !vClipMixesOwnAudio(project, c),
+          hasAudio: asset?.hasAudio,
         };
       });
     return {
       id: track.id,
       kind: track.kind,
       pan: clampPan(track.pan ?? 0),
+      muted: track.muted === true,
+      solo: track.solo === true,
+      volume: track.volume ?? 1,
       clips,
       volumeAutomation: remapVolumeAutomation(volumeAutomationOf(track), startMs),
     };
@@ -214,6 +232,50 @@ export function mixWindowsForClip(
     segs = next;
   }
   return segs.filter((s) => s.endMs - s.startMs > 1);
+}
+
+function automationAudibleInRange(
+  automation: ExportTrack["volumeAutomation"],
+  startMs: number,
+  endMs: number,
+): boolean {
+  if (!volumeAutomationIsActive(automation)) return true;
+  const times = [startMs, endMs];
+  for (const point of automation!.points) {
+    if (point.timeMs >= startMs && point.timeMs <= endMs) times.push(point.timeMs);
+  }
+  return times.some((t) => automationValueAt(automation, t) > 0);
+}
+
+/** Job-time audible/exportable contribution. Reuses mix mute/solo/gain/skipMix semantics. */
+export function clipIsExportableAudio(job: ExportJob, clip: ExportClip): boolean {
+  if (clip.missing || clip.still) return false;
+  if (!isPlayableSource(clip.sourceUrl)) return false;
+  if (clip.endMs <= clip.startMs) return false;
+  if (!(clip.gain > 0)) return false;
+  if (clip.hasAudio === false) return false;
+  const track = job.tracks.find((t) => t.id === clip.trackId);
+  if (!automationAudibleInRange(track?.volumeAutomation, clip.startMs, clip.endMs)) return false;
+  return true;
+}
+
+/**
+ * Mix candidates that are present, playable, and audible after existing
+ * mute/solo/volume/master/gain/fade/automation/skipMix/mate rules.
+ */
+export function exportableAudioClips(job: ExportJob): ExportClip[] {
+  return audioClipsForMix(job).filter((c) => clipIsExportableAudio(job, c));
+}
+
+/**
+ * Deterministic: true when at least one enabled present audible/exportable
+ * audio contribution exists in the selected export range.
+ * Audio-kind clips and V clips with known embedded audio (`hasAudio === true`)
+ * require AAC. Video-only files (`hasAudio === false`) do not.
+ * Unknown V embedded audio is still mixed; a produced buffer must be encoded.
+ */
+export function expectsAudio(job: ExportJob): boolean {
+  return exportableAudioClips(job).some((c) => c.kind === "audio" || c.hasAudio === true);
 }
 
 /** Mix candidates: A and V clips that are present. Video-only files drop at decode. */

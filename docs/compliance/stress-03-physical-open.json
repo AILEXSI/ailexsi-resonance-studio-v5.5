@@ -1,0 +1,28 @@
+{
+  "clip": "1000001827 - Kopie.mp4",
+  "agentCopy": "uploads/stress-03-1000001827-Kopie_0828.mp4",
+  "bytes": 2140770,
+  "ffprobe": {
+    "durationSec": 5.208333,
+    "startSec": 0.083333,
+    "fps": 24,
+    "width": 464,
+    "height": 832,
+    "codec": "h264 High Level 3.1",
+    "nbFrames": 125,
+    "hasBFrames": 2
+  },
+  "ailexsi": {
+    "timescale": 12288,
+    "sampleCount": 125,
+    "editListOffset": 0,
+    "codec": "avc1.64001f",
+    "firstPtsUs": 83333,
+    "clipStartSourceTimeSec": 0.016666666666666666,
+    "firstBlockedStage": "SAMPLE_SELECT",
+    "preFixSampleIndexAtClipStart": null,
+    "postFixSampleIndexAtClipStart": 0,
+    "aloneAt0": "parse + decoderConfig + sample 0",
+    "afterPrecedingClip": "same — sample 0, prefer-software config"
+  }
+}

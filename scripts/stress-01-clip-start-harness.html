@@ -1,0 +1,324 @@
+<!doctype html>
+<html>
+  <!-- STRESS-01 clip-start PTS 100000 differential. Dev-only. Not under public/. -->
+  <head>
+    <meta charset="utf-8" />
+    <title>STRESS-01 clip-start PTS 100000</title>
+    <style>
+      body { font-family: ui-monospace, monospace; background: #111; color: #ddd; margin: 16px; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>STRESS-01 — clip-start exact PTS 100000</h1>
+    <pre id="out">starting</pre>
+    <script type="module">
+      import {
+        AfeVideoDecoder,
+        decodeOrigin,
+        decoderConfigOf,
+        firstAvcCSps,
+        inspectAvcSpsRestriction,
+        isOpenGopAtKey,
+        parseIsoBmff,
+        patchAvcCBitstreamRestriction,
+        sampleBytes,
+        sampleIndexAtTime,
+        ticksToUs,
+      } from "/src/core/frame-engine/index.ts";
+      import { sourceTimeSec } from "/src/core/exporter/frame-source.ts";
+
+      const out = document.getElementById("out");
+      const qs = new URLSearchParams(location.search);
+      const RECEIVE = "http://127.0.0.1:" + (qs.get("receive") || "18771");
+      const CLIP = qs.get("clip") || "/scripts/stress-01-evidence/6C16E2CA-Kopie.mp4";
+      const TARGET = 100000;
+      const COLS = [66667, 100000, 133333, 166667, 200000, 233333, 266667, 300000, 333333, 366667, 400000, 433333, 466667, 500000];
+
+      function show(text) {
+        out.textContent = text;
+        document.title = text.split("\n")[0].slice(0, 80);
+      }
+
+      async function report(path, body) {
+        try {
+          await fetch(RECEIVE + path, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } catch {
+          /* optional */
+        }
+      }
+
+      function yesNo(ts, list) {
+        return list.includes(ts) ? "YES" : "NO";
+      }
+
+      async function decodeRaw(movie, label, configOverride) {
+        const outputs = [];
+        const errors = [];
+        const cfg = { ...decoderConfigOf(movie.avc), ...configOverride };
+        const support = await VideoDecoder.isConfigSupported(cfg);
+        if (!support.supported) {
+          return { label, error: "unsupported " + cfg.codec, outputs, support: false, config: cfg };
+        }
+        await new Promise((resolve, reject) => {
+          const dec = new VideoDecoder({
+            output: (frame) => {
+              outputs.push(frame.timestamp);
+              frame.close();
+            },
+            error: (e) => {
+              errors.push(String(e?.message || e));
+              reject(e);
+            },
+          });
+          dec.configure(cfg);
+          const last = Math.min(movie.sampleCount - 1, 29);
+          for (let i = 0; i <= last; i++) {
+            const sample = movie.samples[i];
+            const timestamp = ticksToUs(sample.ptsTimescale, movie.timescale);
+            dec.decode(
+              new EncodedVideoChunk({
+                type: sample.isKeyframe ? "key" : "delta",
+                timestamp,
+                duration: Math.max(1, ticksToUs(sample.durationTimescale, movie.timescale)),
+                data: sampleBytes(movie, sample),
+              }),
+            );
+          }
+          dec.flush().then(() => resolve()).catch(reject);
+        });
+        return {
+          label,
+          outputs,
+          errors,
+          support: true,
+          has100000: outputs.includes(TARGET),
+          hardwareAcceleration: cfg.hardwareAcceleration,
+        };
+      }
+
+      async function decodeAilexsi(movie) {
+        const decoder = new AfeVideoDecoder(movie);
+        await decoder.ensure();
+        decoder.setGopKeyframeStart(0);
+        const needed = new Uint8Array(30).fill(1);
+        decoder.beginStream(needed, 0, {
+          lastRequested: 3,
+          lastRequiredDecodeSample: 9,
+          requestedIndexes: [3],
+        });
+        decoder.openRequested(3, TARGET);
+        const last = Math.min(movie.sampleCount - 1, 29);
+        for (let i = 0; i <= last; i++) decoder.submitEncoded(movie.samples[i]);
+        if (decoder.decoder) await decoder.decoder.flush();
+        const outputs = decoder.outputTrace();
+        const seen = decoder.hasTargetPtsBeenSeen(TARGET);
+        decoder.close();
+        return { label: "ailexsi", outputs, has100000: outputs.includes(TARGET), targetPtsSeen: seen };
+      }
+
+      async function decodeMediabunny(bytes) {
+        try {
+          const mb = await import("https://esm.sh/mediabunny@1.27.0");
+          const Source = mb.BufferSource || mb.BlobSource;
+          const input = new mb.Input({
+            source: mb.BufferSource
+              ? new mb.BufferSource(bytes)
+              : new mb.BlobSource(new Blob([bytes], { type: "video/mp4" })),
+            formats: mb.ALL_FORMATS,
+          });
+          const video = await input.getPrimaryVideoTrack();
+          if (!video) return { label: "mediabunny", error: "no video track", outputs: [] };
+          const outputs = [];
+          if (mb.VideoSampleSink) {
+            const sink = new mb.VideoSampleSink(video);
+            let n = 0;
+            for await (const sample of sink.samples()) {
+              const ts = sample.timestamp;
+              outputs.push(typeof ts === "number" && ts < 10 ? Math.round(ts * 1e6) : ts);
+              sample.close?.();
+              n += 1;
+              if (n > 16) break;
+            }
+            return {
+              label: "mediabunny",
+              outputs,
+              has100000: outputs.includes(TARGET) || outputs.includes(0.1),
+              decoderTimestampUnit: "VideoSampleSink",
+            };
+          }
+          const sink = new mb.EncodedPacketSink(video);
+          const decoderConfig = await video.getDecoderConfig();
+          const errors = [];
+          await new Promise((resolve, reject) => {
+            const dec = new VideoDecoder({
+              output: (frame) => {
+                outputs.push(frame.timestamp);
+                frame.close();
+              },
+              error: (e) => {
+                errors.push(String(e?.message || e));
+                reject(e);
+              },
+            });
+            dec.configure({
+              ...decoderConfig,
+              hardwareAcceleration: "prefer-software",
+              optimizeForLatency: false,
+            });
+            (async () => {
+              let n = 0;
+              for await (const packet of sink.packets()) {
+                if (n > 29) break;
+                const key = n === 0 || packet.isKeyFrame || packet.type === "key";
+                dec.decode(
+                  new EncodedVideoChunk({
+                    type: key ? "key" : "delta",
+                    timestamp: packet.timestamp,
+                    duration: Math.max(1, packet.duration || 1),
+                    data: packet.data,
+                  }),
+                );
+                n += 1;
+              }
+              await dec.flush();
+              resolve();
+            })().catch(reject);
+          });
+          return {
+            label: "mediabunny",
+            outputs,
+            errors,
+            has100000: outputs.includes(TARGET),
+            decoderTimestampUnit: "mediabunny-packet-timestamp",
+          };
+        } catch (e) {
+          return { label: "mediabunny", error: String(e?.message || e), outputs: [] };
+        }
+      }
+
+      try {
+        show("fetch " + CLIP);
+        const res = await fetch(CLIP);
+        if (!res.ok) throw new Error("clip HTTP " + res.status);
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        const movie = parseIsoBmff(bytes);
+        const sps = firstAvcCSps(movie.avc.description);
+        const spsInfo = sps ? inspectAvcSpsRestriction(sps) : null;
+        const samples = movie.samples.slice(0, 16).map((s, i) => ({
+          index: s.index,
+          dts: s.dtsTimescale,
+          pts: s.ptsTimescale,
+          duration: s.durationTimescale,
+          sync: s.isKeyframe,
+          presentationIndex: movie.presentation.findIndex((p) => p.index === s.index),
+          compositionOffset: s.ptsTimescale - s.dtsTimescale,
+          byteLength: s.byteSize,
+          ptsUs: ticksToUs(s.ptsTimescale, movie.timescale),
+          dtsUs: ticksToUs(s.dtsTimescale, movie.timescale),
+        }));
+        const sourceTimes = [0, 1, 2, 3, 4, 5].map((n) => {
+          const timelineMs = (n * 1000) / 30;
+          const t = sourceTimeSec(
+            { startMs: 0, sourceInMs: 0, sourceOutMs: 38600, rate: 1 },
+            timelineMs,
+            30,
+          );
+          const idx = sampleIndexAtTime(movie, t);
+          const sample = idx == null ? null : movie.samples[idx];
+          return {
+            outFrame: n,
+            timelineMs,
+            sourceSec: t,
+            sample: idx,
+            ptsUs: sample ? ticksToUs(sample.ptsTimescale, movie.timescale) : null,
+          };
+        });
+
+        show("chrome VideoDecoder unpatched avcC");
+        const chromeUnpatched = await decodeRaw(movie, "chrome-unpatched", {
+          hardwareAcceleration: "prefer-software",
+          description: movie.avc.description,
+        });
+        show("chrome VideoDecoder prefer-software (decoderConfigOf)");
+        const chromeSw = await decodeRaw(movie, "chrome-prefer-software", {
+          hardwareAcceleration: "prefer-software",
+        });
+        show("chrome VideoDecoder no-preference");
+        const chromeNp = await decodeRaw(movie, "chrome-no-preference", {
+          hardwareAcceleration: "no-preference",
+        });
+        show("AILEXSI Frame Engine");
+        const ailexsi = await decodeAilexsi(movie);
+        show("patched-SPS diagnostic");
+        const patchedDesc = patchAvcCBitstreamRestriction(movie.avc.description);
+        const patchedMovie = {
+          ...movie,
+          avc: { ...movie.avc, description: patchedDesc },
+        };
+        const patched = await decodeRaw(patchedMovie, "chrome-patched-sps", {
+          hardwareAcceleration: "prefer-software",
+        });
+        show("mediabunny diagnostic");
+        const mediabunny = await decodeMediabunny(bytes);
+
+        const table = {};
+        for (const col of COLS) {
+          table[col] = {
+            ailexsiWebView2Human: col === TARGET ? "NO" : "YES",
+            ailexsiChrome: yesNo(col, ailexsi.outputs),
+            chromeUnpatched: yesNo(col, chromeUnpatched.outputs || []),
+            chromePreferSoftware: yesNo(col, chromeSw.outputs || []),
+            chromeNoPreference: yesNo(col, chromeNp.outputs || []),
+            mediabunny: mediabunny.error ? "ERR" : yesNo(col, mediabunny.outputs || []),
+            chromePatchedSps: yesNo(col, patched.outputs || []),
+          };
+        }
+
+        const result = {
+          ok: true,
+          clipBytes: bytes.length,
+          timescale: movie.timescale,
+          sampleCount: movie.sampleCount,
+          editListOffset: movie.editListOffset,
+          durationSec: movie.durationSec,
+          maxReorderSamples: movie.maxReorderSamples,
+          codec: movie.avc.codec,
+          width: movie.width,
+          height: movie.height,
+          keyframe0: movie.keyframeIndices[0] ?? null,
+          keyframe1: movie.keyframeIndices[1] ?? null,
+          openGop0: isOpenGopAtKey(movie, 0),
+          decodeOrigin3: decodeOrigin(movie, 3),
+          sample3: samples[3],
+          spsInfo,
+          samples,
+          sourceTimes,
+          chromeUnpatched,
+          chromeSw,
+          chromeNp,
+          ailexsi,
+          patched,
+          mediabunny,
+          table,
+          firstDivergence: COLS.find((col) => {
+            const row = table[col];
+            return row.ailexsiWebView2Human !== row.chromePreferSoftware
+              || row.chromePreferSoftware !== row.ailexsiChrome
+              || (row.mediabunny !== "ERR" && row.mediabunny !== row.chromePreferSoftware);
+          }) ?? null,
+        };
+        show(JSON.stringify({ table: result.table, firstDivergence: result.firstDivergence, sample3: result.sample3, sps: result.spsInfo }, null, 2));
+        await report("/afe-results", result);
+      } catch (e) {
+        const err = { ok: false, error: String(e?.stack || e?.message || e) };
+        show(err.error);
+        await report("/afe-results", err);
+      }
+    </script>
+  </body>
+</html>

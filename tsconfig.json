@@ -52,6 +52,9 @@
     "tests/export/afe-22-submitted-unseen-reset.test.ts",
     "tests/export/afe-23-post-reset-liveness-reopen.test.ts",
     "tests/export/afe-24-liveness-reopen-invoke.test.ts",
-    "tests/export/afe-25-eof-tail-sps.test.ts"
+    "tests/export/afe-25-eof-tail-sps.test.ts",
+    "tests/export/stress-01-clip-start-pts.test.ts",
+    "tests/export/stress-03-physical-source.test.ts",
+    "tests/export/stress-04-mp4-mux-arg-overflow.test.ts"
   ]
 }
