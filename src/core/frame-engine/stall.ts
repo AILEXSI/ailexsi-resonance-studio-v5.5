@@ -1,3 +1,5 @@
+import { formatBuildIdentityLedger } from "../build-info";
+
 /**
  * AFE-05/07 — B-frame export stall diagnostics + recover-without-mid-run-flush.
  *
@@ -1312,6 +1314,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
   const submitted = d.lastSubmittedSample;
   const requestedSubmitted = requested != null && submitted != null && submitted >= requested;
   return [
+    ...formatBuildIdentityLedger(),
     `requested sample ${d.sourceSampleRequested ?? d.originRequestedSample} PTS ${d.requestedPtsUs ?? d.originRequestedPts}`,
     `lastSubmittedSample ${submitted}`,
     `requestedSubmitted ${requestedSubmitted ? "yes" : "no"}`,

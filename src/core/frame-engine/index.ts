@@ -1,3 +1,14 @@
+export {
+  AILEXSI_FRAME_ENGINE,
+  AILEXSI_GIT_BRANCH,
+  AILEXSI_GIT_SHA,
+  AILEXSI_PRODUCT_VERSION,
+  ailexsiBuildIdentity,
+  formatBuildIdentityLedger,
+  formatBuildIdentityPrefix,
+  withBuildIdentityPrefix,
+} from "../build-info";
+export type { AilexsiBuildIdentity } from "../build-info";
 export { AfeError, isAfeError, throwIfAborted } from "./errors";
 export {
   parseIsoBmff,

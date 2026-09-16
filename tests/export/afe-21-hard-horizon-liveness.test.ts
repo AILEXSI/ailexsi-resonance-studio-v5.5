@@ -478,7 +478,10 @@ describe("AFE-21 A–H HARD ceiling reached before local horizon + post-recreate
       stalledMs: 3000,
       decoderRecreateCount: 1,
     });
-    const head = text.slice(0, 520);
+    expect(text.startsWith("productVersion 5.5.0; gitSha ")).toBe(true);
+    const head = text.slice(0, 720);
+    expect(head).toContain("productVersion 5.5.0");
+    expect(head).toContain("frameEngine AILEXSI");
     expect(head).toContain("requested sample 38 PTS 1625000");
     expect(head).toContain("lastSubmittedSample 36");
     expect(head).toContain("requestedSubmitted no");
