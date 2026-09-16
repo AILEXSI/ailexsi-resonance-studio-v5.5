@@ -1227,3 +1227,46 @@ AFE-20 Shape A (queue 15 ∈ (12, 22), lastSubmitted 82 < 90) still spends remai
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 38 PTS 1625000 / lastSubmitted 36 / queue >= HARD / no earlier I → progress toward 38/44 or typed recover; queue never exceeds HARD; no empty 37-36 for 3s.  
 **HUMAN-PROVEN: NO**
 
+# AFE-22 — HARD horizon reset must cover submitted-but-unseen exact PTS
+
+Human Windows EXE on AFE-21 + build-identity tip (`c73447a`). One new picture — AFE-20 Shape A/B and AFE-21 stay green. Icon/Explorer out of scope.
+
+- requested sample **28** PTS **1375000** · requestedSubmitted **yes**
+- lastSubmitted **34** · currentTarget **44** · formula **34** · lastRequired **144**
+- SOFT **12** · HARD **22** · decodeQueue **19** · peak **22**
+- lastDecodedTs **458333** · targetPtsSeen **no** · targetPtsOutputs **0**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- usefulInputExhausted **no**
+- recreates **1** · recoveryAttempts **1** · flushes **3**
+- postRecreateSubmitted **35** · postRecreateOutputs **10** · stuck early outputs through 458333
+- hardHorizonReset **no**
+- FINAL_FLUSH **yes** · finalFlushArmed **yes**
+- pumpSlice **35-34** empty
+- gopStart **0** · earlierKeyframeAvailable **no** · earlierKeyframeRecovered **no**
+- waiter **null** · ptsCurrentlyRegistered **no** · ownershipState **PTS_REGISTERED**
+- videoReq/Dec/Enc **191/190/190**
+- stalledMs **3000**
+- productVersion **5.5.0** · gitSha **c73447a** · frameEngine **AILEXSI**
+
+AFE-21 `mayHardHorizonReset` requires lastSubmitted < requested. Human 34 >= 28, so that escape correctly did **not** fire. After FINAL_FLUSH the pump wrote empty 35-34 (`needsKeyframe`) and sat 3s. Decoder liveness was already dead at 458333 (10 post-recreate outputs).
+
+## Cause
+
+1. **Submitted but unseen.** Exact sample 28 was already in the decode queue (`lastSubmitted 34 >= 28`) but PTS 1375000 never emitted. AFE-21's lastSubmitted < requested gate left no escape.
+2. **formula 34 vs current 44 is not a dump bug.** formula = lastRequired(requested 28) = 28+2+4 = **34**. current = AFE-18 `postHorizonRequiredSample` = 34+lookahead 6+prefetch 4 = **44**, because the formula horizon was submitted and lastDecoded 458333 < 1375000. Dump now names `horizonExtended yes`. Not a license to flood to lastRequired 144.
+
+Not a global HARD/SOFT raise. Not a timeout bump. Not snap/nearest/drop/Mediabunny.
+
+## Fix
+
+1. `maySubmittedUnseenHorizonReset`: exact unresolved AND requestedSubmitted AND targetPtsSeen no AND recreates>=1 AND no output progress toward target AND (queue>=SOFT or frozenAtHighWater) AND no earlier I AND reset unused. lastSubmitted < requested is **not** required for this path.
+2. `mayHardHorizonReset` tries the AFE-22 path first when `targetPtsSeen === false` and SOFT is supplied; otherwise AFE-21 (lastSubmitted < requested < live target, queue>=HARD) is unchanged.
+3. Scheduler prefers this reset over `canBorrowTowardLocalHorizon` so submitted-unseen does not keep borrowing toward 44/144 (empty 35-34).
+4. One output-gated recreate+ownership rebuild from gopStart (SOFT first; no HARD spend until lastDecoded moves). Typed stall only after that escape is exhausted.
+
+AFE-21 (36 < 38, queue>=HARD) still uses the AFE-21 path. Shape A (82 < 90, queue 15 < HARD 22) still spends remaining HARD. First-fill recreates=0 stays off. AFE-13 helper calls without `targetPtsSeen === false` stay off.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 28 PTS 1375000 / lastSubmitted 34 / requestedSubmitted yes / targetPtsSeen no / post-recreate freeze at 458333 → one hard-horizon reset+rebuild, then exact PTS or typed stall after exhausted; no empty 35-34 for 3s; no flood to 144.  
+**HUMAN-PROVEN: NO**
+
