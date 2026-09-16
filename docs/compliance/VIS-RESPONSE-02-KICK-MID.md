@@ -1,6 +1,6 @@
 # VIS-RESPONSE-02 — more felt kick / mid (same architecture)
 
-Base: VIS-RESPONSE-01 tip `1d49531` on `cursor/vis-response-01-impact-layer-e2d7` (PR **#25**). Do **not** merge PR #19–#25.
+Base: VIS-RESPONSE-01 tip `1d49531` on `cursor/vis-response-01-impact-layer-e2d7` (PR **#25**). **HUMAN-PROVEN** 2026-09-17. Ready to consolidate into main (coordinator merges).
 
 ## Human evidence (01 soft-PASS)
 
@@ -54,14 +54,24 @@ Onset adds **0.38** to energy (was 0.24). Pad 0.35 stays at **0.721**, not 1. Qu
 
 VIS-SYNC-01 analyser (fft 2048, Blackman, dB `[-100,-30]`, smoothing 0.75). AUDIO-01 mix/mux. AFE / ENC-01 / STRESS. Volume / automation semantics. Other scenes except Resonance Wave + Void Lattice multipliers.
 
-## Operator card — MODE B (coordinator builds EXE)
+## HUMAN-PROVEN — 2026-09-17 (M.G.M.)
 
-Same ~357.8 s lattice/wave clip (and the ~34:18 baseline after the short pass).
+| | |
+| --- | --- |
+| Result | **PASSED** — operator: *perfect lassen wir erst mal so mergen doku* |
+| Feature tip | `cc3cd08` (`cc3cd086831099c0dad6aace5c81e4d0e967a03a`) |
+| EXE SHA256 | `4A080D0F1369091F6F96E7A0BB7F9E6DFF74DC2923EBF6EF75FF658EC142CEFB` |
+| Evidence | Short Impact check on MODE B EXE of tip `cc3cd08`. Prior **soft-PASS** of VIS-RESPONSE-01 (~6 min Lattice 1080p30+AAC). |
+| Locked defaults | `gain` 1.25 · `gamma` 0.68 · `spectrumSpreadBins` 18 · `transientBoost` 0.38 |
+| Shared | `src/core/visualz/scene-impact.ts` (Resonance Wave + Void Lattice). No AGC. Preview = Export. |
 
-1. Build from **this PR tip**. Chip **5.5.0**, Frame Engine **AILEXSI**.
-2. 30–60 s obvious-beat section vs 01 EXE: kicks hit harder, mids clearer, pads still breathe, quiet quiet, fader still lowers VIS, Preview≈Export.
-3. Do not start AUDIO-02. Do not merge.
+### Stack this rests on (already proven earlier — no new numbers)
 
-**EXE path / SHA256:** left for the coordinator.
+This presentation layer sits on the long-form VIDEO+VIS+AAC chain already accepted before 02:
 
-**HUMAN acceptance pending.**
+- **ENC-01** — 1920×1080 H.264 @ 24/25/30 (EXE tip `0ec7758`)
+- **STRESS-01..04** — clip-start PTS, call-stack dump, pre-request source, mux arg overflow
+- **AUDIO-01 / AUDIO-01b** — long-form AAC present and audible
+- **VIS-SYNC-01** — Preview/Export real-FFT parity on the ~34:18 and ~64 min VIDEO+VIS+AAC projects
+
+Do not start AUDIO-02. Coordinator consolidates this stack to main.

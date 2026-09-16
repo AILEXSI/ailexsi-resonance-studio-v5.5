@@ -142,7 +142,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 
 ## VIS-RESPONSE-01 — restore visual impact without breaking parity
 
-**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Do **not** merge PR #19–#24 or this branch. Base: VIS-SYNC-01 `3b16a09`.
+**IMPLEMENTED / AUTOMATED-TESTED**. 01 HUMAN **soft-PASS**. 02 on this branch is **HUMAN-PROVEN**. Base: VIS-SYNC-01 `3b16a09`. Ready to consolidate into main (coordinator merges).
 
 | | |
 | --- | --- |
@@ -152,11 +152,11 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Untouched | FFT / smoothing / dB / onset core; scenes; AUDIO-01; AFE; ENC-01; STRESS mux; volume semantics. |
 | Test | `tests/visualizer/vis-response-01-impact-layer.test.ts` — Phase 1 table + tests 1–8 + monotonicity (17). |
 | Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE-01 + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **131/131**. Full suite **1297 passed / 6 failed / 1303**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
-| Human remaining | 30–60 s obvious-beat section vs `3b16a09`, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-RESPONSE-01-IMPACT-LAYER.md`. |
+| Human | soft-PASS 2026-09-16 (M.G.M. *besser vis*). Follow-on 02 HUMAN-PROVEN. Details: `docs/compliance/VIS-RESPONSE-01-IMPACT-LAYER.md`. |
 
 ## VIS-RESPONSE-02 — more felt kick / mid (same layer)
 
-**IMPLEMENTED / AUTOMATED-TESTED**, not HUMAN-PROVEN. Continues PR **#25**. Do **not** merge. 01 was HUMAN soft-PASS (*besser vis, rest funktioniert, kannst alles anpassen*).
+**HUMAN-PROVEN** 2026-09-17 (M.G.M. *perfect*). Continues PR **#25**. Ready to consolidate into main (coordinator merges). 01 was HUMAN soft-PASS (*besser vis, rest funktioniert, kannst alles anpassen*).
 
 | | |
 | --- | --- |
@@ -166,7 +166,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Untouched | Analyser core; AUDIO-01; AFE; ENC-01; STRESS mux; volume. |
 | Test | Same vis-response file + 02 vs 01 assertions + lattice/wave geometry (20). |
 | Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **134/134**. |
-| Human remaining | Short obvious-beat section vs 01 EXE, then long-form if short passes. Coordinator builds EXE. Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
+| Human | **PASSED** 2026-09-17 M.G.M. *perfect*. Short Impact check, MODE B EXE tip `cc3cd08` / SHA256 `4A080D0F1369091F6F96E7A0BB7F9E6DFF74DC2923EBF6EF75FF658EC142CEFB`. Prior 01 soft-PASS (~6 min Lattice 1080p30+AAC). Locked: gain 1.25 / gamma 0.68 / spread 18 / transient 0.38; `scene-impact.ts`; no AGC; Preview=Export. Stack rests on ENC-01, STRESS-01..04, AUDIO-01/01b, VIS-SYNC-01 (~34:18 and ~64 min VIDEO+VIS+AAC). Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
 
 ## Verification paths
 
