@@ -363,6 +363,8 @@ export class AfeVideoDecoder {
   }
 
   mayHardHorizonResetFor(requested: number): boolean {
+    const rec = this.ownership.get(requested);
+    const targetPts = rec?.ptsUs ?? this.targetPtsUs;
     return mayHardHorizonReset({
       exactReady: this.streamReady.has(requested),
       lastSubmittedSample: this.lastSubmittedSample,
@@ -374,6 +376,11 @@ export class AfeVideoDecoder {
       earlierKeyframeAvailable: this.earlierKeyframeIsAvailable(),
       recreateCount: this.recreateCount,
       hardHorizonResetUsed: this.hardHorizonResetUsed,
+      targetPtsSeen: this.hasTargetPtsBeenSeen(targetPts),
+      softHighWater: this.decodeQueueHighWater,
+      frozenAtHighWater: this.isFrozenAtHighWaterAfterRecreate(),
+      lastDecodedTimestamp: this.lastVideoFrameTimestamp,
+      targetPtsUs: targetPts,
     });
   }
 
@@ -383,18 +390,21 @@ export class AfeVideoDecoder {
   }
 
   /**
-   * Escape already used, still lastSubmitted < requested, queue at/over SOFT,
-   * no post-reset output — typed stall, do not sit empty 37-36 for 3s.
+   * Escape already used, still exact unresolved, queue at/over SOFT, no
+   * post-reset output — typed stall. Covers AFE-21 (never reached requested)
+   * and AFE-22 (requested submitted again, PTS still unseen).
    */
   hardHorizonResetExhausted(requested: number): boolean {
     if (!this.hardHorizonResetUsed) return false;
     if (this.streamReady.has(requested)) return false;
-    if ((this.lastSubmittedSample ?? -1) >= requested) return false;
-    if (this.postRecreateOutputs > 0 && this.canBorrowTowardLocalHorizon(requested)) return false;
-    return (
+    if (this.hasTargetPtsBeenSeen()) return false;
+    const stuck =
       this.decodeQueueSize >= this.decodeQueueHighWater &&
-      this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit
-    );
+      this.lastVideoFrameTimestamp === this.lastDecodedAtSubmit;
+    if (!stuck) return false;
+    if ((this.lastSubmittedSample ?? -1) >= requested) return true;
+    if (this.postRecreateOutputs > 0 && this.canBorrowTowardLocalHorizon(requested)) return false;
+    return true;
   }
 
   releaseStaleFinalFlushIfLiveHorizonOpen(requested: number): void {

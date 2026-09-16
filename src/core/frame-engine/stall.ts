@@ -693,11 +693,50 @@ export function queueRespectsHardCeiling(args: {
 }
 
 /**
+ * AFE-22: exact packet already submitted but PTS never seen after recreate.
+ * lastSubmitted >= requested is expected — do not require lastSubmitted <
+ * requested (that was AFE-21 only). Decoder liveness dead at an early
+ * lastDecoded (human 458333) with queue at/over SOFT or frozenAtHighWater.
+ * One reset+rebuild from gopStart; not a flood to lastRequired 144.
+ */
+export function maySubmittedUnseenHorizonReset(args: {
+  exactReady: boolean;
+  lastSubmittedSample: number | null;
+  requestedSample: number;
+  targetPtsSeen: boolean;
+  recreateCount: number;
+  hardHorizonResetUsed: boolean;
+  earlierKeyframeAvailable: boolean;
+  outputProgressed: boolean;
+  decodeQueueSize: number;
+  softHighWater: number;
+  frozenAtHighWater?: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
+}): boolean {
+  if (args.exactReady) return false;
+  if (args.hardHorizonResetUsed) return false;
+  if (args.recreateCount < 1) return false;
+  if (args.earlierKeyframeAvailable) return false;
+  if (args.targetPtsSeen) return false;
+  if ((args.lastSubmittedSample ?? -1) < args.requestedSample) return false;
+  const frozen =
+    args.frozenAtHighWater === true || args.decodeQueueSize >= args.softHighWater;
+  if (!frozen) return false;
+  if (args.lastDecodedTimestamp != null && args.targetPtsUs != null) {
+    return args.lastDecodedTimestamp < args.targetPtsUs;
+  }
+  return !args.outputProgressed;
+}
+
+/**
  * AFE-21: exact unresolved, lastSubmitted < requested < live local horizon,
  * queue already at/over HARD, no output progress, no earlier I-frame.
+ * AFE-22: requested already submitted, targetPtsSeen no, post-recreate,
+ * no progress toward the exact PTS, queue >= SOFT or frozen.
  * One controlled reset+ownership rebuild from gopStart, then output-gated
  * resubmit (SOFT first; no HARD spend until lastDecoded moves).
- * Not a flood to lastRequired 140, not a mid-run flush, not a timeout bump.
+ * Not a flood to lastRequired 140/144, not a mid-run flush, not a timeout bump.
  * Typed stall only after this escape has already been used.
  */
 export function mayHardHorizonReset(args: {
@@ -711,11 +750,37 @@ export function mayHardHorizonReset(args: {
   earlierKeyframeAvailable: boolean;
   recreateCount: number;
   hardHorizonResetUsed: boolean;
+  targetPtsSeen?: boolean;
+  softHighWater?: number;
+  frozenAtHighWater?: boolean;
+  lastDecodedTimestamp?: number | null;
+  targetPtsUs?: number | null;
 }): boolean {
   if (args.exactReady) return false;
   if (args.hardHorizonResetUsed) return false;
   if (args.recreateCount < 1) return false;
   if (args.earlierKeyframeAvailable) return false;
+  if (
+    args.targetPtsSeen === false &&
+    args.softHighWater != null &&
+    maySubmittedUnseenHorizonReset({
+      exactReady: args.exactReady,
+      lastSubmittedSample: args.lastSubmittedSample,
+      requestedSample: args.requestedSample,
+      targetPtsSeen: false,
+      recreateCount: args.recreateCount,
+      hardHorizonResetUsed: args.hardHorizonResetUsed,
+      earlierKeyframeAvailable: args.earlierKeyframeAvailable,
+      outputProgressed: args.outputProgressed,
+      decodeQueueSize: args.decodeQueueSize,
+      softHighWater: args.softHighWater,
+      frozenAtHighWater: args.frozenAtHighWater,
+      lastDecodedTimestamp: args.lastDecodedTimestamp,
+      targetPtsUs: args.targetPtsUs,
+    })
+  ) {
+    return true;
+  }
   if (args.outputProgressed) return false;
   if (args.decodeQueueSize < args.hardDependencyCeiling) return false;
   const submitted = args.lastSubmittedSample ?? -1;
@@ -1320,6 +1385,13 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `requestedSubmitted ${requestedSubmitted ? "yes" : "no"}`,
     `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
     `formulaTargetRequiredSample ${d.formulaTargetRequiredSample}`,
+    `horizonExtended ${
+      d.currentTargetRequiredSample != null &&
+      d.formulaTargetRequiredSample != null &&
+      d.currentTargetRequiredSample > d.formulaTargetRequiredSample
+        ? "yes"
+        : "no"
+    }`,
     `lastRequiredDecodeSample ${d.lastRequiredDecodeSample}`,
     `softHighWater ${d.softHighWater || d.decodeQueueHighWater}`,
     `hardDependencyCeiling ${d.hardDependencyCeiling}`,
@@ -1331,6 +1403,7 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `earlierKeyframeRecovered ${d.earlierKeyframeRecovered ? "yes" : "no"}`,
     `postRecreateSubmitted ${d.postRecreateSubmitted}`,
     `postRecreateOutputs ${d.postRecreateOutputs}`,
+    `hardHorizonReset ${d.hardHorizonResetUsed ? "yes" : "no"}`,
     `pumpSlice ${d.pumpSliceStart}-${d.pumpSliceEnd}`,
     `submitPhases ${formatSubmitPhaseTraces(d.submitPhaseTraces)}`,
     `originSample ${d.originRequestedSample}`,
@@ -1396,6 +1469,13 @@ export function formatStallMessage(dump: Partial<AfeStallSnapshot>): string {
     `lastRequestedSample ${d.lastRequestedSample} (sample-index)`,
     `currentTargetRequiredSample ${d.currentTargetRequiredSample}`,
     `formulaTargetRequiredSample ${d.formulaTargetRequiredSample}`,
+    `horizonExtended ${
+      d.currentTargetRequiredSample != null &&
+      d.formulaTargetRequiredSample != null &&
+      d.currentTargetRequiredSample > d.formulaTargetRequiredSample
+        ? "yes"
+        : "no"
+    }`,
     `lastRequiredDecodeSample ${d.lastRequiredDecodeSample} (sample-index)`,
     `maxReorderSamples ${d.maxReorderSamples}`,
     `prefetch ${d.prefetch}`,

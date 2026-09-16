@@ -468,13 +468,10 @@ export class AfeScheduler {
         if (await tryEarlierKeyframe()) {
           frame = this.decoder.takeReady(idx) ?? (await waitExact(idx, budgetEnd));
           if (!frame) await progressiveTowardRequired();
-        } else if (this.decoder.canBorrowTowardLocalHorizon(idx)) {
-          /* gopStart 0 / no earlier I — still spend HARD toward sample 81. */
-          await progressiveTowardRequired();
         } else if (this.decoder.mayHardHorizonResetFor(idx)) {
-          /* AFE-21: queue already at/over HARD, lastSubmitted still short of
-           * requested / local horizon, no earlier I. One reset+rebuild from
-           * gopStart, then output-gated refill — not a flood to 140. */
+          /* AFE-21: lastSubmitted < requested, queue >= HARD.
+           * AFE-22: requested already submitted, exact PTS unseen, decoder
+           * dead after recreate — do not keep borrowing toward 44/144. */
           this.decoder.noteHardHorizonReset();
           const origin = this.decoder.currentGopKeyframeStart ?? decodeOrigin(this.movie, idx);
           await recoverGop(idx, origin);
@@ -484,6 +481,9 @@ export class AfeScheduler {
           if (!frame && this.decoder.hardHorizonResetExhausted(idx)) {
             return throwStall(idx);
           }
+        } else if (this.decoder.canBorrowTowardLocalHorizon(idx)) {
+          /* gopStart 0 / no earlier I — still spend HARD toward sample 81. */
+          await progressiveTowardRequired();
         }
       }
       if (!frame) await tryFinalFlush();

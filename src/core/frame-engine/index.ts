@@ -80,6 +80,7 @@ export {
   mayBorrowHardDependencyCredits,
   mayAdvancePastSoftFreeze,
   mayHardHorizonReset,
+  maySubmittedUnseenHorizonReset,
   queueRespectsHardCeiling,
   mayLocalHorizonFinalFlush,
   currentTargetRequiredSample,
