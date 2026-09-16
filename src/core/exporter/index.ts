@@ -50,6 +50,14 @@ export {
   webCodecsUnavailableMessage,
 } from "./webcodecs";
 export type { FrameRun } from "./webcodecs";
+export {
+  AVC_BASELINE_LEVEL_3_1,
+  DEFAULT_AVC_BITRATE,
+  avcEncoderCandidates,
+  requiredAvcLevel,
+  selectAvcEncoderConfig,
+  unsupportedAvcEncoderMessage,
+} from "./avc-capability";
 export { validateMp4Ftyp, looksLikeWebm, hexHeader } from "./ftyp";
 export { audioInputForMux, mp4HasAudioTrack } from "./mp4";
 export { downloadWav, encodeWavPcm, exportMixWav, readWavPcm, wavFileName } from "./wav";
