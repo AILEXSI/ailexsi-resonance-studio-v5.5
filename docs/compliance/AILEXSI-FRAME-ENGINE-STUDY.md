@@ -1125,7 +1125,34 @@ MODE A fixture VIDEO→VIS→VIDEO remains **90/90/90**. **Not HUMAN-PROVEN.**
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `897e0449-….mp4` sample 81 PTS 3416667; dump must show lastSubmitted / requestedSubmitted / HARD.  
 **HUMAN-PROVEN: NO**
 
-# AFE-20 — FINAL_FLUSH tail: requested sample submitted, exact PTS never emitted
+# AFE-20 — Shape A: HARD credits unused while queue ∈ (SOFT, HARD)
+
+Human Windows EXE still on **0367eb1** (AFE-19 binary). Clip after recreate:
+
+- requested sample **90** PTS **3791667** · requestedSubmitted **no**
+- lastSubmitted **82** < 90 < currentTarget/formula **96** · lastRequired **140**
+- SOFT **12** · HARD **22** · decodeQueue **15** (7 HARD credits unused)
+- lastDecodedTs **2625000** · targetPtsSeen **no**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- usefulInputExhausted **no** · FINAL_FLUSH yes but finalFlushArmed **no**
+- recreates **1** · postRecreateSubmitted **83** · postRecreateOutputs **62**
+- pumpSlice **83-82** empty · `PUMP_LOOKAHEAD:83-82/q15->15/.../paused`
+- gopStart **0** · earlierKeyframeAvailable **no**
+- waiter **null** · ptsCurrentlyRegistered **no** · videoReq/Dec/Enc **47/46/46**
+
+## Cause
+
+`mayAdvancePastSoftFreeze` / HARD borrow only stayed live at queue==SOFT or when `outputProgressed` was false. Queue **15 already above SOFT 12** and **below HARD 22**. Neighbor outputs (62) set `outputProgressed`, `mayBorrowHardDependencyCredits` returned false, `waitForDecodeCapacity` expired and treated `queue>=SOFT` as terminal freeze. Progressive wrote empty 83-82. Not a missing drain of an already-submitted PTS. Not a license to raise SOFT to 40 or flood to lastRequired 140.
+
+## Fix
+
+Spend remaining HARD credits toward the live local horizon whenever exact is unresolved, useful input remains, lastSubmitted < currentTargetRequired, and queue < HARD — including when queue is already **between** SOFT and HARD and neighbors have emitted. Expire path no longer freezes at SOFT. HARD remains the cap.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 90 PTS 3791667 / lastSubmitted 82 / queue 15 / SOFT 12 / HARD 22 → lastSubmitted reaches 90/96, unused HARD spent, no empty 83-82 pause.  
+**HUMAN-PROVEN: NO**
+
+# AFE-20 — Shape B / FINAL_FLUSH tail: requested sample submitted, exact PTS never emitted
 
 Human Windows EXE on clip `9f994a16-4eb4-4533-8de9-db46965277a8.mp4` (24fps, sourceInMs ~4039.97 / sourceOutMs 6037). Not the AFE-20 sample-81 SOFT-freeze picture.
 

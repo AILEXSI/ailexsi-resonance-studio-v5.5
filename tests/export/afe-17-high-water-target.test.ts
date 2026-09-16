@@ -303,7 +303,7 @@ describe("AFE-17 A–L HIGH_WATER target reachability / bounded dependency credi
         ...REGRESSION,
         outputProgressed: true,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       mayBorrowHardDependencyCredits({
         ...REGRESSION,

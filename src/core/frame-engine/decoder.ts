@@ -791,12 +791,27 @@ export class AfeVideoDecoder {
       const remain = deadline - nowMs();
       if (remain <= 0) {
         const ceiling = requested != null ? this.effectiveHardCeilingFor(requested) : high;
+        const liveTarget =
+          requested != null ? this.currentTargetRequiredFor(requested) : null;
+        const keepHard =
+          requested != null &&
+          (this.lastSubmittedSample ?? -1) < (liveTarget ?? requested) &&
+          this.decodeQueueSize < ceiling;
+        if (keepHard) {
+          /* Shape A: queue 15 ∈ (SOFT 12, HARD 22), lastSubmitted 82 < 96.
+           * Remaining HARD credits must still be spent — SOFT is not terminal. */
+          this.windowPaused = false;
+          this.backpressureBlocked = false;
+          this.noMoreSubmission = false;
+          this.frozenAfterRecreate = false;
+          return true;
+        }
         if (
           this.lastVideoFrameTimestamp === tsAtPause &&
-          this.decodeQueueSize >= high
+          this.decodeQueueSize >= ceiling
         ) {
           this.noMoreSubmission = true;
-          this.frozenAfterRecreate = this.decodeQueueSize >= ceiling || this.decodeQueueSize >= high;
+          this.frozenAfterRecreate = true;
           return false;
         }
         const resume = mayResumeDecode(resumeArgs(false));
@@ -851,10 +866,11 @@ export class AfeVideoDecoder {
   }
 
   /**
-   * AFE-17/18: borrow bounded HARD credits after recreate while the LIVE
-   * local target is unsubmitted, only at/above SOFT, only with no output
-   * progress. First-fill stays on SOFT HIGH (AFE-12/16). Stops once
-   * currentTargetRequired is submitted or the frozen HARD is reached.
+   * AFE-17/18/20: borrow bounded HARD credits after recreate while the LIVE
+   * local target is unsubmitted and queue is at/above SOFT and below HARD.
+   * Neighbor output does not stop the spend (Shape A: 62 post-recreate
+   * outputs, lastSubmitted 82 < 96, queue 15). First-fill stays on SOFT
+   * HIGH (AFE-12/16). Stops once currentTargetRequired is submitted or HARD.
    */
   private hardDependencyBorrow(
     requested: number | undefined,

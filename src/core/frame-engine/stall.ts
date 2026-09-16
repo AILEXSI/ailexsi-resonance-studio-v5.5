@@ -625,9 +625,11 @@ export function mayLocalHorizonFinalFlush(args: {
 }
 
 /**
- * AFE-17/18 emergency borrow. All of: exact unresolved, useful input remains,
- * live currentTargetRequired > lastSubmitted, no output progress, queue already
- * at SOFT_HIGH_WATER, queue still below HARD.
+ * AFE-17/18/20 HARD borrow. Exact unresolved, useful input remains,
+ * live currentTargetRequired > lastSubmitted, queue already at/above SOFT
+ * and still below HARD. Neighbor outputProgress does NOT cancel borrow —
+ * Shape A lastDecoded 2625000 / 62 post-recreate outputs still left
+ * lastSubmitted 82 < requested 90 < target 96 with queue 15 ∈ (12, 22).
  */
 export function mayBorrowHardDependencyCredits(args: {
   exactReady: boolean;
@@ -644,18 +646,18 @@ export function mayBorrowHardDependencyCredits(args: {
   if (args.exactReady) return false;
   if (!args.usefulInputRemains) return false;
   if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
-  if (args.outputProgressed) return false;
   if (args.decodeQueueSize < args.softHighWater) return false;
   if (args.decodeQueueSize >= args.hardDependencyCeiling) return false;
   return args.hardDependencyCeiling > args.softHighWater;
 }
 
 /**
- * AFE-20: SOFT freeze after recreate must not kill HARD borrow while the
- * exact requested sample / its live local horizon is still unsubmitted.
- * Human sample 81 / queue 15 / lastDecoded 2500000 / earlierKeyframe no:
- * gopStart 0 makes AFE-13 escape ineligible; progressive must still spend
- * remaining HARD credits (never lastRequired 102/140, never HIGH 40/125).
+ * AFE-20: SOFT freeze / queue already above SOFT must not kill HARD borrow
+ * while the exact requested sample / its live local horizon is still
+ * unsubmitted. Shape A: lastSubmitted 82 < 90 < 96, queue 15 ∈ (SOFT 12, HARD 22).
+ * `frozenAtSoftHighWater` is accepted for signature compatibility — a flag
+ * is not required once queue is already in the HARD band.
+ * Never lastRequired 102/140, never HIGH 40/125.
  */
 export function mayAdvancePastSoftFreeze(args: {
   frozenAtSoftHighWater: boolean;
@@ -666,7 +668,6 @@ export function mayAdvancePastSoftFreeze(args: {
   exactReady: boolean;
 }): boolean {
   if (args.exactReady) return false;
-  if (!args.frozenAtSoftHighWater) return false;
   if ((args.lastSubmittedSample ?? -1) >= args.currentTargetRequiredSample) return false;
   return args.decodeQueueSize < args.hardDependencyCeiling;
 }

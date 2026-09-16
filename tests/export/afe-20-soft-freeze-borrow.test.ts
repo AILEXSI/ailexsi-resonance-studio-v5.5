@@ -8,6 +8,7 @@ import {
   hardDependencyCeiling,
   lastRequiredDecodeSample,
   mayAdvancePastSoftFreeze,
+  mayBorrowHardDependencyCredits,
   mayEarlierKeyframeRecover,
   mayLocalHorizonFinalFlush,
   nowMs,
@@ -273,5 +274,178 @@ describe("AFE-20 A–H SOFT freeze after recreate must not hide sample 81", () =
   it("H. no timeout / SOFT / snap change", () => {
     expect(SOFT).toBe(15);
     expect(decodeQueueHighWater(HUMAN.maxReorder, HUMAN.prefetch, { afterRecreate: true })).toBe(15);
+  });
+});
+
+/** Shape A — EXE @ 0367eb1: sample 90, lastSubmitted 82, queue 15 ∈ (SOFT 12, HARD 22). */
+const SHAPE_A = {
+  sample: 90,
+  ptsUs: 3_791_667,
+  lastDecodedTs: 2_625_000,
+  lastSubmitted: 82,
+  decodeQueue: 15,
+  maxReorder: 2,
+  prefetch: 4,
+  lastRequired: 140,
+  sampleCount: 240,
+};
+
+const SHAPE_A_SOFT = decodeQueueHighWater(SHAPE_A.maxReorder, SHAPE_A.prefetch, { afterRecreate: true });
+const SHAPE_A_FORMULA = currentTargetRequiredSample({
+  requested: SHAPE_A.sample,
+  maxReorderSamples: SHAPE_A.maxReorder,
+  prefetch: SHAPE_A.prefetch,
+  sampleCount: SHAPE_A.sampleCount,
+  lastRequiredDecodeSample: SHAPE_A.lastRequired,
+});
+const SHAPE_A_HARD = hardDependencyCeiling({
+  softHighWater: SHAPE_A_SOFT,
+  lastSubmittedSample: SHAPE_A.lastSubmitted,
+  currentTargetRequiredSample: SHAPE_A_FORMULA,
+  maxReorderSamples: SHAPE_A.maxReorder,
+  prefetch: SHAPE_A.prefetch,
+});
+
+describe("AFE-20 Shape A — spend HARD while queue is between SOFT and HARD", () => {
+  let restore: (() => void) | undefined;
+  afterEach(() => {
+    restore?.();
+    restore = undefined;
+  });
+
+  it("A. human shape: lastSubmitted 82 < requested 90 < target 96, queue 15 ∈ (12, 22)", () => {
+    expect(SHAPE_A_SOFT).toBe(12);
+    expect(SHAPE_A_FORMULA).toBe(96);
+    expect(SHAPE_A_HARD).toBe(22);
+    expect(SHAPE_A.lastSubmitted).toBeLessThan(SHAPE_A.sample);
+    expect(SHAPE_A.sample).toBeLessThan(SHAPE_A_FORMULA);
+    expect(SHAPE_A.decodeQueue).toBeGreaterThan(SHAPE_A_SOFT);
+    expect(SHAPE_A.decodeQueue).toBeLessThan(SHAPE_A_HARD);
+    expect(SHAPE_A_HARD - SHAPE_A.decodeQueue).toBe(7);
+    expect(SHAPE_A_HARD).toBeLessThan(SHAPE_A.lastRequired);
+    expect(SHAPE_A_HARD).toBeLessThan(40);
+  });
+
+  it("B. REGRESSION: queue 15 ∈ (SOFT 12, HARD 22) still advances — not only at queue==SOFT", () => {
+    expect(
+      mayAdvancePastSoftFreeze({
+        frozenAtSoftHighWater: true,
+        lastSubmittedSample: SHAPE_A.lastSubmitted,
+        currentTargetRequiredSample: SHAPE_A_FORMULA,
+        decodeQueueSize: SHAPE_A.decodeQueue,
+        hardDependencyCeiling: SHAPE_A_HARD,
+        exactReady: false,
+      }),
+    ).toBe(true);
+    expect(
+      mayAdvancePastSoftFreeze({
+        frozenAtSoftHighWater: false,
+        lastSubmittedSample: SHAPE_A.lastSubmitted,
+        currentTargetRequiredSample: SHAPE_A_FORMULA,
+        decodeQueueSize: SHAPE_A.decodeQueue,
+        hardDependencyCeiling: SHAPE_A_HARD,
+        exactReady: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("C. neighbor outputProgress does not cancel HARD spend toward 96", () => {
+    expect(
+      mayBorrowHardDependencyCredits({
+        exactReady: false,
+        usefulInputRemains: true,
+        currentTargetRequiredSample: SHAPE_A_FORMULA,
+        lastSubmittedSample: SHAPE_A.lastSubmitted,
+        outputProgressed: true,
+        decodeQueueSize: SHAPE_A.decodeQueue,
+        softHighWater: SHAPE_A_SOFT,
+        hardDependencyCeiling: SHAPE_A_HARD,
+      }),
+    ).toBe(true);
+    expect(
+      mayBorrowHardDependencyCredits({
+        exactReady: false,
+        usefulInputRemains: true,
+        currentTargetRequiredSample: SHAPE_A_FORMULA,
+        lastSubmittedSample: SHAPE_A.lastSubmitted,
+        outputProgressed: true,
+        decodeQueueSize: SHAPE_A_HARD,
+        softHighWater: SHAPE_A_SOFT,
+        hardDependencyCeiling: SHAPE_A_HARD,
+      }),
+    ).toBe(false);
+    expect(
+      mayBorrowHardDependencyCredits({
+        exactReady: false,
+        usefulInputRemains: true,
+        currentTargetRequiredSample: SHAPE_A_FORMULA,
+        lastSubmittedSample: SHAPE_A_FORMULA,
+        outputProgressed: false,
+        decodeQueueSize: SHAPE_A.decodeQueue,
+        softHighWater: SHAPE_A_SOFT,
+        hardDependencyCeiling: SHAPE_A_HARD,
+      }),
+    ).toBe(false);
+  });
+
+  it("D. after recreate, queue 15 with 82<90 still submits toward 90/96, never 140", async () => {
+    const movie = loadMovie(LONG);
+    expect(movie).not.toBeNull();
+    restore = installControllableQueueDecoder();
+    const decoder = new AfeVideoDecoder({ ...movie!, maxReorderSamples: SHAPE_A.maxReorder });
+    await decoder.ensure();
+    decoder.setPrefetchHint(SHAPE_A.prefetch);
+    decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
+      lastRequested: 120,
+      lastRequiredDecodeSample: SHAPE_A.lastRequired,
+      requestedIndexes: [SHAPE_A.sample],
+    });
+    const targetPts = decoder.chunkTimestampUs(movie!.samples[SHAPE_A.sample]!);
+    decoder.openRequested(SHAPE_A.sample, targetPts);
+    decoder.setGopKeyframeStart(0);
+    await decoder.recreate();
+    decoder.setGopKeyframeStart(0);
+    decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
+      lastRequested: 120,
+      lastRequiredDecodeSample: SHAPE_A.lastRequired,
+      requestedIndexes: [SHAPE_A.sample],
+      keepResolved: true,
+    });
+    decoder.restoreOpenedIdentity(SHAPE_A.sample, targetPts);
+    decoder.clearRecoveryRebuilding([SHAPE_A.sample]);
+    for (let i = 0; i <= 60; i++) decoder.submitEncoded(movie!.samples[i]!);
+    decoder.deliverOutputForTest(SHAPE_A.lastDecodedTs);
+    for (let i = 61; i <= SHAPE_A.lastSubmitted; i++) decoder.submitEncoded(movie!.samples[i]!);
+    const mock = ControllableQueueDecoder.last!;
+    mock.decodeQueueSize = SHAPE_A.decodeQueue;
+    expect(decoder.softHighWater).toBe(SHAPE_A_SOFT);
+    expect(decoder.snapshot().lastSubmittedSample).toBe(SHAPE_A.lastSubmitted);
+    expect(decoder.canBorrowTowardLocalHorizon(SHAPE_A.sample)).toBe(true);
+    expect(decoder.effectiveHardCeilingFor(SHAPE_A.sample)).toBe(SHAPE_A_HARD);
+    let next = SHAPE_A.lastSubmitted + 1;
+    const hard = decoder.effectiveHardCeilingFor(SHAPE_A.sample);
+    while (next <= SHAPE_A.sample) {
+      const allow = await decoder.waitForDecodeCapacity(undefined, {
+        requested: SHAPE_A.sample,
+        budgetEnd: nowMs() + 40,
+      });
+      if (!allow) break;
+      decoder.submitEncoded(movie!.samples[next]!);
+      next += 1;
+      mock.decodeQueueSize = SHAPE_A.decodeQueue;
+      expect(mock.decodeQueueSize).toBeLessThan(hard);
+    }
+    expect(decoder.snapshot().lastSubmittedSample).toBeGreaterThanOrEqual(SHAPE_A.sample);
+    expect(decoder.snapshot().lastSubmittedSample).toBeLessThan(SHAPE_A.lastRequired);
+    expect(decoder.snapshot().lastSubmittedSample).toBeLessThanOrEqual(SHAPE_A_FORMULA);
+    expect(decoder.snapshot().decoderFlushCount).toBe(0);
+    decoder.close();
+  }, 10_000);
+
+  it("E. no timeout / SOFT raise / snap — HARD stays 22", () => {
+    expect(SHAPE_A_SOFT).toBe(12);
+    expect(SHAPE_A_HARD).toBe(22);
+    expect(decodeQueueHighWater(SHAPE_A.maxReorder, SHAPE_A.prefetch, { afterRecreate: true })).toBe(12);
+    expect(decodeQueueHighWater(SHAPE_A.maxReorder, SHAPE_A.prefetch, { afterRecreate: false })).toBe(40);
   });
 });
