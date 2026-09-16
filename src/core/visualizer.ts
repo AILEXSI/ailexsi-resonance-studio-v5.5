@@ -20,6 +20,7 @@ import {
   type OfflineFeatureExtractor,
 } from "./visualz/feature-extractor";
 import { preferLiveFeatures } from "./visualz/playback-tap";
+import { applyVisResponse } from "./visualz/vis-response";
 
 export const DEFAULT_VIS_EVENT_MS = 4000;
 
@@ -121,19 +122,17 @@ export function featuresAt(timeMs: number, durationMs: number): VisualizerFeatur
   const high = clamp01(hats * (0.35 + 0.65 * (1 - energy)));
   const spectrum = syntheticSpectrum(bass, mid, high, timeMs, energy);
   const onset = energy > 0.92;
-  return {
+  return presentVisualizerFeatures({
     timeMs,
-    energy,
     rms: energy,
     bass,
     mid,
-    high,
     treble: high,
     spectrum,
     onset,
     beatPulse: energy,
     tempoBpm: DEFAULT_VISUALIZER_BPM,
-  };
+  });
 }
 
 /** Fake 64-bin spectrum so Visualz scenes that read `spectrum` still move. */
@@ -157,12 +156,12 @@ function syntheticSpectrum(
 
 export type MixPcm = ExtractorMixPcm;
 
-function withEnergyAliases(live: AudioFeatures): VisualizerFeatures {
-  return {
-    ...live,
-    energy: clamp01(live.rms * 0.5 + live.bass * 0.5),
-    high: live.treble,
-  };
+/**
+ * Single Preview/Export presentation hook. Analysis stays in the extractor;
+ * scenes only see this packet. Same raw + DEFAULT_VIS_RESPONSE ⇒ same result.
+ */
+export function presentVisualizerFeatures(raw: AudioFeatures): VisualizerFeatures {
+  return applyVisResponse(raw);
 }
 
 /**
@@ -172,7 +171,7 @@ function withEnergyAliases(live: AudioFeatures): VisualizerFeatures {
  * Sequential calls on the same buffer keep prevEnergy / lastOnset / smoothing.
  */
 export function featuresFromMix(buf: MixPcm, timeMs: number): VisualizerFeatures {
-  return withEnergyAliases(offlineExtractorFor(buf).sample(timeMs));
+  return presentVisualizerFeatures(offlineExtractorFor(buf).sample(timeMs));
 }
 
 export function quietVisualizerFeatures(timeMs: number): VisualizerFeatures {
@@ -194,6 +193,8 @@ export function quietVisualizerFeatures(timeMs: number): VisualizerFeatures {
 export type ExportFeatureSession = {
   sample(timeMs: number): VisualizerFeatures;
   reset(): void;
+  /** Session sample() already ran applyVisResponse — do not shape again. */
+  readonly presented: true;
 };
 
 /**
@@ -212,8 +213,9 @@ export function createExportFeatureSession(
   const origin = opts?.timelineOriginMs ?? 0;
   const durationMs = opts?.durationMs ?? 0;
   return {
+    presented: true,
     sample(timeMs: number) {
-      if (extractor) return withEnergyAliases(extractor.sample(timeMs));
+      if (extractor) return presentVisualizerFeatures(extractor.sample(timeMs));
       return featuresAt(origin + timeMs, origin + durationMs);
     },
     reset() {
@@ -230,7 +232,12 @@ export function visFeaturesForExport(
   opts?: { timelineOriginMs?: number; extractor?: OfflineFeatureExtractor | ExportFeatureSession },
 ): VisualizerFeatures {
   const origin = opts?.timelineOriginMs ?? 0;
-  if (opts?.extractor) return withEnergyAliases(opts.extractor.sample(timeMs));
+  if (opts?.extractor) {
+    if ("presented" in opts.extractor && opts.extractor.presented) {
+      return opts.extractor.sample(timeMs);
+    }
+    return presentVisualizerFeatures(opts.extractor.sample(timeMs));
+  }
   if (mix && mix.length >= 8) return featuresFromMix(mix, timeMs);
   return featuresAt(origin + timeMs, origin + durationMs);
 }
@@ -256,16 +263,19 @@ export function visFeaturesForPreview(opts: {
     return quietVisualizerFeatures(opts.timeMs);
   }
   if (clipHere && opts.live && !isSilentEnergy(opts.live.rms, opts.live.bass)) {
-    return withEnergyAliases(opts.live);
+    return presentVisualizerFeatures(opts.live);
   }
   if (clipHere && opts.mix && opts.mix.length >= 8) {
     return featuresFromMix(opts.mix, opts.timeMs);
   }
   if (opts.audioLoaded) {
     const live = preferLiveFeatures(opts.live, quietVisualizerFeatures(opts.timeMs));
-    return withEnergyAliases(live);
+    return presentVisualizerFeatures(live);
   }
-  return preferLiveFeatures(opts.live, featuresAt(opts.timeMs, opts.durationMs)) as VisualizerFeatures;
+  const fallback = preferLiveFeatures(opts.live, featuresAt(opts.timeMs, opts.durationMs));
+  // featuresAt is already presented; a live tap still needs the same transform.
+  if (fallback === opts.live) return presentVisualizerFeatures(fallback);
+  return fallback as VisualizerFeatures;
 }
 
 export function nextSceneId(current: VisualizerSceneId): VisualizerSceneId {

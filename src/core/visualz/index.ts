@@ -35,3 +35,19 @@ export {
 } from "./feature-extractor";
 export type { FeatureExtractor, OfflineFeatureExtractor } from "./feature-extractor";
 export { analyserSpectrumFromWindow, binFrequencyHz } from "./fft";
+export {
+  applyVisResponse,
+  clamp01 as clampVis01,
+  DEFAULT_VIS_RESPONSE,
+  shapeVisLevel,
+  VIS_RESPONSE_01,
+} from "./vis-response";
+export type { RawAudioFeatures, VisResponseConfig, VisualizerPresentation } from "./vis-response";
+export {
+  latticeNodePulse,
+  latticeWarp,
+  resonanceCoreRadius,
+  resonanceMidFreq,
+  resonanceRingPulse,
+  resonanceWaveKickAmp,
+} from "./scene-impact";

@@ -119,3 +119,5 @@ Same project as the AUDIO-01 long-form VIDEO+VIS+AAC pass (audible soundtrack, V
 **EXE path / EXE SHA256:** left for the coordinator. This agent does not build the Windows EXE.
 
 **Do not merge** until MODE B confirms preview/export VIS parity on the short clip (and long-form if short passes).
+
+Follow-on: visual impact after the truthful FFT is `docs/compliance/VIS-RESPONSE-01-IMPACT-LAYER.md` / `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. **VIS-RESPONSE-02 is HUMAN-PROVEN** 2026-09-17 (MODE B EXE `cc3cd08`). Coordinator consolidates the stack to main.
