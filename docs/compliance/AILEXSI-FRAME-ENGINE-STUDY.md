@@ -1308,3 +1308,33 @@ No timeout bump, no snap/nearest/drop, no flood to 144, no Mediabunny, no HTMLVi
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest VIDEO-only (expect PASS) then VIDEO+VIS mix on `…Kopie.mp4` sample 28 PTS 1375000 after AFE-22 reset: cold reopen (not a third identical 458333 recreate); exact PTS or typed stall after reopen exhausted; no flood to 144. Dump should show `postResetFingerprintMatch` / `livenessReopen` / `coldOpenAfterVis` when applicable.  
 **HUMAN-PROVEN: NO**
 
+# AFE-24 — liveness reopen did not fire despite fingerprint match
+
+Human Windows EXE on AFE-23 tip (`dea72ca`). Same shape as AFE-22/23. Fixture MODE A still green. VIS-mix still fails.
+
+- sample **28** PTS **1375000** · lastSubmitted **34** · requestedSubmitted **yes**
+- lastDecodedTs **458333** · postRecreateOutputs **10** · HARD **22** · queue **19**
+- hardHorizonReset **yes** · recreates **2** · resets **2** · FINAL_FLUSH
+- **postResetFingerprintMatch yes**
+- **livenessReopen no**
+- **coldOpenAfterVis no**
+- visFrames **0** at stall
+
+## Cause
+
+AFE-23 **detected** the identical post-reset death (`postResetFingerprintMatch yes`) but the scheduler only called `mayPostResetLivenessReopenFor` when `hardHorizonResetExhausted` was true. Exhausted requires `lastDecoded === lastDecodedAtSubmit`. After the AFE-22 reset, WebView2 emits the ~10-frame / 458333 death **after** the last submit, so those timestamps stay unequal, exhausted stays **false**, FINAL_FLUSH runs, then the 3s stall. `mayPostResetLivenessReopen` itself would have returned true if invoked.
+
+`coldOpenAfterVis no` is **correct** on this dump: first video run (`previousPictureKind` null), visFrames 0. VIS is later in the mix. Not a missed VIS→VIDEO evict.
+
+## Fix
+
+1. Invoke liveness reopen whenever fingerprint matches after hardHorizonReset — do **not** require `hardHorizonResetExhausted`.
+2. Also invoke after FINAL_FLUSH (the human path) before the 3s stall.
+3. Dump `livenessReopen yes` / `livenessReopenReason yes` after the path runs; typed reason if blocked.
+
+No timeout bump, no snap, no flood to 144, no Mediabunny. AFE-20/21/22/23 predicates kept.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest VIS-mix on `…Kopie.mp4` sample 28: dump must show `livenessReopen yes` after fingerprint match (not match-yes / reopen-no). Exact PTS or typed stall after reopen exhausted.  
+**HUMAN-PROVEN: NO**
+
