@@ -25,7 +25,7 @@ encoded = await withTimeout(encodeAac(mixed, …), 12000, null);
 | C | Raw PCM memory | 29 min ≈ **585 MiB** mix buffer (see below). May contribute under low RAM; not the silent-success path. |
 | D | AAC `encodeQueueSize` unbounded | **Contributing risk** for 29 min (~75k frames). Hardened with high-water wait. Not the Fertig-without-audio mechanism. |
 | E | Missing AudioSpecificConfig description | Would have returned `null` then video-only success. Now a **LOUD FAIL**. Not proven on the human MP4. |
-| F | Mux omission / missing `soun` trak | STRESS-04 mux is PASS. Silent `audioKind = "none"` after a missing trak is removed. |
+| F | Mux omission / missing `soun` trak | **Second human fail on `334b150`.** Mix+AAC finished (`aacOutputCount 75397`, `mp4AudioSupplied yes`). `mp4HasAudioTrack` was a **64 KB ASCII prefix false negative**: video `stsz` (~4N) sits before `soun`/`mp4a`. Trak was written. Validator now walks `moov`. |
 | G | Other | No AFE / ENC-01 / VIS / WebM / Mediabunny involvement. |
 
 **Exact proven root cause:** `withTimeout(…, 12000, null)` around `mixJobAudio` / `encodeAac` maps slow long-form audio to `null`, and the exporter treats that as a valid video-only `success: true`.
@@ -50,6 +50,7 @@ Plus decoded source buffers. AUDIO-01 does **not** stream the mix. If timeout + 
 | Fail-honest | Mix fail / AAC fail / missing description / empty samples / mux omission / missing MP4 `soun` trak → `FAIL:` + AUDIO-01 dump. |
 | AAC backpressure | `encodeQueueSize` high-water **8**, wait on `dequeue` (same spirit as video). |
 | Mux | STRESS-04 iterative tables unchanged. Missing trak is a loud fail, not `audioKind = "none"`. |
+| `mp4HasAudioTrack` | Walks `moov`/`trak`/`hdlr`/`stsd`. Does **not** ASCII-scan the first 64 KB. 2-byte AAC-LC ASC (`0x12 0x10`) is valid. |
 
 ## Untouched
 
@@ -67,9 +68,15 @@ Streamed mix/encode so 60–120 min does not hold ~1.2–2.4 GiB of Float32 PCM 
 | 60 min | **YELLOW** | 1.2 GiB mix + sources. May OOM in WebView2. Same API; no streaming. |
 | 120 min | **RED** | 2.4 GiB mix + sources. Do not claim ready. AUDIO-02 streaming. |
 
+## Human follow-up on EXE `334b150` — verdict **F (validator false negative)**
+
+Dump: `FAIL: MP4 missing AAC audio trak (expectsAudio)` with `mp4AudioSupplied yes`, `aacOutputCount 75397`, `descriptionBytes 2`, `aacElapsedMs 9106`, `mixElapsedMs 20225`, `lastStage AUDIO_MUX_DONE`, `mp4HasAudioTrack no`.
+
+Mux **did** attach the AAC trak (video trak first, then audio). `mp4HasAudioTrack` only scanned `bytes.subarray(0, 64000)` as ASCII. ~29 min @30 fps video `stsz` is ~4N and sits before `soun`/`mp4a`, so both fourccs are past 64 KB. Not omitted. Not a bad 2-byte ASC (AAC-LC 44.1 kHz stereo).
+
 ## Tests
 
-`tests/export/audio-01-long-form-fail-honest.test.ts` — **17/17**.
+`tests/export/audio-01-long-form-fail-honest.test.ts`
 
 - A short audio → AAC trak
 - B video-only → none
@@ -82,10 +89,11 @@ Streamed mix/encode so 60–120 min does not hold ~1.2–2.4 GiB of Float32 PCM 
 - I samples empty → LOUD FAIL
 - J mux receives audio / `mp4HasAudioTrack`
 - K 25k video mux still valid (STRESS-04 contract)
-- L 75k AAC samples — no arg overflow
+- L 75k AAC samples — no arg overflow + `stsz` entry_count
+- F-human: 25k video + 75 397 AAC — 64 KB ASCII scan misses `soun`/`mp4a`; box walk finds trak
 - plus backpressure, no-`withTimeout` audit, fail-dump path, PCM quantification, exact stage names
 
-Gates on this tip: `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **80/80**. Full suite **1264 passed / 6 failed / 1270** (same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip, absent in the agent VM). `vite build` OK.
+Gates on this tip: `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **81/81**. Full suite **1265 passed / 6 failed / 1271** (same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip, absent in the agent VM). `vite build` OK.
 
 ## Operator card — MODE B (coordinator builds the EXE)
 

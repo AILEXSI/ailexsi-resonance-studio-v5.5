@@ -69,7 +69,13 @@ export {
   unsupportedAvcEncoderMessage,
 } from "./avc-capability";
 export { validateMp4Ftyp, looksLikeWebm, hexHeader } from "./ftyp";
-export { audioInputForMux, mp4HasAudioTrack, muxAvcToMp4 } from "./mp4";
+export {
+  aacAudioSpecificConfigIsUsable,
+  audioInputForMux,
+  mp4HasAudioTrack,
+  mp4SoundTrackInfo,
+  muxAvcToMp4,
+} from "./mp4";
 export {
   AAC_ENCODE_QUEUE_HIGH_WATER,
   AudioExportError,
@@ -92,6 +98,7 @@ export {
   withTimeout,
 } from "./audio";
 export type { AacProbe, AudioExportReport, AudioStageName } from "./audio";
+export type { Mp4SoundTrackInfo } from "./mp4";
 export { downloadWav, encodeWavPcm, exportMixWav, readWavPcm, wavFileName } from "./wav";
 export {
   beginExportFailSession,

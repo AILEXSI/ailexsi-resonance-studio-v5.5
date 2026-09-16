@@ -13,7 +13,9 @@ import {
   formatAudioFail,
   formatExportFailDump,
   jobFromProject,
+  aacAudioSpecificConfigIsUsable,
   mp4HasAudioTrack,
+  mp4SoundTrackInfo,
   muxAvcToMp4,
   pcmBytesForDuration,
   prepareJobAudioMix,
@@ -296,7 +298,54 @@ describe("AUDIO-01 long-form audio fail-honest", () => {
     });
     expect(validateMp4Ftyp(bytes).ok).toBe(true);
     expect(mp4HasAudioTrack(bytes)).toBe(true);
+    const info = mp4SoundTrackInfo(bytes);
+    expect(info.present).toBe(true);
+    expect(info.hasSoun).toBe(true);
+    expect(info.hasMp4a).toBe(true);
+    expect(info.sampleCount).toBe(count);
     expect(bytes.length).toBeLessThan(count * AAC_FRAME.length * 3 + 2_000_000);
+  });
+
+  it("F-human: large video stsz pushes soun past 64KB ASCII scan; trak is still present", () => {
+    const videoCount = 25_000;
+    const audioCount = 75_397;
+    const bytes = muxAvcToMp4({
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      description: AVC_C,
+      samples: Array.from({ length: videoCount }, (_, i) => ({
+        data: NAL,
+        timestampUs: i * 33333,
+        durationUs: 33333,
+        key: i % 60 === 0,
+      })),
+      audio: {
+        sampleRate: 44100,
+        channels: 2,
+        description: AAC_ASC,
+        samples: Array.from({ length: audioCount }, (_, i) => ({
+          data: AAC_FRAME,
+          timestampUs: i * 23220,
+          durationUs: 23220,
+        })),
+      },
+    });
+    expect(validateMp4Ftyp(bytes).ok).toBe(true);
+    const prefix = Array.from(bytes.subarray(0, 64_000) as Uint8Array)
+      .map((b: number) => (b >= 32 && b < 127 ? String.fromCharCode(b) : "."))
+      .join("");
+    expect(prefix.includes("soun") && prefix.includes("mp4a")).toBe(false);
+    const info = mp4SoundTrackInfo(bytes);
+    expect(info.hasSoun).toBe(true);
+    expect(info.hasMp4a).toBe(true);
+    expect(info.sampleCount).toBe(audioCount);
+    expect(info.present).toBe(true);
+    expect(mp4HasAudioTrack(bytes)).toBe(true);
+    expect(aacAudioSpecificConfigIsUsable(AAC_ASC)).toBe(true);
+    expect(AAC_ASC.byteLength).toBe(2);
+    expect(aacAudioSpecificConfigIsUsable(new Uint8Array([0x12]))).toBe(false);
+    expect(aacAudioSpecificConfigIsUsable(new Uint8Array())).toBe(false);
   });
 
   it("AAC encode queue waits on dequeue (bounded backpressure)", async () => {

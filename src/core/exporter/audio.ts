@@ -10,7 +10,7 @@ import {
   presentLinkedAudioMates,
 } from "./job";
 import { decodeAudio, isPlayableSource } from "./media";
-import { audioInputForMux, type AacSample, type AacTrack } from "./mp4";
+import { aacAudioSpecificConfigIsUsable, audioInputForMux, type AacSample, type AacTrack } from "./mp4";
 import type { ExportHooks, ExportJob } from "./types";
 import type { TrackId } from "../models";
 import {
@@ -428,6 +428,9 @@ export async function encodeAac(
   if (!description || description.byteLength === 0) {
     throw new AudioExportError("AAC encoder did not emit AudioSpecificConfig description");
   }
+  if (!aacAudioSpecificConfigIsUsable(description)) {
+    throw new AudioExportError("AAC AudioSpecificConfig unusable");
+  }
   if (samples.length === 0) {
     throw new AudioExportError("AAC encoder produced no samples");
   }
@@ -508,6 +511,9 @@ export async function finalizeExportAudio(
   const encoded = await encode(mixed, probe, hooks);
   if (!encoded.description || encoded.description.byteLength === 0) {
     throw new AudioExportError("AAC encoder did not emit AudioSpecificConfig description");
+  }
+  if (!aacAudioSpecificConfigIsUsable(encoded.description)) {
+    throw new AudioExportError("AAC AudioSpecificConfig unusable");
   }
   if (!encoded.samples || encoded.samples.length === 0) {
     throw new AudioExportError("AAC encoder produced no samples");

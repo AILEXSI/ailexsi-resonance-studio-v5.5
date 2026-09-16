@@ -540,11 +540,130 @@ export function muxAvcToMp4(opts: {
   return concatParts([ftyp, moov, mdat]);
 }
 
+function readU32(bytes: Uint8Array, offset: number): number {
+  return (
+    ((bytes[offset] ?? 0) << 24) |
+    ((bytes[offset + 1] ?? 0) << 16) |
+    ((bytes[offset + 2] ?? 0) << 8) |
+    (bytes[offset + 3] ?? 0)
+  ) >>> 0;
+}
+
+function readFourcc(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(
+    bytes[offset] ?? 0,
+    bytes[offset + 1] ?? 0,
+    bytes[offset + 2] ?? 0,
+    bytes[offset + 3] ?? 0,
+  );
+}
+
+type IsoBox = {
+  type: string;
+  start: number;
+  size: number;
+  payloadStart: number;
+  payloadEnd: number;
+};
+
+/** Local walker — do not import AFE `readBoxes` (muxer stays independent). */
+function readIsoBoxes(bytes: Uint8Array, start: number, end: number): IsoBox[] {
+  const out: IsoBox[] = [];
+  let off = start;
+  while (off + 8 <= end) {
+    const size32 = readU32(bytes, off);
+    const type = readFourcc(bytes, off + 4);
+    let header = 8;
+    let size = size32;
+    if (size32 === 1) {
+      if (off + 16 > end) break;
+      const hi = readU32(bytes, off + 8);
+      const lo = readU32(bytes, off + 12);
+      if (hi > 0x1fffff) break;
+      size = hi * 0x1_0000_0000 + lo;
+      header = 16;
+    } else if (size32 === 0) {
+      size = end - off;
+    }
+    if (size < header || off + size > end) break;
+    out.push({ type, start: off, size, payloadStart: off + header, payloadEnd: off + size });
+    off += size;
+  }
+  return out;
+}
+
+function child(boxes: readonly IsoBox[], type: string): IsoBox | undefined {
+  return boxes.find((b) => b.type === type);
+}
+
+/**
+ * 2-byte AAC-LC AudioSpecificConfig is valid (e.g. 0x12 0x10 = LC / 44.1 kHz / stereo).
+ * Human AUDIO-01 dump had descriptionBytes 2 — that is complete, not truncated.
+ */
+export function aacAudioSpecificConfigIsUsable(desc: Uint8Array | undefined | null): boolean {
+  if (!desc || desc.byteLength < 2) return false;
+  const objectType = desc[0]! >> 3;
+  return objectType >= 1 && objectType <= 31;
+}
+
+export type Mp4SoundTrackInfo = {
+  present: boolean;
+  hasSoun: boolean;
+  hasMp4a: boolean;
+  sampleCount: number;
+};
+
+function soundTrackInfoFromTrak(bytes: Uint8Array, trak: IsoBox): Mp4SoundTrackInfo {
+  const mdia = child(readIsoBoxes(bytes, trak.payloadStart, trak.payloadEnd), "mdia");
+  if (!mdia) return { present: false, hasSoun: false, hasMp4a: false, sampleCount: 0 };
+  const mdiaKids = readIsoBoxes(bytes, mdia.payloadStart, mdia.payloadEnd);
+  const hdlr = child(mdiaKids, "hdlr");
+  const hasSoun = Boolean(
+    hdlr && hdlr.payloadEnd - hdlr.payloadStart >= 12 && readFourcc(bytes, hdlr.payloadStart + 8) === "soun",
+  );
+  const minf = child(mdiaKids, "minf");
+  if (!minf) return { present: false, hasSoun, hasMp4a: false, sampleCount: 0 };
+  const stbl = child(readIsoBoxes(bytes, minf.payloadStart, minf.payloadEnd), "stbl");
+  if (!stbl) return { present: false, hasSoun, hasMp4a: false, sampleCount: 0 };
+  const stblKids = readIsoBoxes(bytes, stbl.payloadStart, stbl.payloadEnd);
+  const stsd = child(stblKids, "stsd");
+  let hasMp4a = false;
+  if (stsd && stsd.payloadEnd - stsd.payloadStart >= 8) {
+    // stsd is a full box + entry_count, then sample entries.
+    hasMp4a = readIsoBoxes(bytes, stsd.payloadStart + 8, stsd.payloadEnd).some((b) => b.type === "mp4a");
+  }
+  const stsz = child(stblKids, "stsz");
+  let sampleCount = 0;
+  if (stsz && stsz.payloadEnd - stsz.payloadStart >= 12) {
+    sampleCount = readU32(bytes, stsz.payloadStart + 8);
+  }
+  const present = hasSoun && hasMp4a && sampleCount > 0;
+  return { present, hasSoun, hasMp4a, sampleCount };
+}
+
+/**
+ * True when moov contains an AAC sound trak (hdlr=soun + stsd mp4a + stsz entry_count>0).
+ *
+ * Must walk boxes. A 64 KB ASCII prefix scan is a false negative on long 1080p30
+ * files: video stsz (~4N) sits in the first trak and pushes `soun`/`mp4a` past 64 KB.
+ * Human AUDIO-01 EXE `334b150`: mp4AudioSupplied yes, aacOutputCount 75397,
+ * lastStage AUDIO_MUX_DONE, mp4HasAudioTrack no — trak was written, validator missed it.
+ */
+export function mp4SoundTrackInfo(bytes: Uint8Array): Mp4SoundTrackInfo {
+  const empty: Mp4SoundTrackInfo = { present: false, hasSoun: false, hasMp4a: false, sampleCount: 0 };
+  const moov = child(readIsoBoxes(bytes, 0, bytes.length), "moov");
+  if (!moov) return empty;
+  const traks = readIsoBoxes(bytes, moov.payloadStart, moov.payloadEnd).filter((b) => b.type === "trak");
+  for (const trak of traks) {
+    const info = soundTrackInfoFromTrak(bytes, trak);
+    if (info.hasSoun || info.hasMp4a) return info;
+  }
+  return empty;
+}
+
 export function mp4HasAudioTrack(bytes: Uint8Array): boolean {
-  const text = Array.from(bytes.subarray(0, Math.min(bytes.length, 64_000)))
-    .map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : "."))
-    .join("");
-  return text.includes("mp4a") && text.includes("soun");
+  const info = mp4SoundTrackInfo(bytes);
+  return info.present;
 }
 
 /** Exported for STRESS-04 tests that assert table construction without a full movie. */

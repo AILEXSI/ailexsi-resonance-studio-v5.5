@@ -117,13 +117,13 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 
 | | |
 | --- | --- |
-| Verdict | **A — duration-unsafe success timeout.** STRESS-04 tip wrapped `mixJobAudio` / `encodeAac` in `withTimeout(…, 12000, null)`. Null became video-only `success: true`. ~29 min mix/encode cannot finish in 12s. |
-| Human | STRESS-04 EXE: 1920×1080@30 ~29 min VIDEO+VIS+AUDIO, mux Fertig, **no audible audio**. VIDEO/AFE/VIS/large mux PASS. Long-form audio FAIL. |
-| Diff | `expectsAudio(job)` contract; AUDIO-01 stages on the fail/report path; no duration-scaling success timeout; AbortSignal cancel; mix/AAC/description/samples/mux/trak failures are `FAIL:`; AAC encode queue high-water 8. STRESS-04 mux helpers unchanged. |
+| Verdict | **A** (12s success timeout) then **F** (post-mux validator). Human EXE `334b150`: mix+AAC finished; `mp4HasAudioTrack` ASCII-scanned only 64 KB and missed `soun` after the video `stsz`. |
+| Human | STRESS-04 EXE: mux Fertig, no audio (timeout). AUDIO-01 EXE `334b150`: `FAIL: MP4 missing AAC audio trak` with `mp4AudioSupplied yes` / `aacOutputCount 75397` / `lastStage AUDIO_MUX_DONE`. |
+| Diff | Fail-honest `expectsAudio`; no 12s success-null; AAC high-water 8; `mp4HasAudioTrack` walks `moov` (not a 64 KB prefix). STRESS-04 mux tables unchanged. |
 | Memory | 29 / 60 / 120 min @ 44.1 kHz stereo Float32 ≈ **585 / 1211 / 2423 MiB** mix PCM. AUDIO-01 stays narrow. AUDIO-02 streaming is future. |
 | 60 / 120 | 29 min **GREEN** (after this fix; human still required). 60 min **YELLOW**. 120 min **RED**. |
-| Test | `tests/export/audio-01-long-form-fail-honest.test.ts` — A–L (17). |
-| Gates | `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **80/80**. Full suite **1264 passed / 6 failed / 1270**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
+| Test | `tests/export/audio-01-long-form-fail-honest.test.ts` — A–L + F-human 64 KB scan (18). |
+| Gates | `tsc --noEmit` clean. Focused AUDIO-01 + STRESS-04 + STRESS-03 stage + STRESS-02 + STRESS-01 + AFE-25 + ENC-01 + aac-mux + export **81/81**. Full suite **1265 passed / 6 failed / 1271**: same 2 pre-existing AFE-15 A/N dump-ban; 4 STRESS-03 physical tests need the operator clip (not in this VM). `vite build` OK. |
 | Human remaining | Same ~29:11 1080p30 VIDEO+VIS+AUDIO project. Fertig + audible AAC start/mid/end + A/V sync. EXE path/SHA left for coordinator. Details: `docs/compliance/AUDIO-01-LONG-FORM-FAIL-HONEST.md`. |
 
 ## Verification paths
