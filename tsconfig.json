@@ -41,6 +41,7 @@
     "tests/export/afe-12-decode-backpressure.test.ts",
     "tests/export/afe-13-backpressure-deadlock.test.ts",
     "tests/export/afe-14-packet-parity-window.test.ts",
-    "tests/export/afe-15-exact-pts-tail-ownership.test.ts"
+    "tests/export/afe-15-exact-pts-tail-ownership.test.ts",
+    "tests/export/afe-16-empty-pump-slice.test.ts"
   ]
 }

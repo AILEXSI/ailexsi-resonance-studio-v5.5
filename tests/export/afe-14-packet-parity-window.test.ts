@@ -454,25 +454,25 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     await decoder.ensure();
     decoder.setGopKeyframeStart(0);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
-      lastRequested: 40,
-      lastRequiredDecodeSample: 50,
-      requestedIndexes: [34],
+      lastRequested: 10,
+      lastRequiredDecodeSample: 10,
+      requestedIndexes: [10],
     });
-    decoder.openRequested(34, decoder.chunkTimestampUs(movie!.samples[34]!));
+    decoder.openRequested(10, decoder.chunkTimestampUs(movie!.samples[10]!));
     await decoder.recreate();
     decoder.setGopKeyframeStart(0);
     decoder.beginStream(new Uint8Array(movie!.sampleCount).fill(1), 0, {
-      lastRequested: 40,
-      lastRequiredDecodeSample: 50,
-      requestedIndexes: [34],
+      lastRequested: 10,
+      lastRequiredDecodeSample: 10,
+      requestedIndexes: [10],
       keepResolved: true,
     });
-    decoder.restoreOpenedIdentity(34, decoder.chunkTimestampUs(movie!.samples[34]!));
+    decoder.restoreOpenedIdentity(10, decoder.chunkTimestampUs(movie!.samples[10]!));
     const hw = decoder.decodeQueueHighWater;
     const lw = decoder.decodeQueueLowWater;
     for (let i = 0; i < hw; i++) decoder.submitEncoded(movie!.samples[i]!);
     const mid = await decoder.waitForDecodeCapacity(undefined, {
-      requested: 34,
+      requested: 10,
       budgetEnd: nowMs() + 40,
     });
     expect(mid).toBe(false);
@@ -481,14 +481,14 @@ describe("AFE-14 A–N packet/config parity + bounded decode window", () => {
     expect(mock.decodeQueueSize).toBe(hw - 1);
     expect(hw - 1).toBeGreaterThan(lw);
     const stillPaused = await decoder.waitForDecodeCapacity(undefined, {
-      requested: 34,
+      requested: 10,
       budgetEnd: nowMs() + 40,
     });
     expect(stillPaused).toBe(false);
     mock.drain(mock.decodeQueueSize - lw, false);
     expect(mock.decodeQueueSize).toBe(lw);
     const resumed = await decoder.waitForDecodeCapacity(undefined, {
-      requested: 34,
+      requested: 10,
       budgetEnd: nowMs() + 40,
     });
     expect(resumed).toBe(true);
