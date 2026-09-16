@@ -1125,3 +1125,39 @@ MODE A fixture VIDEO→VIS→VIDEO remains **90/90/90**. **Not HUMAN-PROVEN.**
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `897e0449-….mp4` sample 81 PTS 3416667; dump must show lastSubmitted / requestedSubmitted / HARD.  
 **HUMAN-PROVEN: NO**
 
+# AFE-20 — FINAL_FLUSH tail: requested sample submitted, exact PTS never emitted
+
+Human Windows EXE on clip `9f994a16-4eb4-4533-8de9-db46965277a8.mp4` (24fps, sourceInMs ~4039.97 / sourceOutMs 6037). Not the AFE-20 sample-81 SOFT-freeze picture.
+
+- requested sample **134** PTS **5625000** · requestedSubmitted **yes**
+- lastSubmitted **140** · lastRequired **140** · currentTarget **140** · formula **140**
+- lastDecodedTs **5583333** (sample 133 — one 24fps frame short)
+- decodeQueue **2** · HIGH/SOFT **40** · HARD **40** · first-fill (recreates **0**)
+- targetPtsSeen **no** · targetPtsOutputs **12** · targetPtsLastSeenTs **5333333**
+- flushes **1** · FINAL_FLUSH **yes** · finalFlushArmed **yes** · usefulInputExhausted **yes**
+- waiter **null** · streamPts **0** · ptsEverRegistered **yes** · ptsCurrentlyRegistered **no**
+- ownershipState **FINAL_FLUSH_ARMED** · exactIdentity **no** · unresolved **1**
+- videoReq/Dec/Enc **46/45/45** · pumpSlice **141-140** · stalledMs **3000**
+
+This is the AFE-15 CASE B shape (same 134 / 5625000 / 5583333 / queue 2 / submitted 140). Soft-freeze / HARD credits / sample-beyond-submitted do not apply.
+
+## Cause
+
+1. `settleOutputs` returned early when waiter/pending/streamWaiter were empty even with unresolved=1 and decodeQueue=2, so CASE B `drainHeldTail` never ran after identity left `PtsIndexMap`.
+2. First `VideoDecoder.flush()` could occupy the entire 3s stall watchdog while hardware still held the exact sample. Extra genuine drain never started (`flushes` already 1, `recreates` 0, waiter never installed).
+3. `recordOutputTimestamp` rebound `targetPtsUs` to any opened neighbor (12 counts, lastSeen 5333333) so exact 5625000 was not the tracked target.
+
+Not a missing submit. Not SOFT freeze. Not a license to snap to 5583333.
+
+## Fix
+
+1. Unresolved exact request + (FINAL_FLUSH armed or queue>0) + exact PTS unseen → continue to flush / CASE B drain even when waiter is null and `streamPts` is 0. Re-bind identity around the extra flush.
+2. CASE B flush wait plateaus after `AFE_SETTLE_DRAIN_MS` of no output progress (queue still held, exact unseen) instead of sitting the 3s watchdog. One extra `flush()`. Scheduler post-flush wait is `AFE_WAIT_EXACT_PTS_MS` (120), not the leftover 3s budget.
+3. `targetPts*` counts only the exact requested PTS. Neighbor outputs do not rebind the target.
+
+Regression: requested submitted + lastSubmitted>=lastRequired + usefulInputExhausted + FINAL_FLUSH + exact not ready + queue small → exact PTS or typed fail with ownership intact. No timeout bump, no snap/nearest/drop, no global queue flood, no Mediabunny, no HTMLVideo fallback. AFE-19 SOFT-freeze path unchanged.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `9f994a16-….mp4` sample 134 PTS 5625000 / lastDecoded 5583333 / submitted 140 / queue 2 → exact frame or typed fail with `ptsCurrentlyRegistered` or waiter live; no 3s waiter-null sit.  
+**HUMAN-PROVEN: NO**
+

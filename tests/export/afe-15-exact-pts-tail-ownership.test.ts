@@ -496,18 +496,20 @@ describe("AFE-15 A–P exact-PTS tail ownership + final drain", () => {
     ).toBe(false);
     const movie = loadMovie(BFRAME) ?? loadMovie(LONG);
     if (!movie) return;
-    restore = installFlushLeavesQueueDecoder({ leaveOnFirstFlush: 2 });
+    const index = 3;
+    const pts = new AfeVideoDecoder(movie).chunkTimestampUs(movie.samples[index]!);
+    restore = installFlushLeavesQueueDecoder({ leaveOnFirstFlush: 2, skipPts: [pts] });
     const decoder = new AfeVideoDecoder(movie);
     await decoder.ensure();
-    const index = 3;
-    const pts = decoder.chunkTimestampUs(movie.samples[index]!);
     decoder.beginStream(new Uint8Array(movie.sampleCount).fill(1), 0, {
       lastRequested: index,
       lastRequiredDecodeSample: index + 4,
       requestedIndexes: [index],
     });
     decoder.openRequested(index, pts);
+    decoder.bindOrigin({ sourceSampleRequested: index, requestedPtsUs: pts });
     for (let i = 0; i <= index + 4; i++) decoder.submitEncoded(movie.samples[i]!);
+    decoder.armFinalFlush([index]);
     await decoder.flushTail();
     expect(FlushLeavesQueueDecoder.last?.flushCount ?? 0).toBeGreaterThanOrEqual(2);
     expect(decoder.snapshot().decoderRecreateCount).toBe(0);

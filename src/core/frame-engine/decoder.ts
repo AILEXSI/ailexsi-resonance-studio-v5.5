@@ -508,7 +508,11 @@ export class AfeVideoDecoder {
     const rec = this.ensureOwnership(index, ptsUs);
     if (ptsUs != null) {
       rec.ptsUs = ptsUs;
-      this.targetPtsUs = ptsUs;
+      if (this.targetPtsUs !== ptsUs) {
+        this.targetPtsUs = ptsUs;
+        this.targetPtsOutputCount = 0;
+        this.targetPtsLastSeenTs = null;
+      }
     }
     this.noteIdentity(index, "OPEN_REQUEST", rec.ptsUs);
   }
@@ -597,16 +601,11 @@ export class AfeVideoDecoder {
     if (this.finalFlushArmed || this.stallPhase === "FINAL_FLUSH") {
       if (this.tailOutputTimestamps.length < 24) this.tailOutputTimestamps.push(timestamp);
     }
+    /* Exact requested PTS only. Neighbor outputs must not rebind targetPtsUs
+     * (human: 12 rematches, lastSeen 5333333, exact 5625000 never seen). */
     if (this.targetPtsUs != null && timestamp === this.targetPtsUs) {
       this.targetPtsOutputCount += 1;
       this.targetPtsLastSeenTs = timestamp;
-    } else {
-      const opened = this.openedUnresolvedByPts(timestamp);
-      if (opened != null) {
-        this.targetPtsUs = timestamp;
-        this.targetPtsOutputCount += 1;
-        this.targetPtsLastSeenTs = timestamp;
-      }
     }
   }
 
@@ -2075,8 +2074,25 @@ export class AfeVideoDecoder {
     const dec = this.decoder;
     if (!dec) return;
     const unresolvedRequested = this.unresolvedRequestedCount();
-    if (this.waiterCount() === 0 && unresolvedRequested === 0 && !this.streamWaiter) return;
-    if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
+    const exactPts = this.exactTargetPts();
+    const exactSeen = () => this.hasTargetPtsBeenSeen(exactPts);
+    const heldCaseB =
+      unresolvedRequested > 0 &&
+      !exactSeen() &&
+      (this.finalFlushArmed || dec.decodeQueueSize > 0);
+    /* Identity may already be gone (waiter null, streamPts 0) while hardware
+     * still holds the exact sample — do not skip flush/CASE B drain. */
+    if (this.waiterCount() === 0 && unresolvedRequested === 0 && !this.streamWaiter && !heldCaseB) {
+      return;
+    }
+    if (
+      this.waiterCount() === 0 &&
+      this.streamPts.pendingCount() === 0 &&
+      !this.streamWaiter &&
+      !heldCaseB
+    ) {
+      return;
+    }
 
     this.stallPhase = this.stallPhase === "FINAL_FLUSH" ? "FINAL_FLUSH" : "DECODER_DRAIN";
 
@@ -2114,25 +2130,21 @@ export class AfeVideoDecoder {
       }
     }
 
-    if (this.waiterCount() === 0 && this.streamPts.pendingCount() === 0 && !this.streamWaiter) return;
+    if (
+      this.waiterCount() === 0 &&
+      this.streamPts.pendingCount() === 0 &&
+      !this.streamWaiter &&
+      !heldCaseB
+    ) {
+      return;
+    }
     this.stallPhase = "FINAL_FLUSH";
     try {
-      let flushTimer: ReturnType<typeof setTimeout> | undefined;
       this.flushCount += 1;
       if (!afePerfProbeInstalled()) afePerfCount("decoderFlushes");
-      try {
-        await Promise.race([
-          dec.flush(),
-          new Promise<never>((_, reject) => {
-            flushTimer = setTimeout(() => {
-              const dump = this.snapshot({ stalledMs: AFE_FLUSH_WATCHDOG_MS });
-              reject(new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false));
-            }, AFE_FLUSH_WATCHDOG_MS);
-          }),
-        ]);
-      } finally {
-        if (flushTimer) clearTimeout(flushTimer);
-      }
+      await this.awaitDecoderFlush(dec, signal, {
+        caseB: this.finalFlushArmed && unresolvedRequested > 0 && !exactSeen(),
+      });
       this.needsKeyframe = true;
     } catch (e) {
       if (signal?.aborted) throw abortedError(signal);
@@ -2140,6 +2152,59 @@ export class AfeVideoDecoder {
       throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
     }
     if (this.finalFlushArmed) await this.drainHeldTail(signal);
+  }
+
+  private exactTargetPts(): number | null {
+    return this.origin.requestedPtsUs ?? this.origin.originRequestedPts ?? this.targetPtsUs;
+  }
+
+  /**
+   * CASE B: do not occupy the 3s stall watchdog on a hung first flush while
+   * hardware still holds frames and exact PTS is unseen. Plateau → extra drain.
+   */
+  private async awaitDecoderFlush(
+    dec: VideoDecoder,
+    signal: AbortSignal | undefined,
+    opts?: { caseB?: boolean },
+  ): Promise<void> {
+    const caseB = opts?.caseB === true;
+    const exactPts = this.exactTargetPts();
+    const started = nowMs();
+    let progressTs = this.lastVideoFrameTimestamp;
+    let progressAt = started;
+    let flushSettled = false;
+    const flushPromise = dec.flush().then(
+      () => {
+        flushSettled = true;
+      },
+      (e: unknown) => {
+        flushSettled = true;
+        throw e;
+      },
+    );
+    while (!flushSettled) {
+      throwIfAborted(signal);
+      await Promise.race([
+        flushPromise.catch(() => undefined),
+        new Promise<void>((r) => setTimeout(r, 16)),
+      ]);
+      if (flushSettled) break;
+      if (this.hasTargetPtsBeenSeen(exactPts)) return;
+      if (this.lastVideoFrameTimestamp !== progressTs) {
+        progressTs = this.lastVideoFrameTimestamp;
+        progressAt = nowMs();
+      }
+      const plateau = nowMs() - progressAt >= AFE_SETTLE_DRAIN_MS;
+      if (caseB && dec.decodeQueueSize > 0 && !this.hasTargetPtsBeenSeen(exactPts) && plateau) {
+        return;
+      }
+      if (nowMs() - started >= AFE_FLUSH_WATCHDOG_MS) {
+        if (caseB && !this.hasTargetPtsBeenSeen(exactPts)) return;
+        const dump = this.snapshot({ stalledMs: AFE_FLUSH_WATCHDOG_MS });
+        throw new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false);
+      }
+    }
+    await flushPromise;
   }
 
   /**
@@ -2174,6 +2239,7 @@ export class AfeVideoDecoder {
     }
     const snap = this.snapshot();
     const focus = snap.requestedSample ?? snap.sourceSampleRequested;
+    const exactPts = this.exactTargetPts() ?? snap.targetPtsUs;
     const localExhausted =
       focus != null &&
       (this.lastSubmittedSample ?? -1) >= this.currentTargetRequiredFor(focus);
@@ -2181,12 +2247,12 @@ export class AfeVideoDecoder {
       !this.tailDrainReplayed &&
       mayGenuineFinalDrain({
         unresolvedRequestedVideoFrames: unresolved(),
-        usefulInputExhausted: snap.usefulInputExhausted,
+        usefulInputExhausted: snap.usefulInputExhausted || this.usefulInputIsExhausted(),
         finalFlushAttempted: true,
-        targetPtsSeen: snap.targetPtsSeen,
-        decodeQueueSize: this.decodeQueueSize,
+        targetPtsSeen: this.hasTargetPtsBeenSeen(exactPts),
+        decodeQueueSize: dec.decodeQueueSize,
         lastDecodedTimestamp: this.lastVideoFrameTimestamp,
-        targetPtsUs: snap.targetPtsUs,
+        targetPtsUs: exactPts,
         recoveryRebuilding: snap.recoveryRebuilding,
         transactionComplete: snap.transactionComplete,
         localHorizonExhausted: localExhausted,
@@ -2194,25 +2260,20 @@ export class AfeVideoDecoder {
     if (!needReplay) return;
     this.tailDrainReplayed = true;
     this.stallPhase = "FINAL_FLUSH";
-    let flushTimer: ReturnType<typeof setTimeout> | undefined;
     this.flushCount += 1;
-    try {
-      await Promise.race([
-        dec.flush(),
-        new Promise<never>((_, reject) => {
-          flushTimer = setTimeout(() => {
-            const dump = this.snapshot({ stalledMs: AFE_FLUSH_WATCHDOG_MS });
-            reject(new AfeError("AFE_DECODE_STALL", `decoder flush stall; ${formatStallMessage(dump)}`, false));
-          }, AFE_FLUSH_WATCHDOG_MS);
-        }),
-      ]);
-    } finally {
-      if (flushTimer) clearTimeout(flushTimer);
+    if (!afePerfProbeInstalled()) afePerfCount("decoderFlushes");
+    for (const index of [...this.openedRequested].filter((i) => !this.isResolvedRequested(i))) {
+      this.retainExactIdentity(index);
     }
+    await this.awaitDecoderFlush(dec, signal, { caseB: true });
+    this.needsKeyframe = true;
     const drainStart = nowMs();
     while (dec.decodeQueueSize > 0 && unresolved() > 0 && nowMs() - drainStart < AFE_SETTLE_DRAIN_MS) {
       throwIfAborted(signal);
       await waitDequeue();
+    }
+    for (const index of [...this.openedRequested].filter((i) => !this.isResolvedRequested(i))) {
+      this.retainExactIdentity(index);
     }
   }
 

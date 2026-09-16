@@ -444,7 +444,9 @@ export class AfeScheduler {
         this.decoder.assertOpenedOwnership(extra);
         frame = this.decoder.takeReady(idx);
         if (!frame) {
-          const remain = Math.max(16, budgetEnd - nowMs());
+          /* CASE B already drained. Do not sit the leftover 3s budget with a
+           * waiter that is then cleared (human: waiter null, stalledMs 3000). */
+          const remain = Math.min(AFE_WAIT_EXACT_PTS_MS, Math.max(16, budgetEnd - nowMs()));
           frame = await this.decoder.awaitReady(idx, signal, extra, {
             allowSkip: false,
             throwOnTimeout: false,
