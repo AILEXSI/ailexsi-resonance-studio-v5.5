@@ -27,6 +27,8 @@ export interface ExportClip {
   still?: boolean;
   /** True when a living linked A mate (enabled, disabled, or muted) carries the sound. */
   skipMix?: boolean;
+  /** From MediaAsset.hasAudio when known. false = video-only file (no embedded audio). */
+  hasAudio?: boolean;
 }
 
 export interface ExportTrack {
@@ -34,6 +36,12 @@ export interface ExportTrack {
   kind: MediaKind;
   /** −1 L … +1 R. Applied last on this track’s mix contribution. */
   pan: number;
+  /** Raw project mute flag (diagnostics). Mix already baked via isTrackAudible. */
+  muted?: boolean;
+  /** Raw project solo flag (diagnostics). */
+  solo?: boolean;
+  /** Raw project fader (diagnostics). Mix already baked into clip.gain. */
+  volume?: number;
   clips: ExportClip[];
   /** Export-local volume envelope. Missing / disabled = identity (prior mix). */
   volumeAutomation?: { enabled: boolean; points: { timeMs: number; value: number }[] };
@@ -96,6 +104,8 @@ export interface ExportResult {
   blob?: Blob;
   brands?: string[];
   audio?: ExportAudioKind;
+  expectsAudio?: boolean;
+  audioReport?: import("./audio-trace").AudioExportReport;
   videoFramesRequested?: number;
   videoFramesDecoded?: number;
   videoFramesEncoded?: number;
@@ -103,7 +113,23 @@ export interface ExportResult {
   blackFramesEncoded?: number;
 }
 
+export interface ExportAudioTestHooks {
+  mixJobAudio?: (
+    job: ExportJob,
+    probe: { sampleRate: number; channels: number; bitrate: number },
+    signal?: AbortSignal,
+  ) => Promise<AudioBuffer | null>;
+  encodeAac?: (
+    buffer: AudioBuffer,
+    probe: { sampleRate: number; channels: number; bitrate: number },
+    hooks?: ExportHooks,
+  ) => Promise<{ samples: { data: Uint8Array; timestampUs: number; durationUs: number }[]; description: Uint8Array }>;
+  probeAac?: () => Promise<{ sampleRate: number; channels: number; bitrate: number } | null>;
+}
+
 export interface ExportHooks {
   onProgress?: (progress: ExportProgress) => void;
   signal?: AbortSignal;
+  /** Test-only overrides. Production callers omit. */
+  audio?: ExportAudioTestHooks;
 }

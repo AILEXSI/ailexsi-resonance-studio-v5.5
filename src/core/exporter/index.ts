@@ -22,7 +22,16 @@ export {
   succeedExportDialog,
   type ExportDialogState,
 } from "./dialog";
-export { jobFromProject, ExportPlanError, summarizeJob, videoClipAt, missingOnlyVideoLabel } from "./job";
+export {
+  jobFromProject,
+  ExportPlanError,
+  summarizeJob,
+  videoClipAt,
+  missingOnlyVideoLabel,
+  expectsAudio,
+  exportableAudioClips,
+  clipIsExportableAudio,
+} from "./job";
 export { runExportWithDestination, type ExportDestinationOutcome } from "./destination";
 export {
   existingExportNamesFromMemory,
@@ -60,7 +69,29 @@ export {
   unsupportedAvcEncoderMessage,
 } from "./avc-capability";
 export { validateMp4Ftyp, looksLikeWebm, hexHeader } from "./ftyp";
-export { audioInputForMux, mp4HasAudioTrack } from "./mp4";
+export { audioInputForMux, mp4HasAudioTrack, muxAvcToMp4 } from "./mp4";
+export {
+  AAC_ENCODE_QUEUE_HIGH_WATER,
+  AudioExportError,
+  AUDIO_STAGE_NAMES,
+  beginJobAudioReport,
+  classifyOfflineAudioMemory,
+  encodeAac,
+  finalizeExportAudio,
+  formatAudioExportReport,
+  formatAudioFail,
+  getAudioExportReport,
+  mixJobAudio,
+  pcmBytesForDuration,
+  prepareJobAudioMix,
+  probeAac,
+  requireAacForMixed,
+  resetAudioExportReport,
+  snapshotAudioExportReport,
+  waitForAudioEncodeQueue,
+  withTimeout,
+} from "./audio";
+export type { AacProbe, AudioExportReport, AudioStageName } from "./audio";
 export { downloadWav, encodeWavPcm, exportMixWav, readWavPcm, wavFileName } from "./wav";
 export {
   beginExportFailSession,

@@ -17,6 +17,7 @@ import {
   resetStageTrace,
 } from "../frame-engine/stage-trace";
 import type { ExportJob, ExportResult } from "./types";
+import { formatAudioExportReport, resetAudioExportReport, snapshotAudioExportReport } from "./audio-trace";
 
 export const EXPORT_FAIL_DUMP_TITLE = "STRESS-02 CALL-STACK DIAGNOSTIC";
 
@@ -157,6 +158,7 @@ export function clearExportFailDiagnostics(): void {
   lastCaptured = null;
   lastGlobalCaptured = null;
   resetStageTrace();
+  resetAudioExportReport();
 }
 
 export function resetExportFailContext(): void {
@@ -254,6 +256,8 @@ export function formatExportFailDump(
   lines.push(...formatContextLines(context));
   lines.push("--- STRESS-03 stage trail ---");
   lines.push(...formatStageTraceLines());
+  lines.push("--- AUDIO-01 ---");
+  lines.push(formatAudioExportReport(snapshotAudioExportReport()));
   lines.push("--- operator ---");
   lines.push("Mark FIRST application frame (first src/ / app frame after WebView2/V8 natives).");
   lines.push("Mark FIRST repeated function/frame. Do not classify A–F until that stack exists.");

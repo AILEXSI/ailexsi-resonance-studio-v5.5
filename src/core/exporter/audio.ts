@@ -3,11 +3,46 @@ import { clampClipRate } from "../models";
 import { scheduleTransitionAudioGain } from "../transition";
 import { clampPan, equalPowerPan } from "../volume";
 import { scheduleVolumeAutomation, volumeAutomationIsActive } from "../volume-automation";
-import { audioClipsForMix, mixWindowsForClip, presentLinkedAudioMates } from "./job";
+import {
+  audioClipsForMix,
+  expectsAudio as jobExpectsAudio,
+  mixWindowsForClip,
+  presentLinkedAudioMates,
+} from "./job";
 import { decodeAudio, isPlayableSource } from "./media";
-import type { AacSample } from "./mp4";
+import { audioInputForMux, type AacSample, type AacTrack } from "./mp4";
 import type { ExportHooks, ExportJob } from "./types";
 import type { TrackId } from "../models";
+import {
+  beginAudioExportReport,
+  formatAudioExportReport,
+  markAudioStage,
+  snapshotAudioExportReport,
+  updateAudioExportReport,
+  type AudioExportReport,
+  type AudioTrackSnapshot,
+} from "./audio-trace";
+
+export {
+  expectsAudio,
+  exportableAudioClips,
+  clipIsExportableAudio,
+} from "./job";
+
+export {
+  AUDIO_STAGE_NAMES,
+  beginAudioExportReport,
+  classifyOfflineAudioMemory,
+  getAudioExportReport,
+  markAudioStage,
+  pcmBytesForDuration,
+  resetAudioExportReport,
+  snapshotAudioExportReport,
+  updateAudioExportReport,
+  type AudioExportReport,
+  type AudioStageName,
+} from "./audio-trace";
+export { formatAudioExportReport };
 
 function trackPanOfJob(job: ExportJob, trackId: TrackId): number {
   return clampPan(job.tracks.find((t) => t.id === trackId)?.pan ?? 0);
@@ -44,6 +79,16 @@ export type AacProbe = {
 
 const AAC_CODEC = "mp4a.40.2";
 
+/** Same high-water spirit as video encodeQueueSize > 8. Duration-scaling PCM must not queue unbounded. */
+export const AAC_ENCODE_QUEUE_HIGH_WATER = 8;
+
+export class AudioExportError extends Error {
+  constructor(message: string) {
+    super(message.startsWith("FAIL:") ? message : `FAIL: ${message}`);
+    this.name = "AudioExportError";
+  }
+}
+
 export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise((resolve, reject) => {
     const t = window.setTimeout(() => resolve(fallback), ms);
@@ -52,6 +97,33 @@ export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<
       (e) => { window.clearTimeout(t); reject(e); },
     );
   });
+}
+
+export type AudioEncoderQueue = {
+  encodeQueueSize: number;
+  addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
+};
+
+export async function waitForAudioEncodeQueue(
+  encoder: AudioEncoderQueue,
+  signal?: AbortSignal,
+): Promise<void> {
+  while (encoder.encodeQueueSize > AAC_ENCODE_QUEUE_HIGH_WATER) {
+    if (signal?.aborted) throw new AudioExportError("Export aborted");
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        encoder.removeEventListener?.("dequeue", done);
+        window.clearTimeout(timer);
+        resolve();
+      };
+      const timer = window.setTimeout(done, 200);
+      encoder.addEventListener?.("dequeue", done);
+    });
+  }
 }
 
 export async function probeAac(): Promise<AacProbe | null> {
@@ -93,20 +165,62 @@ export function decodedBufferIsAudible(
   return buf.numberOfChannels > 0 && buf.length > 0;
 }
 
+export function audioTrackSnapshots(job: ExportJob): AudioTrackSnapshot[] {
+  return job.tracks.map((t) => ({
+    id: t.id,
+    kind: t.kind,
+    muted: t.muted ?? null,
+    solo: t.solo ?? null,
+    volume: t.volume ?? null,
+    pan: t.pan,
+    clipCount: t.clips.length,
+  }));
+}
+
+export function beginJobAudioReport(job: ExportJob, expects: boolean): AudioExportReport {
+  return beginAudioExportReport({
+    projectDurationMs: job.durationMs,
+    exportStartMs: job.startMs,
+    exportEndMs: job.endMs,
+    expectsAudio: expects,
+    clipCount: audioClipsForMix(job).length,
+    trackCount: job.tracks.length,
+    tracks: audioTrackSnapshots(job),
+  });
+}
+
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 export async function mixJobAudio(
   job: ExportJob,
   probe: AacProbe,
   signal?: AbortSignal,
 ): Promise<AudioBuffer | null> {
   const clips = audioClipsForMix(job).filter((c) => isPlayableSource(c.sourceUrl));
-  if (clips.length === 0) return null;
+  markAudioStage("AUDIO_MIX_BEGIN");
+  updateAudioExportReport({
+    sampleRate: probe.sampleRate,
+    channels: probe.channels,
+    bitrate: probe.bitrate,
+    clipCount: clips.length,
+  });
+  if (clips.length === 0) {
+    markAudioStage("AUDIO_MIX_DONE");
+    return null;
+  }
   const length = Math.max(1, Math.ceil((job.durationMs / 1000) * probe.sampleRate));
+  updateAudioExportReport({ offlineFrameLength: length });
   const ctx = new OfflineAudioContext(probe.channels, length, probe.sampleRate);
   let added = 0;
+  const mix0 = nowMs();
   for (const clip of clips) {
-    if (signal?.aborted) throw new Error("Export aborted");
+    if (signal?.aborted) throw new AudioExportError("Export aborted");
     try {
+      markAudioStage("AUDIO_DECODE_BEGIN");
       const decoded = await decodeAudio(clip.sourceUrl);
+      markAudioStage("AUDIO_DECODE_DONE");
       if (!decodedBufferIsAudible(decoded)) continue;
       const src = ctx.createBufferSource();
       src.buffer = decoded;
@@ -173,12 +287,27 @@ export async function mixJobAudio(
         startOne(windows[i]!, extra);
       }
       added += 1;
-    } catch {
-      /* skip unreadable audio; video-only is still success */
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (signal?.aborted || /abort/i.test(msg) || e instanceof AudioExportError) throw e;
+      /* skip unreadable audio; video-only files drop at decode */
     }
   }
-  if (!added) return null;
-  return ctx.startRendering();
+  if (!added) {
+    updateAudioExportReport({ mixElapsedMs: nowMs() - mix0 });
+    markAudioStage("AUDIO_MIX_DONE");
+    return null;
+  }
+  markAudioStage("AUDIO_MIX_RENDER_BEGIN");
+  const rendered = await ctx.startRendering();
+  markAudioStage("AUDIO_MIX_RENDER_DONE");
+  updateAudioExportReport({
+    mixedBufferLength: rendered.length,
+    mixedDurationSec: rendered.length / rendered.sampleRate,
+    mixElapsedMs: nowMs() - mix0,
+  });
+  markAudioStage("AUDIO_MIX_DONE");
+  return rendered;
 }
 
 function stripAdts(data: Uint8Array): Uint8Array {
@@ -202,12 +331,22 @@ export async function encodeAac(
   buffer: AudioBuffer,
   probe: AacProbe,
   hooks: ExportHooks = {},
-): Promise<{ samples: AacSample[]; description: Uint8Array } | null> {
-  if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") return null;
+): Promise<{ samples: AacSample[]; description: Uint8Array }> {
+  if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") {
+    throw new AudioExportError("AAC encoder unavailable");
+  }
 
   const samples: AacSample[] = [];
   let description: Uint8Array | undefined;
   let encoderError: Error | undefined;
+  const encode0 = nowMs();
+  markAudioStage("AAC_ENCODE_BEGIN");
+  updateAudioExportReport({
+    sampleRate: probe.sampleRate,
+    channels: probe.channels,
+    bitrate: probe.bitrate,
+    aacInputFrames: buffer.length,
+  });
 
   const encoder = new AudioEncoder({
     output: (chunk, meta) => {
@@ -239,8 +378,9 @@ export async function encodeAac(
     const channels = Math.min(probe.channels, buffer.numberOfChannels);
     const frameSize = 1024;
     for (let offset = 0; offset < buffer.length; offset += frameSize) {
-      if (hooks.signal?.aborted) throw new Error("Export aborted");
+      if (hooks.signal?.aborted) throw new AudioExportError("Export aborted");
       if (encoderError) throw encoderError;
+      await waitForAudioEncodeQueue(encoder, hooks.signal);
       const frames = Math.min(frameSize, buffer.length - offset);
       const planar = new Float32Array(frames * channels);
       for (let c = 0; c < channels; c++) {
@@ -258,17 +398,135 @@ export async function encodeAac(
       audioData.close();
     }
 
+    if (hooks.signal?.aborted) throw new AudioExportError("Export aborted");
+    if (encoderError) throw encoderError;
+    markAudioStage("AAC_ENCODE_FLUSH_BEGIN");
     await encoder.flush();
+    markAudioStage("AAC_ENCODE_FLUSH_DONE");
     encoder.close();
-  } catch {
+  } catch (e) {
     try {
       encoder.close();
     } catch {
       /* already closed */
     }
-    return null;
+    if (e instanceof AudioExportError) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    if (hooks.signal?.aborted || /abort/i.test(msg)) throw new AudioExportError("Export aborted");
+    throw new AudioExportError(`AAC encode failed: ${msg}`);
   }
 
-  if (!description || samples.length === 0) return null;
+  const encodedBytes = samples.reduce((n, s) => n + s.data.byteLength, 0);
+  updateAudioExportReport({
+    aacOutputCount: samples.length,
+    descriptionBytes: description?.byteLength ?? 0,
+    encodedBytes,
+    aacElapsedMs: nowMs() - encode0,
+  });
+  markAudioStage("AAC_ENCODE_DONE");
+
+  if (!description || description.byteLength === 0) {
+    throw new AudioExportError("AAC encoder did not emit AudioSpecificConfig description");
+  }
+  if (samples.length === 0) {
+    throw new AudioExportError("AAC encoder produced no samples");
+  }
   return { samples, description };
+}
+
+export function requireAacForMixed(
+  job: ExportJob,
+  mixed: AudioBuffer | null,
+): boolean {
+  if (jobExpectsAudio(job)) return true;
+  return Boolean(mixed && decodedBufferIsAudible(mixed));
+}
+
+export async function prepareJobAudioMix(
+  job: ExportJob,
+  hooks: ExportHooks = {},
+): Promise<{ expects: boolean; probe: AacProbe | null; mixed: AudioBuffer | null }> {
+  const expects = jobExpectsAudio(job);
+  beginJobAudioReport(job, expects);
+  markAudioStage("AUDIO_EXPECTATION_EVALUATED");
+  markAudioStage("AUDIO_CLIPS_DISCOVERED");
+  const mixFn = hooks.audio?.mixJobAudio ?? mixJobAudio;
+  const probeFn = hooks.audio?.probeAac ?? probeAac;
+  let probe: AacProbe | null = null;
+  try {
+    markAudioStage("AAC_PROBE_BEGIN");
+    probe = await probeFn();
+    markAudioStage("AAC_PROBE_DONE");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (hooks.signal?.aborted || /abort/i.test(msg)) throw new AudioExportError("Export aborted");
+    if (expects) throw new AudioExportError(`AAC probe failed: ${msg}`);
+    probe = null;
+  }
+  if (expects && !probe) {
+    throw new AudioExportError("AAC encoder unavailable (expectsAudio)");
+  }
+  const mixLayout = probe ?? { sampleRate: 44100, channels: 2, bitrate: 128_000 };
+  const visWantsMix = job.visualizer.enabled && !job.visualizer.muted;
+  let mixed: AudioBuffer | null = null;
+  if (expects || visWantsMix) {
+    try {
+      mixed = await mixFn(job, mixLayout, hooks.signal);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (hooks.signal?.aborted || /abort/i.test(msg)) throw new AudioExportError("Export aborted");
+      if (expects) {
+        throw e instanceof AudioExportError ? e : new AudioExportError(`audio mix failed: ${msg}`);
+      }
+      mixed = null;
+    }
+    if (expects && (!mixed || !decodedBufferIsAudible(mixed))) {
+      throw new AudioExportError("audio mix produced no buffer (expectsAudio)");
+    }
+  }
+  return { expects, probe, mixed };
+}
+
+export async function finalizeExportAudio(
+  job: ExportJob,
+  mixed: AudioBuffer | null,
+  probe: AacProbe | null,
+  hooks: ExportHooks = {},
+): Promise<{ audioTrack: AacTrack | undefined; encoded: { samples: AacSample[]; description: Uint8Array } | null }> {
+  const requireAac = requireAacForMixed(job, mixed);
+  if (!requireAac) {
+    updateAudioExportReport({ mp4AudioSupplied: false, resultAudio: "none" });
+    return { audioTrack: undefined, encoded: null };
+  }
+  if (!probe) {
+    throw new AudioExportError("AAC encoder unavailable (expectsAudio)");
+  }
+  if (!mixed || !decodedBufferIsAudible(mixed)) {
+    throw new AudioExportError("audio mix produced no buffer (expectsAudio)");
+  }
+  const encode = hooks.audio?.encodeAac ?? encodeAac;
+  const encoded = await encode(mixed, probe, hooks);
+  if (!encoded.description || encoded.description.byteLength === 0) {
+    throw new AudioExportError("AAC encoder did not emit AudioSpecificConfig description");
+  }
+  if (!encoded.samples || encoded.samples.length === 0) {
+    throw new AudioExportError("AAC encoder produced no samples");
+  }
+  const audioTrack = audioInputForMux(encoded, probe);
+  if (!audioTrack) {
+    throw new AudioExportError("mux omitted AAC track (expectsAudio)");
+  }
+  updateAudioExportReport({
+    aacOutputCount: encoded.samples.length,
+    descriptionBytes: encoded.description.byteLength,
+    encodedBytes: encoded.samples.reduce((n, s) => n + s.data.byteLength, 0),
+    mp4AudioSupplied: true,
+  });
+  markAudioStage("AUDIO_TRACK_READY");
+  return { audioTrack, encoded };
+}
+
+export function formatAudioFail(error: string, report: AudioExportReport = snapshotAudioExportReport()): string {
+  const prefixed = error.startsWith("FAIL:") ? error : `FAIL: ${error}`;
+  return `${prefixed}\n--- AUDIO-01 ---\n${formatAudioExportReport(report)}`;
 }

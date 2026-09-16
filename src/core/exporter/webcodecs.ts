@@ -1,4 +1,13 @@
-import { encodeAac, mixJobAudio, probeAac, withTimeout, type AacProbe } from "./audio";
+import {
+  AudioExportError,
+  finalizeExportAudio,
+  formatAudioFail,
+  markAudioStage,
+  prepareJobAudioMix,
+  snapshotAudioExportReport,
+  updateAudioExportReport,
+  withTimeout,
+} from "./audio";
 import { clearFrameSources, getDecoder, sourceTimeSec, type DrawableFrame } from "./frame-source";
 import {
   AfeError,
@@ -21,7 +30,7 @@ import { validateMp4Ftyp } from "./ftyp";
 import { videoClipAt } from "./job";
 import { clearMediaCache, isPlayableSource } from "./media";
 import { clearStillCache, paintStillUrl } from "../still";
-import { audioInputForMux, mp4HasAudioTrack, muxAvcToMp4, type AvcSample } from "./mp4";
+import { mp4HasAudioTrack, muxAvcToMp4, type AvcSample } from "./mp4";
 import type { ExportClip, ExportHooks, ExportJob, ExportResult } from "./types";
 import { videoAlphaAtClipTime } from "../fades";
 import {
@@ -63,6 +72,7 @@ export function webCodecsUnavailableMessage(): string {
 }
 
 function fail(job: ExportJob, error: string, aborted = false): ExportResult {
+  const audioReport = snapshotAudioExportReport();
   return {
     success: false,
     aborted,
@@ -70,7 +80,15 @@ function fail(job: ExportJob, error: string, aborted = false): ExportResult {
     fileName: job.fileName,
     durationMs: job.durationMs,
     fileSizeBytes: 0,
+    expectsAudio: audioReport.expectsAudio,
+    audioReport,
   };
+}
+
+function failAudio(job: ExportJob, error: string): ExportResult {
+  updateExportFailContext({ stage: "audio" });
+  const msg = error.startsWith("FAIL:") ? error : `FAIL: ${error}`;
+  return fail(job, formatAudioFail(msg));
 }
 
 function aborted(job: ExportJob): ExportResult {
@@ -279,20 +297,18 @@ export async function exportWithWebCodecs(
   if (!ctx) return fail(job, "FAIL: 2D canvas unavailable");
 
   hooks.onProgress?.({ percent: 4, stage: "Mixing audio" });
-  let aacProbe: AacProbe | null = null;
+  let audioExpected = false;
+  let aacProbe = null as Awaited<ReturnType<typeof prepareJobAudioMix>>["probe"];
   let mixed: AudioBuffer | null = null;
   try {
-    aacProbe = await withTimeout(probeAac(), 4000, null);
-  } catch {
-    aacProbe = null;
-  }
-  const mixLayout = aacProbe ?? { sampleRate: 44100, channels: 2, bitrate: 128_000 };
-  if (job.visualizer.enabled && !job.visualizer.muted) {
-    try {
-      mixed = await withTimeout(mixJobAudio(job, mixLayout, hooks.signal), 12000, null);
-    } catch {
-      mixed = null;
-    }
+    const prepared = await prepareJobAudioMix(job, hooks);
+    audioExpected = prepared.expects;
+    aacProbe = prepared.probe;
+    mixed = prepared.mixed;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (hooks.signal?.aborted || /abort/i.test(msg)) return aborted(job);
+    return failAudio(job, e instanceof AudioExportError ? e.message : msg);
   }
 
   hooks.onProgress?.({ percent: 6, stage: "Encoding H.264" });
@@ -779,26 +795,20 @@ export async function exportWithWebCodecs(
   let audioTrack: Parameters<typeof muxAvcToMp4>[0]["audio"];
   let audioKind: "aac" | "none" = "none";
   try {
-    const aacProbe = await withTimeout(probeAac(), 4000, null);
-    if (aacProbe) {
-      if (!mixed) {
-        mixed = await withTimeout(mixJobAudio(job, aacProbe, hooks.signal), 12000, null);
-      }
-      if (mixed) {
-        const encoded = await withTimeout(encodeAac(mixed, aacProbe, hooks), 12000, null);
-        audioTrack = audioInputForMux(encoded, aacProbe);
-        if (audioTrack) audioKind = "aac";
-      }
-    }
+    const finalized = await finalizeExportAudio(job, mixed, aacProbe, hooks);
+    audioTrack = finalized.audioTrack;
+    if (audioTrack) audioKind = "aac";
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (hooks.signal?.aborted || /abort/i.test(msg)) return aborted(job);
-    audioKind = "none";
+    return failAudio(job, e instanceof AudioExportError ? e.message : `AAC encode failed: ${msg}`);
   }
 
   if (hooks.signal?.aborted) return aborted(job);
   hooks.onProgress?.({ percent: 95, stage: "Muxing MP4" });
   updateExportFailContext({ stage: "mux" });
+  if (audioTrack) markAudioStage("AUDIO_MUX_BEGIN");
+  updateAudioExportReport({ mp4AudioSupplied: Boolean(audioTrack) });
   let bytes: Uint8Array;
   try {
     const mux0 = afePerfEnabled() ? performance.now() : 0;
@@ -820,12 +830,23 @@ export async function exportWithWebCodecs(
     const msg = e instanceof Error ? e.message : String(e);
     return fail(job, `FAIL: mux ${msg}`);
   }
+  if (audioTrack) markAudioStage("AUDIO_MUX_DONE");
 
   const check = validateMp4Ftyp(bytes);
   if (!check.ok) return fail(job, `FAIL: ${check.error}`);
-  if (audioKind === "aac" && !mp4HasAudioTrack(bytes)) {
+  const hasAudioTrak = mp4HasAudioTrack(bytes);
+  updateAudioExportReport({ mp4HasAudioTrack: hasAudioTrak });
+  if (audioKind === "aac" || audioExpected) {
+    if (!hasAudioTrak) {
+      updateAudioExportReport({ resultAudio: "none" });
+      return failAudio(job, "MP4 missing AAC audio trak (expectsAudio)");
+    }
+    markAudioStage("AUDIO_TRACK_VALIDATED");
+    audioKind = "aac";
+  } else {
     audioKind = "none";
   }
+  updateAudioExportReport({ resultAudio: audioKind });
 
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -840,6 +861,8 @@ export async function exportWithWebCodecs(
     blob,
     brands: check.brands,
     audio: audioKind,
+    expectsAudio: audioExpected,
+    audioReport: snapshotAudioExportReport(),
     videoFramesRequested,
     videoFramesDecoded,
     videoFramesEncoded,
