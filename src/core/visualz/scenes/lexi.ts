@@ -137,26 +137,27 @@ export const lexiScene: Scene = {
     phase += dt * speed * (0.32 + sRms * 0.55);
 
     const sky = ctx.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, hexToRgba(accentHex, 0.1 + backgroundLevel * 0.08));
-    sky.addColorStop(0.42, secondary);
-    sky.addColorStop(1, hexToRgba(primary, 0.035 + backgroundLevel * 0.05));
+    sky.addColorStop(0, hexToRgba(accentHex, 0.14 + backgroundLevel * 0.1));
+    sky.addColorStop(0.38, secondary);
+    sky.addColorStop(0.52, hexToRgba(primary, 0.04 + backgroundLevel * 0.04));
+    sky.addColorStop(1, hexToRgba(primary, 0.07 + backgroundLevel * 0.08));
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, width, height);
 
-    const camY = 0.92 + lift * 0.18;
+    const camY = 0.72 + lift * 0.12;
     const cam = cam3({
       x: Math.sin(features.timeMs * 0.00007 * speed) * 0.1,
       y: camY,
-      z: -0.35,
+      z: -0.2,
       yaw: Math.sin(features.timeMs * 0.00005 * speed) * 0.035,
-      pitch: -0.2 - depthStrength * 0.06,
-      fov: 1.12,
+      pitch: -0.28 - depthStrength * 0.05,
+      fov: 1.05,
       far: 12 + depthStrength * 3,
     });
 
-    const zNear = 1.7;
-    const zFar = 3.4 + depthStrength * 7.2;
-    const xSpan = 5.6 + depthStrength * 0.8;
+    const zNear = 1.35;
+    const zFar = 3.1 + depthStrength * 6.4;
+    const xSpan = 6.4 + depthStrength * 0.6;
     const wave = waveAmplitude * (idle + glow * 0.85 + lift * 0.55);
 
     for (let col = 0; col < COLS; col++) {
@@ -170,6 +171,7 @@ export const lexiScene: Scene = {
       const z = zs[row]!;
       const fog = 1 - row / (ROWS - 1);
       let started = false;
+      let hadPath = false;
       ctx.beginPath();
       for (let col = 0; col < COLS; col++) {
         const x = xs[col]!;
@@ -187,16 +189,23 @@ export const lexiScene: Scene = {
         if (!started) {
           ctx.moveTo(p.x, p.y);
           started = true;
+          hadPath = true;
         } else ctx.lineTo(p.x, p.y);
       }
-      const cool = hexToRgba(accentHex, (0.05 + fog * 0.1) * intensity);
-      const warm = hexToRgba(primary, (0.1 + fog * 0.22 + glow * 0.12) * intensity);
+      if (!hadPath) continue;
+      const cool = hexToRgba(accentHex, (0.12 + fog * 0.2) * intensity);
+      const warm = hexToRgba(primary, (0.2 + fog * 0.38 + glow * 0.2) * intensity);
       ctx.strokeStyle = row % 2 === 0 ? warm : cool;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1 + fog * 0.8;
       ctx.stroke();
+      ctx.lineTo(width + 8, height + 8);
+      ctx.lineTo(-8, height + 8);
+      ctx.closePath();
+      ctx.fillStyle = hexToRgba(row % 2 === 0 ? primary : accentHex, (0.03 + fog * 0.05 + glow * 0.03) * intensity);
+      ctx.fill();
     }
 
-    ctx.strokeStyle = hexToRgba(accentHex, 0.07 + glow * 0.06);
+    ctx.strokeStyle = hexToRgba(accentHex, 0.14 + glow * 0.1);
     ctx.lineWidth = 1;
     for (let m = 0; m < MERIDIANS; m++) {
       const x = -xSpan * 0.72 + ((xSpan * 1.44) * m) / (MERIDIANS - 1);
@@ -222,8 +231,8 @@ export const lexiScene: Scene = {
       if (started) ctx.stroke();
     }
 
-    const horizonZ = 4.6 + depthStrength * 1.1;
-    const horizonY = lift * 0.28;
+    const horizonZ = 3.8 + depthStrength * 0.8;
+    const horizonY = lift * 0.22;
     let hCount = 0;
     let hSumY = 0;
     for (let col = 0; col < COLS; col++) {
@@ -239,16 +248,38 @@ export const lexiScene: Scene = {
       hSumY += p.y;
       hCount += 1;
     }
-    const horizonScreenY = hCount ? hSumY / hCount : height * 0.44;
-    const bloom = glowStrength * (0.45 + glow * 0.55 + accent * 0.35);
-    const haze = ctx.createLinearGradient(0, horizonScreenY - height * 0.22, 0, horizonScreenY + height * 0.28);
+    const horizonScreenY = hCount ? hSumY / hCount : height * 0.46;
+    const bloom = glowStrength * (0.55 + glow * 0.55 + accent * 0.4);
+    const haze = ctx.createLinearGradient(0, horizonScreenY - height * 0.28, 0, horizonScreenY + height * 0.32);
     haze.addColorStop(0, hexToRgba(primary, 0));
-    haze.addColorStop(0.45, hexToRgba(primary, 0.07 * bloom));
-    haze.addColorStop(0.52, hexToRgba("#ffd27a", (0.1 + accent * 0.08) * bloom));
-    haze.addColorStop(0.62, hexToRgba(primary, 0.06 * bloom));
-    haze.addColorStop(1, hexToRgba(accentHex, 0));
+    haze.addColorStop(0.42, hexToRgba(primary, 0.12 * bloom));
+    haze.addColorStop(0.5, hexToRgba("#ffd27a", (0.2 + accent * 0.12) * bloom));
+    haze.addColorStop(0.58, hexToRgba(primary, 0.1 * bloom));
+    haze.addColorStop(1, hexToRgba(accentHex, 0.02));
     ctx.fillStyle = haze;
-    ctx.fillRect(0, horizonScreenY - height * 0.22, width, height * 0.5);
+    ctx.fillRect(0, horizonScreenY - height * 0.28, width, height * 0.6);
+
+    ctx.beginPath();
+    for (let x = 0; x <= width; x += 8) {
+      const t = x / width;
+      const sheen = lexiSheen(presented, t);
+      const y =
+        horizonScreenY +
+        Math.sin(t * Math.PI * 2 + phase * 0.35) * (3 + wave * 10) +
+        (sheen - 0.2) * 6 * reactivity;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    const ribbon = 2.2 + lineThickness * 3.2 + accent * 2.2 + glow * 1.2;
+    ctx.strokeStyle = hexToRgba(primary, 0.22 + bloom * 0.28);
+    ctx.lineWidth = ribbon * 3.4;
+    ctx.stroke();
+    ctx.strokeStyle = hexToRgba("#ffe6a8", 0.42 + bloom * 0.38 + accent * 0.2);
+    ctx.lineWidth = ribbon;
+    ctx.stroke();
+    ctx.strokeStyle = hexToRgba("#fff6df", 0.35 + accent * 0.22);
+    ctx.lineWidth = Math.max(1.1, ribbon * 0.32);
+    ctx.stroke();
 
     const strokeHorizon = (color: string, widthPx: number) => {
       ctx.beginPath();
@@ -269,10 +300,9 @@ export const lexiScene: Scene = {
     };
 
     if (hCount > 1) {
-      const thick = 1.2 + lineThickness * 2.4 + accent * 1.6 + glow * 0.8;
-      strokeHorizon(hexToRgba(primary, 0.16 + bloom * 0.22), thick * 3.2);
-      strokeHorizon(hexToRgba("#ffe6a8", 0.28 + bloom * 0.35 + accent * 0.18), thick);
-      strokeHorizon(hexToRgba("#fff6df", 0.22 + accent * 0.2), Math.max(1, thick * 0.35));
+      const thick = 1 + lineThickness * 1.6 + accent * 1.1 + glow * 0.5;
+      strokeHorizon(hexToRgba(primary, 0.12 + bloom * 0.14), thick * 2.2);
+      strokeHorizon(hexToRgba("#ffe6a8", 0.18 + bloom * 0.16), thick);
     }
 
     const nDust = Math.round(PARTICLE_CAP * particleAmount * (0.45 + glow * 0.55));
