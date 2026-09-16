@@ -1,4 +1,5 @@
 import { decoderConfigOf } from "./avc-config";
+import { markStage } from "./stage-trace";
 import { AfeError, abortedError, isAfeError, throwIfAborted } from "./errors";
 import { AFE_MAX_REORDER_READY, PtsIndexMap } from "./frame-match";
 import { afePerfAdd, afePerfCount, afePerfEnabled, afePerfMarkDecoded, afePerfMax, afePerfProbeInstalled } from "./perf";
@@ -1667,6 +1668,7 @@ export class AfeVideoDecoder {
     if (typeof VideoDecoder === "undefined") {
       throw new AfeError("AFE_DECODE_CONFIG_FAILED", "VideoDecoder unavailable");
     }
+    markStage("DECODER_CREATE");
     this.transactionId += 1;
     const bornTxn = this.transactionId;
     this.decoder = new VideoDecoder({
@@ -1682,6 +1684,7 @@ export class AfeVideoDecoder {
         this.teardown();
         throw new AfeError("AFE_DECODE_CONFIG_FAILED", `unsupported ${config.codec}`);
       }
+      markStage("DECODER_CONFIGURE");
       this.decoder.configure(config);
       this.configured = true;
       this.needsKeyframe = true;
@@ -1792,6 +1795,7 @@ export class AfeVideoDecoder {
       keepResolved?: boolean;
     },
   ): void {
+    markStage("TRANSACTION_BEGIN");
     this.closeStreamFrames();
     this.streamPts.clear();
     if (!bounds?.keepResolved) {

@@ -7,8 +7,11 @@ import {
   hostSafeSourceName,
   isAfeError,
   isExportTransactionComplete,
+  markStage,
   mustColdOpenVideoDecoder,
   nowMs,
+  resetStageTrace,
+  setStageTraceContext,
   type AfeDumpPictureKind,
   type AfeStallSnapshot,
 } from "../frame-engine";
@@ -252,6 +255,7 @@ export async function exportWithWebCodecs(
   hooks: ExportHooks = {},
 ): Promise<ExportResult> {
   beginExportFailSession(job);
+  resetStageTrace();
   if (!canUseWebCodecs()) return fail(job, webCodecsUnavailableMessage());
   if (job.durationMs <= 0) return fail(job, "FAIL: empty export range");
 
@@ -470,6 +474,16 @@ export async function exportWithWebCodecs(
     };
   };
 
+  const bindStageTrace = (clip: ExportClip, i: number): void => {
+    setStageTraceContext({
+      timelineMs: (i / job.fps) * 1000,
+      exportFrame: i,
+      clipId: clip.id,
+      clipName: clip.label,
+      sourceId: hostSafeSourceName(clip.sourceUrl),
+    });
+  };
+
   try {
     let previousPictureKind: AfeDumpPictureKind | null = null;
     for (const run of runs) {
@@ -545,6 +559,10 @@ export async function exportWithWebCodecs(
         nextPictureKind: "video",
       });
       coldOpenAfterVisForDump = coldOpenAfterVis;
+      bindStageTrace(clip, run.startIndex);
+      markStage("FRAME_REQUESTED");
+      markStage("CLIP_SELECTED");
+      markStage("SOURCE_RESOLVED");
       try {
         decoded = await withTimeout(
           getDecoder(clip.sourceUrl, hooks.signal, { fresh: coldOpenAfterVis }),
@@ -569,6 +587,12 @@ export async function exportWithWebCodecs(
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           if (encoderError) throw encoderError;
           videoFramesRequested += 1;
+          if (k > 0) {
+            bindStageTrace(clip, run.startIndex + k);
+            markStage("FRAME_REQUESTED");
+            markStage("CLIP_SELECTED");
+            markStage("SOURCE_RESOLVED");
+          }
           const stallFields = {
             ...stallExtraFromClip(clip, run.startIndex + k),
             videoFramesRequested,

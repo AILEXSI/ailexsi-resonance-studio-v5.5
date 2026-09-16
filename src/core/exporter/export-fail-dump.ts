@@ -9,6 +9,13 @@
 
 import { ailexsiBuildIdentity, formatBuildIdentityLedger } from "../build-info";
 import type { AfeStallSnapshot } from "../frame-engine";
+import {
+  firstBlockedStage,
+  formatStageTraceForDump,
+  formatStageTraceLines,
+  nextExpectedStage,
+  resetStageTrace,
+} from "../frame-engine/stage-trace";
 import type { ExportJob, ExportResult } from "./types";
 
 export const EXPORT_FAIL_DUMP_TITLE = "STRESS-02 CALL-STACK DIAGNOSTIC";
@@ -49,6 +56,9 @@ export type ExportFailContext = {
   requestedSample?: number | null;
   requestedPts?: number | null;
   stage?: string | null;
+  firstBlockedStage?: string | null;
+  nextExpectedStage?: string | null;
+  stageTrail?: string | null;
 };
 
 const CONTEXT_FIELDS: Array<keyof ExportFailContext> = [
@@ -77,6 +87,9 @@ const CONTEXT_FIELDS: Array<keyof ExportFailContext> = [
   "requestedSample",
   "requestedPts",
   "stage",
+  "firstBlockedStage",
+  "nextExpectedStage",
+  "stageTrail",
 ];
 
 let liveContext: ExportFailContext = {};
@@ -143,6 +156,7 @@ export function clearExportFailDiagnostics(): void {
   liveContext = {};
   lastCaptured = null;
   lastGlobalCaptured = null;
+  resetStageTrace();
 }
 
 export function resetExportFailContext(): void {
@@ -158,6 +172,7 @@ export function getExportFailContext(): ExportFailContext {
 }
 
 export function beginExportFailSession(job: ExportJob): void {
+  resetStageTrace();
   const id = ailexsiBuildIdentity();
   liveContext = {
     productVersion: id.productVersion,
@@ -193,6 +208,9 @@ export function mergeStallSnapshotIntoExportFailContext(dump: Partial<AfeStallSn
     transactionId: dump.transactionId ?? liveContext.transactionId ?? null,
     requestedSample: dump.sourceSampleRequested ?? dump.originRequestedSample ?? liveContext.requestedSample ?? null,
     requestedPts: dump.requestedPtsUs ?? dump.originRequestedPts ?? liveContext.requestedPts ?? null,
+    firstBlockedStage: firstBlockedStage() ?? liveContext.firstBlockedStage ?? null,
+    nextExpectedStage: nextExpectedStage() ?? liveContext.nextExpectedStage ?? null,
+    stageTrail: formatStageTraceForDump(),
   });
 }
 
@@ -234,6 +252,8 @@ export function formatExportFailDump(
   }
   lines.push("--- export context ---");
   lines.push(...formatContextLines(context));
+  lines.push("--- STRESS-03 stage trail ---");
+  lines.push(...formatStageTraceLines());
   lines.push("--- operator ---");
   lines.push("Mark FIRST application frame (first src/ / app frame after WebView2/V8 natives).");
   lines.push("Mark FIRST repeated function/frame. Do not classify A–F until that stack exists.");

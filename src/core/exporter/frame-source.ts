@@ -9,6 +9,7 @@ import {
   AfeError,
   createFrameSourceBackend,
   isAfeError,
+  markStage,
   type AfeStallSnapshot,
   type DrawableFrame,
   type FrameSourceBackendId,
@@ -85,6 +86,7 @@ function wrapOpened(source: OpenedFrameSource): OpenedDecoder {
 }
 
 async function openPreferred(src: string, signal?: AbortSignal): Promise<OpenedDecoder> {
+  markStage("OPEN_PREFERRED_BEGIN");
   if (frameSourceBackend === "htmlvideo") {
     throw new AfeError("AFE_UNSUPPORTED_CONTAINER", "HTMLVideo is not an export frame source");
   }

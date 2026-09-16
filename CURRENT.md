@@ -83,6 +83,19 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Gates | `tsc --noEmit` clean. Focused STRESS-02 + STRESS-01 + AFE-25 + ENC-01 **29/29**. Full suite **1229 passed / 2 failed / 1231** (same pre-existing AFE-15 A/N dump-ban as STRESS-01). |
 | Human remaining | Same ~25 min stress on the diagnostic EXE. Need one dump with stack + FIRST application frame + FIRST repeated frame. |
 
+## STRESS-03 — pre-request source open stall (diagnostic)
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **Not HUMAN-PROVEN**. Do not merge.
+
+| | |
+| --- | --- |
+| Human | Diagnostic EXE `e2c6659`: `AFE_DECODE_STALL` at originTimelineMs 168733.33 / exportFrame 5062 on `1000001827 - Kopie.mp4` (`sourceInMs 0` / `sourceOutMs 5208`). `requestedSample` null, `transactionId` 0, `videoReq/Dec/Enc` 5063/5062/5062. Not STRESS-01 exact-PTS. Not a call-stack overflow. |
+| First blocked | **SAMPLE_SELECT**. First composition PTS 83333µs; clip-start request 16667µs; lookup returned null → VIDEO null-yield stall (`stalledMs 3000` is the throw field, not an open hang). |
+| Diff | Stage trail in stall / export-fail dumps. Narrow clamp: `sampleIndexAtTime` selects the first presentation sample when the mapped request is ≥ 0 but still before the first PTS. Negative times stay null. No scheduling / watermark / timeout / reset / ENC-01 / STRESS-01 avcC / STRESS-02 capture change. |
+| Alone vs after preceding | Same physical file parses and now selects sample 0 at `sourceInMs 0` both alone and after a preceding fixture. jsdom has no VideoDecoder (configure not run here). |
+| Test | `tests/export/stress-03-stage-trace.test.ts` + `tests/export/stress-03-physical-source.test.ts` |
+| Human remaining | Same long export. Confirm `firstBlockedStage` / `stageTrail` on fail, or Fertig if the clamp holds on WebView2. Details: `docs/compliance/STRESS-03-PRE-REQUEST-SOURCE-OPEN.md`. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |
