@@ -1096,3 +1096,32 @@ MODE A Chrome production `exportWithWebCodecs` (Linux, `--headless=new`): primar
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner EXE VIDEO→VIS→VIDEO past 2500ms / sample 61 PTS 2583333, Req==Dec==Enc, unresolved 0.  
 **HUMAN-PROVEN: NO**
 
+# AFE-20 — SOFT freeze after recreate with no earlier I-frame (sample 81)
+
+Human Windows EXE on a **different** production clip (`897e0449-22bf-4aeb-b15a-377b687db846.mp4`), not the MODE A user-video-B fixture:
+
+- requested sample **81** PTS **3416667**
+- originExportFrame **37** · originTimelineMs **~1233.33**
+- lastDecodedTs **2500000**
+- decodeQueue **15** · frozenAtHighWater **yes** · backpressureBlocked **yes**
+- earlierKeyframeRecovered **no** · recreates **1** · recoveryAttempts **1**
+- stalledMs 3000 WAIT_EXACT_PTS
+
+The one-picture dump omitted lastSubmitted / currentTarget / soft / hard / targetPtsSeen / postRecreate / pumpSlice / submitPhases (those fields existed but sat after ~1KB of other keys; dialog is 360px). Next dump **front-loads** them.
+
+## Cause
+
+1. `earlierKeyframeRecovered=no` is **correct ineligibility**: `mayEarlierKeyframeRecover` returns false when `gopStart<=0` / no earlier I. Recreate already started at file GOP 0. Not a missed walk-back.
+2. decodeQueue **15** = SOFT HIGH for maxReorder **5** (5+6+4). HARD should be SOFT+min(remaining, L+B)=**25** while lastSubmitted < formula **90**. LastDecoded 2500000 ≈ sample 60; queue 15 ⇒ lastSubmitted **~75 < 81**. Sample 81 was **not** yet submitted. Formula-horizon drain (AFE-19) does not apply until the packet is in.
+3. Scheduler `progressiveTowardRequired` exited on `isFrozenAtHighWaterAfterRecreate()` (SOFT), so HARD credits were never spent. Then earlier-I skipped, then stall.
+
+## Fix
+
+`mayAdvancePastSoftFreeze`: frozen at SOFT + lastSubmitted < live local horizon + queue < HARD → keep borrowing (bounded, never 40/125 / lastRequired 140). After ineligible earlier-I, retry that progressive. Drain also legal once lastSubmitted ≥ requested. Stall message ledger is first. Failed export dialog scrolls.
+
+MODE A fixture VIDEO→VIS→VIDEO remains **90/90/90**. **Not HUMAN-PROVEN.**
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest clip `897e0449-….mp4` sample 81 PTS 3416667; dump must show lastSubmitted / requestedSubmitted / HARD.  
+**HUMAN-PROVEN: NO**
+
