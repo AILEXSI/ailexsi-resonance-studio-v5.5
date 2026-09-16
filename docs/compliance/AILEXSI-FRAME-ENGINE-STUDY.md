@@ -1061,7 +1061,7 @@ HARD computed from shrinking remaining meets a growing queue before 77 (SOFT+rem
 2. HARD uses the live target. At lastSubmitted 67 / live 77: SOFT 12 + min(10, L+B=10) = **22**. Freeze that ceiling for the borrow episode so remaining-shrink cannot stop the advance before 77.
 3. First-fill HARD may derive extra when remaining>0 (diagnostic / secondary). Borrow still requires recreate — first-fill stays on SOFT HIGH 40 (AFE-12/16).
 4. Liveness: recreate / beginStream clear `finalFlushArmed` / `finalFlushAttempted` / `tailDrainReplayed`. If live horizon is still unsubmitted, `releaseStaleFinalFlushIfLiveHorizonOpen` forgets a premature/stale arm so this request can borrow, then drain.
-5. `mayLocalHorizonFinalFlush` after lastSubmitted >= live target, queue held, lastDecoded < target, no progress — ownership-retaining drain, not a mid-run pressure flush. `mayGenuineFinalDrain` accepts `localHorizonExhausted`. Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired.
+5. `mayLocalHorizonFinalFlush` documents when a held queue may drain after the live horizon — not a new mid-run `tryFinalFlush` trigger (AFE-06). Transaction `mayFinalFlush` still requires lastSubmitted>=lastRequired. `mayGenuineFinalDrain` accepts `localHorizonExhausted`. Recreate clears the per-decoder flush gate so this request can flush again; the dump `FINAL_FLUSH` bit stays sticky. `releaseStaleFinalFlushIfLiveHorizonOpen` forgets the per-decoder gate when live horizon is still unsubmitted. Post-horizon extend is skipped while `recoveryRebuilding` (AFE-13 pause at SOFT).
 6. No timeout bump. No snap/nearest/drop. No global HIGH raise. No Mediabunny. HARD never floods to 102/140.
 
 **WINDOWS WEBVIEW2 VERIFIED: NO**  
