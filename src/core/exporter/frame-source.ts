@@ -16,6 +16,7 @@ import {
 } from "../frame-engine";
 import type { ExportClip } from "./types";
 import { isPlayableSource } from "./media";
+import { captureThrownValue, isStackOverflowThrown } from "./export-fail-dump";
 
 export type { DrawableFrame, FrameSourceBackendId };
 
@@ -94,6 +95,8 @@ async function openPreferred(src: string, signal?: AbortSignal): Promise<OpenedD
   try {
     return wrapOpened(await createFrameSourceBackend("ailexsi").open(src, signal));
   } catch (e) {
+    captureThrownValue(e);
+    if (isStackOverflowThrown(e)) throw e;
     if (isAfeError(e)) throw e;
     throw new AfeError("AFE_DECODE_FAILED", e instanceof Error ? e.message : String(e));
   }

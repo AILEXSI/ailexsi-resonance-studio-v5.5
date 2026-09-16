@@ -18,17 +18,28 @@ function gitToken(args: string): string {
   }
 }
 
+/** STRESS-02 diagnostic EXE: production minify + usable source maps. */
+const diagSourcemap = process.env.AILEXSI_DIAG_SOURCEMAP === "1";
+
 /** Baked into EXE and Vite so AFE stall / export-fail dumps name the binary. */
 const ailexsiBuildDefine = {
   __AILEXSI_PRODUCT_VERSION__: JSON.stringify(pkg.version || "5.5.0"),
   __AILEXSI_GIT_SHA__: JSON.stringify(gitToken("rev-parse --short HEAD")),
   __AILEXSI_GIT_BRANCH__: JSON.stringify(gitToken("rev-parse --abbrev-ref HEAD")),
+  __AILEXSI_DIAG_SOURCEMAP__: JSON.stringify(diagSourcemap ? "1" : "0"),
 };
 
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   define: ailexsiBuildDefine,
+  esbuild: diagSourcemap ? { keepNames: true } : undefined,
+  build: {
+    // Default EXE stays minified without maps (unchanged runtime).
+    // Diagnostic MODE-B: minify ON (same stack-depth shape) + maps + keepNames.
+    minify: true,
+    sourcemap: diagSourcemap,
+  },
   server: {
     port: 1421,
     strictPort: true,

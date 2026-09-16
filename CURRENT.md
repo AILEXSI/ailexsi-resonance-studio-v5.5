@@ -70,6 +70,18 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Human remaining | MODE B EXE, same `…Kopie.mp4`, `sourceInMs 0` — confirm no stall at PTS 100000. **Do not merge from this pass.** |
 | Gates | `tsc --noEmit` clean. Focused STRESS-01 + AFE-25 + ENC-01 **16/16**. AFE files except pre-existing AFE-15 A/N dump-ban. Full suite **1221 passed / 2 failed / 1223** (same AFE-15 A/N as main). `vite build` OK. |
 
+## STRESS-02 — call-stack diagnostic (no production fix)
+
+**IMPLEMENTED / AUTOMATED-TESTED** (dump capture only). **Not classified A–F.** Not HUMAN-PROVEN. Do not merge.
+
+| | |
+| --- | --- |
+| Human | PR #19 MODE-B EXE `fc7ab97`: 11 min PASS; ~25 min FAIL `Maximum call stack size exceeded` with no useful stack. STRESS-01 PTS 100000 no longer reproduced. |
+| Diff | Outermost export catch + `window.onerror` / `unhandledrejection` record original `name` / `message` / `stack` (never a replacement Error). Context fields go to the scrollable failed-status. Diagnostic MODE-B maps via `AILEXSI_DIAG_SOURCEMAP=1` / `npm run tauri:exe:diag`. Candidate audit in `docs/compliance/STRESS-02-CALL-STACK-DIAGNOSTIC.md` — **CANDIDATE not PROVEN**. |
+| Untouched | STRESS-01 avcC patch, AFE-25 prefer-software, ENC-01 encoder selection, AFE scheduling/timeouts/queues/escapes. No yield hacks. No stack-limit raise. No speculative fix. |
+| Test | `tests/export/stress-02-call-stack-dump.test.ts` — RangeError at export boundary keeps original `.stack` + context. |
+| Human remaining | Same ~25 min stress on the diagnostic EXE. Need one dump with stack + FIRST application frame + FIRST repeated frame. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

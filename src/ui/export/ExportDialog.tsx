@@ -88,7 +88,11 @@ export function ExportDialog({ state, onCancel, onClose, onChange, onStart }: Pr
             />
           </div>
         )}
-        <p className="export-dialog-status" data-testid="export-dialog-status">
+        <p
+          className="export-dialog-status"
+          data-testid="export-dialog-status"
+          data-export-fail-dump={state.phase === "failed" ? "1" : undefined}
+        >
           {state.phase === "done"
             ? `Fertig — ${state.fileName}`
             : state.phase === "aborted"

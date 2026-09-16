@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyExportDialogSize,
   applyExportProgress,
+  failExportDialog,
   openExportDialog,
   readyExportDialog,
   succeedExportDialog,
 } from "../../src/core/exporter/dialog";
+import { EXPORT_FAIL_DUMP_TITLE } from "../../src/core/exporter/export-fail-dump";
 import { ExportDialog } from "../../src/ui/export/ExportDialog";
 import { Toolbar } from "../../src/ui/toolbar/Toolbar";
 import "../../src/styles.css";
@@ -138,6 +140,28 @@ describe("export dialog DOM", () => {
     expect(host.querySelector('[data-testid="export-dialog-status"]')?.textContent).toMatch(
       /Größe wählen/,
     );
+  });
+
+  it("failed-status is scrollable and shows the STRESS-02 dump including original stack", () => {
+    const stack = "RangeError: Maximum call stack size exceeded\n    at muxAvcToMp4 (src/core/exporter/mp4.ts:379:24)";
+    const dump = `${EXPORT_FAIL_DUMP_TITLE}\nerror.name RangeError\nerror.stack\n${stack}\nexportFrame 12`;
+    const state = failExportDialog(
+      openExportDialog({ fileName: "stress-02.mp4", width: 1920, height: 1080, fps: 30 }),
+      dump,
+    );
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(<ExportDialog state={state} onCancel={() => {}} onClose={() => {}} />);
+    });
+    const status = host.querySelector('[data-testid="export-dialog-status"]') as HTMLElement;
+    expect(status).toBeTruthy();
+    expect(status.getAttribute("data-export-fail-dump")).toBe("1");
+    expect(status.textContent).toContain(EXPORT_FAIL_DUMP_TITLE);
+    expect(status.textContent).toContain(stack);
+    expect(status.textContent).toContain("error.name RangeError");
+    expect(status.className).toContain("export-dialog-status");
   });
 
   it("toolbar Export stays labeled Export (progress lives in the dialog)", () => {

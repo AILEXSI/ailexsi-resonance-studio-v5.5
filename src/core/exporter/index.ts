@@ -1,4 +1,5 @@
 import { canUseWebCodecs, exportWithWebCodecs, webCodecsUnavailableMessage } from "./webcodecs";
+import { beginExportFailSession, exportResultFromCaughtThrow } from "./export-fail-dump";
 import { missingOnlyVideoLabel } from "./job";
 import type { ExportHooks, ExportJob, ExportResult } from "./types";
 
@@ -61,6 +62,24 @@ export {
 export { validateMp4Ftyp, looksLikeWebm, hexHeader } from "./ftyp";
 export { audioInputForMux, mp4HasAudioTrack } from "./mp4";
 export { downloadWav, encodeWavPcm, exportMixWav, readWavPcm, wavFileName } from "./wav";
+export {
+  beginExportFailSession,
+  captureThrownValue,
+  clearExportFailDiagnostics,
+  diagnosticSourcemapEnabled,
+  exportResultFromCaughtThrow,
+  formatExportFailDump,
+  getExportFailContext,
+  installExportFailDiagnostics,
+  uninstallExportFailDiagnostics,
+  isStackOverflowThrown,
+  lastCapturedThrown,
+  lastGlobalExportFail,
+  resetExportFailContext,
+  updateExportFailContext,
+  EXPORT_FAIL_DUMP_TITLE,
+} from "./export-fail-dump";
+export type { CapturedThrown, ExportFailContext } from "./export-fail-dump";
 
 function fail(job: ExportJob | undefined, error: string, aborted = false): ExportResult {
   return {
@@ -102,7 +121,12 @@ export async function exportTimeline(
   if (!canUseWebCodecs()) {
     return fail(job, webCodecsUnavailableMessage());
   }
-  return exportWithWebCodecs(job, hooks);
+  beginExportFailSession(job);
+  try {
+    return await exportWithWebCodecs(job, hooks);
+  } catch (e) {
+    return exportResultFromCaughtThrow(job, e);
+  }
 }
 
 export function downloadMp4(result: ExportResult): void {

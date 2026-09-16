@@ -29,6 +29,22 @@ Copy-Item -LiteralPath $found -Destination $dest -Force
 Write-Host ('Copied: ' + $found)
 Write-Host ('To:     ' + $dest)
 
+# STRESS-02 diagnostic maps (present only when AILEXSI_DIAG_SOURCEMAP=1).
+$mapSrc = Join-Path $repo 'dist\assets'
+$mapDest = Join-Path $repo 'stress-02-sourcemaps'
+if (Test-Path -LiteralPath $mapSrc) {
+  $maps = Get-ChildItem -LiteralPath $mapSrc -Filter '*.js.map' -ErrorAction SilentlyContinue
+  if ($maps) {
+    if (-not (Test-Path -LiteralPath $mapDest)) {
+      New-Item -ItemType Directory -Path $mapDest | Out-Null
+    }
+    foreach ($item in $maps) {
+      Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $mapDest $item.Name) -Force
+    }
+    Write-Host ('STRESS-02 sourcemaps: ' + $mapDest)
+  }
+}
+
 $nsisDir = Join-Path $release 'bundle\nsis'
 if (Test-Path -LiteralPath $nsisDir) {
   $nsis = Get-ChildItem -LiteralPath $nsisDir -Filter '*.exe' -ErrorAction SilentlyContinue

@@ -29,6 +29,14 @@ import {
 } from "../transition";
 import { exportVisOf } from "./job";
 import { DEFAULT_AVC_BITRATE, selectAvcEncoderConfig } from "./avc-capability";
+import {
+  beginExportFailSession,
+  captureThrownValue,
+  exportResultFromCaughtThrow,
+  isStackOverflowThrown,
+  mergeStallSnapshotIntoExportFailContext,
+  updateExportFailContext,
+} from "./export-fail-dump";
 
 export { compositeVideoAt as exportComposite } from "../transition";
 import {
@@ -243,6 +251,7 @@ export async function exportWithWebCodecs(
   job: ExportJob,
   hooks: ExportHooks = {},
 ): Promise<ExportResult> {
+  beginExportFailSession(job);
   if (!canUseWebCodecs()) return fail(job, webCodecsUnavailableMessage());
   if (job.durationMs <= 0) return fail(job, "FAIL: empty export range");
 
@@ -411,6 +420,25 @@ export async function exportWithWebCodecs(
   const stallExtraFromClip = (clip: ExportClip, i: number): Partial<AfeStallSnapshot> => {
     const timeMs = (i / job.fps) * 1000;
     const pictureKind = exportPictureKind(job, timeMs);
+    updateExportFailContext({
+      exportFrame: i,
+      timelineMs: timeMs,
+      fps: job.fps,
+      resolution: `${width}x${height}`,
+      clipId: clip.id,
+      clipName: clip.label,
+      sourceId: hostSafeSourceName(clip.sourceUrl),
+      sourceInMs: clip.sourceInMs ?? null,
+      sourceOutMs: clip.sourceOutMs ?? null,
+      pictureMode: pictureKind,
+      videoReq: videoFramesRequested,
+      videoDec: videoFramesDecoded,
+      videoEnc: videoFramesEncoded,
+      afeFrames,
+      visFrames,
+      blackFrames,
+      encoderQueue: encoder.encodeQueueSize,
+    });
     return {
       exportFrameIndex: i,
       exportTimestampSec: i / job.fps,
@@ -452,6 +480,22 @@ export async function exportWithWebCodecs(
         for (let k = 0; k < run.count; k++) {
           if (hooks.signal?.aborted) throw new Error("Export aborted");
           const i = run.startIndex + k;
+          updateExportFailContext({
+            exportFrame: i,
+            timelineMs: (i / job.fps) * 1000,
+            fps: job.fps,
+            resolution: `${width}x${height}`,
+            clipId: clip?.id ?? null,
+            clipName: clip?.label ?? null,
+            pictureMode: run.pictureKind,
+            videoReq: videoFramesRequested,
+            videoDec: videoFramesDecoded,
+            videoEnc: videoFramesEncoded,
+            afeFrames,
+            visFrames,
+            blackFrames,
+            encoderQueue: encoder.encodeQueueSize,
+          });
           hooks.onProgress?.({
             percent: Math.round((i / frameCount) * 80) + 8,
             stage: encodingStage(),
@@ -626,6 +670,16 @@ export async function exportWithWebCodecs(
           k += 1;
         }
       } catch (e) {
+        captureThrownValue(e);
+        const liveDump =
+          decoded?.stallSnapshot({
+            ...stallExtraFromClip(clip, run.startIndex + k),
+            encoderEncodeQueueSize: encoder.encodeQueueSize,
+            lastProgressUpdateMs: lastProgressAt,
+            stalledMs: AFE_DECODE_STALL_MS,
+          }) ?? null;
+        if (liveDump) mergeStallSnapshotIntoExportFailContext(liveDump);
+        if (isStackOverflowThrown(e)) throw e;
         const msg = e instanceof Error ? e.message : String(e);
         if (isAfeError(e) && e.code === "AFE_DECODE_STALL") {
           const dump =
@@ -677,11 +731,14 @@ export async function exportWithWebCodecs(
     clearFrameSources();
     clearMediaCache();
     clearStillCache();
+    captureThrownValue(e);
     const msg = e instanceof Error ? e.message : String(e);
     if (hooks.signal?.aborted || /abort/i.test(msg) || (isAfeError(e) && e.code === "AFE_ABORTED")) {
       return aborted(job);
     }
+    if (isStackOverflowThrown(e)) return exportResultFromCaughtThrow(job, e);
     if (isAfeError(e) || msg.startsWith("AFE_")) return failAfe(job, e);
+    if (e instanceof Error && e.stack) return exportResultFromCaughtThrow(job, e);
     const prefixed = msg.startsWith("FAIL:") || msg.startsWith("missing:") ? msg : `FAIL: ${msg}`;
     return fail(job, prefixed.startsWith("missing:") ? `FAIL: ${prefixed}` : prefixed);
   }
@@ -717,6 +774,7 @@ export async function exportWithWebCodecs(
 
   if (hooks.signal?.aborted) return aborted(job);
   hooks.onProgress?.({ percent: 95, stage: "Muxing MP4" });
+  updateExportFailContext({ stage: "mux" });
   let bytes: Uint8Array;
   try {
     const mux0 = afePerfEnabled() ? performance.now() : 0;
@@ -730,6 +788,11 @@ export async function exportWithWebCodecs(
     });
     if (mux0) afePerfAdd("mux", performance.now() - mux0);
   } catch (e) {
+    captureThrownValue(e);
+    if (isStackOverflowThrown(e) || (e instanceof Error && e.stack && /call stack|recursion/i.test(e.message))) {
+      updateExportFailContext({ stage: "mux" });
+      return exportResultFromCaughtThrow(job, e);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     return fail(job, `FAIL: mux ${msg}`);
   }
