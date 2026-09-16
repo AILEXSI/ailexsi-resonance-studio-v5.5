@@ -3,6 +3,7 @@
  * Shared onset/energy/spectrum step is the only musical clock when real audio
  * is loaded. Preview (AnalyserNode) and Export (offline PCM FFT) both call
  * assembleAudioFeatures so they cannot drift into unrelated algorithms.
+ * Presentation shaping lives in vis-response.ts — this file stays raw.
  */
 
 import type { AudioAnalyserConfig, AudioFeatures } from "./types";

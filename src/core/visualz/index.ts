@@ -35,3 +35,10 @@ export {
 } from "./feature-extractor";
 export type { FeatureExtractor, OfflineFeatureExtractor } from "./feature-extractor";
 export { analyserSpectrumFromWindow, binFrequencyHz } from "./fft";
+export {
+  applyVisResponse,
+  clamp01 as clampVis01,
+  DEFAULT_VIS_RESPONSE,
+  shapeVisLevel,
+} from "./vis-response";
+export type { RawAudioFeatures, VisResponseConfig, VisualizerPresentation } from "./vis-response";

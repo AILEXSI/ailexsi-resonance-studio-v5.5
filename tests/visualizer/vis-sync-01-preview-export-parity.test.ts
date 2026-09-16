@@ -21,6 +21,7 @@ import {
   rmsFromTimeDomain,
 } from "../../src/core/visualz/feature-extractor";
 import { analyserSpectrumFromWindow, binFrequencyHz } from "../../src/core/visualz/fft";
+import { applyVisResponse } from "../../src/core/visualz/vis-response";
 import { jobFromProject } from "../../src/core/exporter/job";
 import { createEmptyProject } from "../../src/core/project";
 import { asset, clip, projectWith } from "../helpers";
@@ -485,8 +486,10 @@ describe("VIS-SYNC-01 host routing", () => {
       audioLoaded: true,
       hasClipAtPlayhead: true,
     });
-    expect(preview.rms).toBeCloseTo(0.55, 5);
+    const presented = applyVisResponse(live);
+    expect(preview.rms).toBeCloseTo(presented.rms, 5);
     expect(preview.onset).toBe(true);
+    expect(preview.bass).toBeCloseTo(presented.bass, 5);
   });
 
   it("gap at playhead still ignores leftover live energy", () => {
