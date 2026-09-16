@@ -1270,3 +1270,41 @@ AFE-21 (36 < 38, queue>=HARD) still uses the AFE-21 path. Shape A (82 < 90, queu
 **WINDOWS HUMAN TEST REQUIRED: YES** — owner retest sample 28 PTS 1375000 / lastSubmitted 34 / requestedSubmitted yes / targetPtsSeen no / post-recreate freeze at 458333 → one hard-horizon reset+rebuild, then exact PTS or typed stall after exhausted; no empty 35-34 for 3s; no flood to 144.  
 **HUMAN-PROVEN: NO**
 
+# AFE-23 — HARD horizon reset fired but same liveness death (458333)
+
+Human Windows EXE on AFE-22 tip (`b91ecfc`). One new picture. Pure VIDEO export works; VIDEO+VIS mix still fails. AFE-20/21/22 stay green.
+
+- requested sample **28** PTS **1375000** · requestedSubmitted **yes** · lastSubmitted **34**
+- currentTarget **44** · formula **34** · horizonExtended **yes** · lastRequired **144**
+- SOFT **12** · HARD **22** · decodeQueue **19** · peak **22**
+- lastDecodedTs **458333** · targetPtsSeen **no**
+- postRecreateSubmitted **35** · postRecreateOutputs **10** · same early output list through 458333
+- **hardHorizonReset yes**
+- recreates **2** · resets **2** · recoveryAttempts **2**
+- gopStart **0** · earlierKeyframeAvailable **no**
+- frozenAtHighWater / backpressureBlocked / noMoreSubmission **yes**
+- pumpSlice **35-34** empty
+- usefulInputExhausted **no** · FINAL_FLUSH **yes**
+- videoReq/Dec/Enc **191/190/190** · afeFrames **190** · visFrames **0** at stall
+- clip `…Kopie.mp4` · sourceInMs **0** · sourceOutMs **6042** · timelineMs **6333**
+- stalledMs **3000**
+
+## Cause
+
+1. **Same recreate, same death.** AFE-22 correctly fired. The escape is another `recoverGop(gopStart=0)` — close + new `VideoDecoder` + pump from sample 0. After that second recreate the decoder still emits ~10 frames and freezes at 458333. packetParity / configParity **yes**: input is identical; WebView2 output starvation is unchanged. Repeating that recreate cannot help.
+2. **VIDEO-only vs VIDEO+VIS.** A never-recreated first-fill decoder on a cold source can pass 458333 (VIDEO-only). The mix reuses the cached `OpenedDecoder` across VIS and the next video run; transaction-end used `reset()`+reconfigure on the same native decoder, which is the same poison as recreate.
+3. **Not a missing AFE-22 predicate.** `hardHorizonReset yes` / recreates 2. The next escape must be a *different* recovery.
+
+## Fix
+
+1. `identicalPostResetFingerprint` + `mayPostResetLivenessReopen`: after AFE-22 exhausted, if lastDecoded / output band match the pre-reset death, **do not** recoverGop again.
+2. `coldReopenNativeDecoder`: close the native decoder, `ensure()` a new one, **do not** increment `recreateCount`. SOFT window until lastDecoded moves past the death PTS; output-gated HARD; first-fill water only after liveness. Typed stall if the reopen dies at the same PTS.
+3. `mustColdOpenVideoDecoder` + `getDecoder(..., { fresh })`: VIS→VIDEO / black→VIDEO evicts the cached frame source so the mix cold-starts like VIDEO-only. VIDEO-only first run does not evict.
+4. Transaction-end `abandonSpeculativeDecoder` **closes** instead of reset+reconfigure.
+
+No timeout bump, no snap/nearest/drop, no flood to 144, no Mediabunny, no HTMLVideo fallback, no global HARD raise. AFE-20/21/22 predicates unchanged.
+
+**WINDOWS WEBVIEW2 VERIFIED: NO**  
+**WINDOWS HUMAN TEST REQUIRED: YES** — owner retest VIDEO-only (expect PASS) then VIDEO+VIS mix on `…Kopie.mp4` sample 28 PTS 1375000 after AFE-22 reset: cold reopen (not a third identical 458333 recreate); exact PTS or typed stall after reopen exhausted; no flood to 144. Dump should show `postResetFingerprintMatch` / `livenessReopen` / `coldOpenAfterVis` when applicable.  
+**HUMAN-PROVEN: NO**
+
