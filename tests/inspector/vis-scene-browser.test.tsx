@@ -84,7 +84,11 @@ describe("VIS scene browser", () => {
     });
     act(() => {
       (host!.querySelector("[data-testid=vis-browser-category-LEXI]") as HTMLButtonElement).click();
+    });
+    act(() => {
       (host!.querySelector("[data-testid=vis-browser-family-FLOW]") as HTMLButtonElement).click();
+    });
+    act(() => {
       (host!.querySelector("[data-testid=vis-browser-scene-lexi-v1]") as HTMLButtonElement).click();
     });
     expect(seen).toEqual(["lexi-ref", "lexi-v1"]);

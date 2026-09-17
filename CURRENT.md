@@ -239,6 +239,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Registry | `SCENE_CATALOG` is the single metadata source. No hardcoded second dropdown. |
 | Select | Inspector / VIS-lane browser: LEXI → family → scene. Cycle remains a fallback. |
 | Human | PENDING. Checklist: `docs/compliance/VIS-SCENE-LEXI-FAMILY.md`. EXE pending coordinator MODE B. |
+| Test | Family 8 + browser 2 + vis-scene-lexi 15 + visualizer 30. Broader VIS/inspector/timeline/export/AUDIO/identity **175/175**. ENC-01 + AAC + STRESS-02/03-stage **26/26**. `tsc --noEmit` clean. `vite build` clean. |
 | Untouched | AFE; AVC/ENC; AAC; mix; MP4 mux; STRESS; 2h buffer. |
 
 ## Verification paths

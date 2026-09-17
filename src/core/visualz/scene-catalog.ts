@@ -223,7 +223,7 @@ export const SCENE_CATALOG = [
     shortName: "LEXI V2",
     suite: "LEXI",
     family: "FLOW",
-    description: "PR #28 polish V2 flagship look — layered filaments and haze",
+    description: "PR #28 polish V2 flagship look — same paint as Minimal Horizon, kept as its own id",
     renderer: "lexi-v2",
   },
   {

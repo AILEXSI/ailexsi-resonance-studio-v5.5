@@ -38,7 +38,7 @@ Every distinct stack variant remains selectable. V2 polish (`lexi-v2`) and LEXI 
 | `lexi-minimal` | **LEXI Minimal Horizon** | `src/core/visualz/scenes/lexi-minimal.ts` | Quiet V2 variant (kept since PR #29) | FLOW | yes | yes |
 | `lexi-v1` | **LEXI Flow V1** | `src/core/visualz/scenes/lexi-v1.ts` | PR #27 `37dfd7b` | FLOW | yes | yes |
 
-Duplicates: none removed. `lexi-v2` vs `lexi-minimal` differ in code and are both registered.
+Duplicates: none removed. `lexi-v2` and `lexi-minimal` share the same V2 paint (identical 96×54 fingerprint) but remain two named library entries — original PR #28 flagship id vs the quiet-variant id shipped since PR #29. When in doubt both stay selectable.
 
 ## Registry model
 
@@ -80,4 +80,6 @@ Flagship FLOW (`lexi`): **FAIL** if it still reads as thin gold wireframe on bla
 
 Do **not** merge. Freeze this branch tip. Coordinator builds one `AILEXSI Resonance Studio V5.5.exe` (MODE B). Agent does not produce the Windows EXE.
 
-Identity: `productVersion` **5.5.0** · `frameEngine` **AILEXSI** · `gitSha` / branch = this tip after stamp.
+Identity: `productVersion` **5.5.0** · `frameEngine` **AILEXSI** · branch `cursor/vis-lexi-family-consolidation-0a86` · `gitSha` = this tip after stamp.
+
+Automated gates this pass: LEXI family 8 + browser 2 + vis-scene-lexi 15 + visualizer 30; broader VIS/inspector/timeline/export/AUDIO/identity **175/175**; ENC-01 + AAC + STRESS-02/03-stage **26/26**. `tsc --noEmit` clean. `vite build` clean.

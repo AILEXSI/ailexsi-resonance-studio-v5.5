@@ -295,8 +295,10 @@ describe("Visualz scene registry", () => {
       prints.set(id, buf.fingerprint());
     }
     const unique = new Set(prints.values());
+    // lexi-v2 and lexi-minimal share the V2 paint (kept as two named library entries).
+    expect(prints.get("lexi-v2")).toBe(prints.get("lexi-minimal"));
     expect(unique.size, `fingerprints ${JSON.stringify(Object.fromEntries(prints))}`).toBe(
-      VISUALIZER_SCENE_IDS.length,
+      VISUALIZER_SCENE_IDS.length - 1,
     );
   });
 

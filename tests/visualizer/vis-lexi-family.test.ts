@@ -13,6 +13,7 @@ import {
 import { builtinScenes, getRegisteredScene } from "../../src/core/visualz";
 import { featuresAt, renderVisualizerScene, sceneShortName } from "../../src/core/visualizer";
 import { jobFromProject } from "../../src/core/exporter/job";
+import { createPixelCanvas } from "../helpers/pixel-canvas";
 
 const LEXI_FAMILY_SET = new Set<string>(LEXI_FAMILIES);
 
@@ -116,19 +117,11 @@ describe("LEXI family catalog", () => {
     for (const id of LEXI_SCENE_IDS) {
       const scene = getRegisteredScene(id);
       expect(scene, id).toBeTruthy();
+      const buf = createPixelCanvas(96, 54);
       expect(() => {
-        renderVisualizerScene(
-          {
-            fillRect() {},
-            fillStyle: "#000",
-          } as unknown as CanvasRenderingContext2D,
-          96,
-          54,
-          id,
-          features,
-          1 / 30,
-        );
+        renderVisualizerScene(buf.ctx, 96, 54, id, features, 1 / 30);
       }).not.toThrow();
+      expect(buf.nonemptyCount(), id).toBeGreaterThan(20);
     }
   });
 
