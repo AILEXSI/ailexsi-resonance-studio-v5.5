@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LEXI 2036 preview</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #07060a;
+        color: #e8d2a8;
+        font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+      }
+      header {
+        padding: 10px 16px 6px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      p {
+        margin: 4px 0 0;
+        opacity: 0.72;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 10px 16px 24px;
+      }
+      figure {
+        margin: 0;
+      }
+      canvas {
+        width: 100%;
+        height: auto;
+        display: block;
+        background: #07060a;
+        border: 1px solid #2a2114;
+      }
+      figcaption {
+        margin-top: 6px;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>LEXI 2036 — flagship vs Minimal Horizon</h1>
+      <p>Same presented packet. Quiet / pad / kick / snare. Not HUMAN-PROVEN.</p>
+    </header>
+    <div class="grid" id="grid"></div>
+    <script type="module">
+      import { lexiScene } from "./src/core/visualz/scenes/lexi.ts";
+      import { lexiMinimalScene } from "./src/core/visualz/scenes/lexi-minimal.ts";
+
+      const spectrum = (n, fn) => Float32Array.from({ length: n }, (_, i) => fn(i));
+
+      const packets = {
+        quiet: {
+          timeMs: 2400,
+          rms: 0.05,
+          bass: 0.04,
+          mid: 0.03,
+          treble: 0.02,
+          spectrum: spectrum(32, () => 0.03),
+          onset: false,
+          beatPulse: 0,
+        },
+        pad: {
+          timeMs: 2400,
+          rms: 0.62,
+          bass: 0.28,
+          mid: 0.58,
+          treble: 0.2,
+          spectrum: spectrum(32, (i) => 0.18 + (i % 5) * 0.04),
+          onset: false,
+          beatPulse: 0.08,
+        },
+        kick: {
+          timeMs: 2400,
+          rms: 0.74,
+          bass: 0.7,
+          mid: 0.34,
+          treble: 0.12,
+          spectrum: spectrum(32, (i) => (i < 6 ? 0.7 : 0.08)),
+          onset: true,
+          beatPulse: 0.92,
+        },
+        snare: {
+          timeMs: 2400,
+          rms: 0.4,
+          bass: 0.16,
+          mid: 0.38,
+          treble: 0.74,
+          spectrum: spectrum(32, (i) => (i > 18 ? 0.55 : 0.1)),
+          onset: true,
+          beatPulse: 0.55,
+        },
+      };
+
+      const grid = document.getElementById("grid");
+      const W = 960;
+      const H = 540;
+
+      function paint(scene, features, label) {
+        const canvas = document.createElement("canvas");
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext("2d");
+        scene.onEnter?.({ width: W, height: H, ctx }, scene.defaultParams);
+        scene.render({ width: W, height: H, ctx }, features, scene.defaultParams, 1 / 30);
+        const fig = document.createElement("figure");
+        const cap = document.createElement("figcaption");
+        cap.textContent = label;
+        fig.append(canvas, cap);
+        grid.append(fig);
+      }
+
+      for (const [name, features] of Object.entries(packets)) {
+        paint(lexiScene, features, `LEXI 2036 — ${name}`);
+        paint(lexiMinimalScene, features, `LEXI Minimal Horizon — ${name}`);
+      }
+    </script>
+  </body>
+</html>

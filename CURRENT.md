@@ -210,6 +210,22 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Select | Inspector **LEXI** (flagship) or **LEXI Min**. Cycle: Crystal → LEXI → LEXI Min → Bars. |
 | Human | 1–2 min: depth at a glance, kick pressure wave, bass lift, quiet darker, lower volume → lower VIS, not gold soup. Details: `docs/compliance/VIS-SCENE-LEXI-V3-CINEMATIC-DEPTH.md`. |
 
+## VIS-SCENE-LEXI 2036 — Cinematic Future Energy Space
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — not HUMAN-PROVEN. Do not merge from this pass. VIS-only. Do not reopen AFE / ENC / AUDIO / STRESS.
+
+| | |
+| --- | --- |
+| Base | LEXI V3 tip `0d0ee827b0d1d9cc199f7e5e0b66ca9c87f25ed8` on `cursor/vis-scene-lexi-v3-cinematic-depth-9f48` (PR **#29**). |
+| Tip | Coordinator MODE-B EXE from the branch tip of `cursor/vis-scene-lexi-2036-cinematic-ef57`. |
+| Why | Human on V3: too retro / too close to old-school wireframe horizon — early Tron, not premium 2036. Too flat, empty, uniform, too much simple grid. |
+| What | Flagship `lexi` / **LEXI** becomes cinematic future energy space: less plain grid, FG traces · MG flowing terrain · hero luminous stream · BG haze / distant signal towers, volumetric atmosphere, controlled gold + cyan/magenta reflections. `lexi-minimal` / **LEXI Minimal Horizon** stays the calm V2 look. |
+| Audio | Same `applyVisResponse` packet. Additive helpers `lexiAmbientExpand`, `lexiTransientFlash`, `lexiRibbonWidth`. Kick = local pulse; bass = terrain lift; snare/high = highlight flash; pads = ribbon width / ambient. Preview === Export. |
+| Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry; `lexi-minimal` render. |
+| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 18. `tsc --noEmit` clean. Focused VIS suite on the PR. |
+| Select | Inspector **LEXI** (flagship 2036) or **LEXI Min**. Cycle: Crystal → LEXI → LEXI Min → Bars. |
+| Human | PASS only if clearly more premium / deeper / more atmospheric / more futuristic than V3, still calm and musical. Details: `docs/compliance/VIS-SCENE-LEXI-2036-CINEMATIC.md`. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

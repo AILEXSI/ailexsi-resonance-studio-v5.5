@@ -1,7 +1,13 @@
 /**
  * Shared LEXI palettes + title-safe band.
- * Used by flagship LEXI (V3) and LEXI Minimal Horizon (V2).
+ * Used by flagship LEXI (2036) and LEXI Minimal Horizon (V2).
  */
+
+/** Subtle cool / rose reflections for flagship 2036 only. Minimal ignores these. */
+export const LEXI_REFLECT = {
+  cyan: "#6ad4e8",
+  magenta: "#d878b0",
+} as const;
 
 import type { SceneParams } from "../types";
 

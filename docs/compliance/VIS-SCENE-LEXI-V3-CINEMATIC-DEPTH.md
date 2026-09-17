@@ -1,6 +1,6 @@
 # VIS-SCENE-LEXI V3 — Cinematic Depth & Impact
 
-**Status:** **IMPLEMENTED / AUTOMATED-TESTED** · **DRAFT** (not HUMAN-PROVEN). Do not merge until MODE B acceptance. Do not mark HUMAN-PROVEN from tests or agent screenshots.
+**Status:** **IMPLEMENTED / AUTOMATED-TESTED** · **DRAFT** (not HUMAN-PROVEN). Flagship look continues in `VIS-SCENE-LEXI-2036-CINEMATIC.md` (same `lexi` id). This doc is the V3 depth-architecture base. Do not merge until MODE B acceptance. Do not mark HUMAN-PROVEN from tests or agent screenshots.
 
 Base tip: LEXI Polish V2 `8d46dbfbd9397b9184180d11f32d83e17b1e3ac6` on `cursor/vis-scene-lexi-polish-v2-f909` (PR #28), already on LEXI V1 + HUMAN-PROVEN main `59f6c18`. VIS-only. ENC / STRESS / AUDIO / VIS-SYNC / VIS-RESPONSE analysers and Lattice/Wave geometry are untouched.
 

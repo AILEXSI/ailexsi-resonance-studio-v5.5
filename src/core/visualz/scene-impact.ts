@@ -97,3 +97,25 @@ export function lexiHighlightBloom(features: AudioFeatures, intensity: number): 
 export function lexiPeakBias(timeMs: number, speed: number): number {
   return 0.88 + Math.sin(timeMs * 0.000092 * speed) * 0.58;
 }
+
+/**
+ * LEXI 2036 — pads / vocals breathe glow width and ambient volume.
+ * Additive. Does not change V2 Minimal or V3 lift/form coefficients.
+ */
+export function lexiAmbientExpand(features: AudioFeatures, intensity: number): number {
+  return (features.rms * 0.48 + features.mid * 0.42) * intensity;
+}
+
+/**
+ * Snare / high-transient flash. Treble-weighted so a bass kick without highs
+ * stays a local pulse, not a white strobe.
+ */
+export function lexiTransientFlash(features: AudioFeatures): number {
+  const hit = features.onset ? features.treble * 0.28 : 0;
+  return features.treble * 0.58 + features.treble * features.beatPulse * 0.28 + hit;
+}
+
+/** Hero ribbon width. Pads expand the stream; bass adds a little body. */
+export function lexiRibbonWidth(features: AudioFeatures, intensity: number): number {
+  return (features.rms * 0.44 + features.mid * 0.38 + features.bass * 0.14) * intensity;
+}

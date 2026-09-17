@@ -12,6 +12,7 @@ import {
 import { builtinScenes, getRegisteredScene } from "../../src/core/visualz";
 import {
   lexiAccent,
+  lexiAmbientExpand,
   lexiFormShift,
   lexiGlow,
   lexiHighlightBloom,
@@ -19,11 +20,17 @@ import {
   lexiHorizonLift,
   lexiPeakBias,
   lexiPressureWave,
+  lexiRibbonWidth,
   lexiSheen,
   lexiTerrainSpread,
+  lexiTransientFlash,
 } from "../../src/core/visualz/scene-impact";
 import {
+  LEXI_2036_FG_TRACES,
+  LEXI_2036_HERO_FILAMENTS,
+  LEXI_2036_SIGNAL_TOWERS,
   LEXI_DEFAULT_THEME,
+  LEXI_REFLECT,
   LEXI_THEMES,
   LEXI_TITLE_SAFE,
   LEXI_V3_DEPTH_PLANES,
@@ -61,6 +68,28 @@ const PAD: AudioFeatures = {
   ...LOUD,
   onset: false,
   beatPulse: 0,
+};
+
+const SNARE: AudioFeatures = {
+  timeMs: 800,
+  rms: 0.38,
+  bass: 0.14,
+  mid: 0.36,
+  treble: 0.72,
+  spectrum: Float32Array.from({ length: 32 }, (_, i) => 0.15 + (i > 18 ? 0.45 : 0.08)),
+  onset: true,
+  beatPulse: 0.55,
+};
+
+const KICK_DARK: AudioFeatures = {
+  timeMs: 800,
+  rms: 0.7,
+  bass: 0.78,
+  mid: 0.18,
+  treble: 0.04,
+  spectrum: Float32Array.from({ length: 32 }, (_, i) => (i < 6 ? 0.7 : 0.05)),
+  onset: true,
+  beatPulse: 0.94,
 };
 
 function paint(id: (typeof VISUALIZER_SCENE_IDS)[number], features: AudioFeatures, dt = 1 / 30) {
@@ -126,13 +155,18 @@ describe("VIS-SCENE-LEXI registry", () => {
   });
 });
 
-describe("VIS-SCENE-LEXI V3 cinematic language", () => {
+describe("VIS-SCENE-LEXI 2036 cinematic language", () => {
   it("is a new image language — distinct from Minimal, Lattice, Wave, Gold", () => {
     const features = featuresAt(0, 10_000);
     const lexi = paint("lexi", features);
     expect(lexi.nonemptyCount()).toBeGreaterThan(20);
     expect(LEXI_V3_DEPTH_PLANES).toBe(3);
     expect(LEXI_V3_LIGHT_BANDS).toBeGreaterThanOrEqual(3);
+    expect(LEXI_2036_HERO_FILAMENTS).toBeGreaterThanOrEqual(4);
+    expect(LEXI_2036_FG_TRACES).toBeGreaterThanOrEqual(3);
+    expect(LEXI_2036_SIGNAL_TOWERS).toBeGreaterThanOrEqual(4);
+    expect(LEXI_REFLECT.cyan).toMatch(/^#/);
+    expect(LEXI_REFLECT.magenta).toMatch(/^#/);
     const minimal = paint("lexi-minimal", features).fingerprint();
     const lattice = paint("void-lattice", features).fingerprint();
     const wave = paint("resonance-wave", features).fingerprint();
@@ -162,6 +196,11 @@ describe("VIS-SCENE-LEXI V3 cinematic language", () => {
     expect(lexiAccent(QUIET)).toBeLessThan(lexiAccent(LOUD));
     expect(lexiSheen(LOUD, 0.4)).toBeGreaterThan(lexiSheen(QUIET, 0.4));
     expect(Math.abs(lexiPeakBias(800, 0.78))).toBeGreaterThan(0.2);
+    expect(lexiAmbientExpand(QUIET, 0.86)).toBeLessThan(lexiAmbientExpand(PAD, 0.86) * 0.25);
+    expect(lexiRibbonWidth(QUIET, 0.86)).toBeLessThan(lexiRibbonWidth(PAD, 0.86) * 0.3);
+    expect(lexiTransientFlash(SNARE)).toBeGreaterThan(lexiTransientFlash(KICK_DARK));
+    expect(lexiTransientFlash(QUIET)).toBeLessThan(lexiTransientFlash(SNARE) * 0.2);
+    expect(lexiPressureWave(KICK_DARK)).toBeGreaterThan(lexiPressureWave(SNARE));
   });
 
   it("paints a quieter / darker frame than a musical peak", () => {
@@ -185,6 +224,15 @@ describe("VIS-SCENE-LEXI V3 cinematic language", () => {
     const kick = paint("lexi", LOUD);
     expect(kick.fingerprint()).not.toBe(pad.fingerprint());
     expect(lexiPressureWave(LOUD)).toBeGreaterThan(lexiPressureWave(PAD));
+  });
+
+  it("snare / high-transient flashes the highlight without matching a dark kick", () => {
+    lexiScene.onEnter?.({ width: 96, height: 54, ctx: paint("lexi", PAD).ctx }, lexiScene.defaultParams);
+    const pad = paint("lexi", PAD);
+    lexiScene.onEnter?.({ width: 96, height: 54, ctx: paint("lexi", PAD).ctx }, lexiScene.defaultParams);
+    const snare = paint("lexi", SNARE);
+    expect(snare.fingerprint()).not.toBe(pad.fingerprint());
+    expect(lexiTransientFlash(SNARE)).toBeGreaterThan(lexiTransientFlash(PAD) * 1.4);
   });
 
   it("mids shift large form, not just glow", () => {
@@ -250,6 +298,9 @@ describe("VIS-SCENE-LEXI drivers (Preview === Export)", () => {
     expect(lexiTerrainSpread(presented, 1)).toBeCloseTo(lexiTerrainSpread(preview, 1), 5);
     expect(lexiFormShift(presented, 1)).toBeCloseTo(lexiFormShift(preview, 1), 5);
     expect(lexiPressureWave(presented)).toBeCloseTo(lexiPressureWave(preview), 5);
+    expect(lexiAmbientExpand(presented, 1)).toBeCloseTo(lexiAmbientExpand(preview, 1), 5);
+    expect(lexiRibbonWidth(presented, 1)).toBeCloseTo(lexiRibbonWidth(preview, 1), 5);
+    expect(lexiTransientFlash(presented)).toBeCloseTo(lexiTransientFlash(preview), 5);
     expect(exported.tempoBpm).toBe(120);
     expect(lexiAccent(presented)).toBeGreaterThan(0);
   });
