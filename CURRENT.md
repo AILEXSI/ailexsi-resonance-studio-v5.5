@@ -226,6 +226,21 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Select | Inspector **LEXI** (flagship 2036) or **LEXI Min**. Cycle: Crystal → LEXI → LEXI Min → Bars. |
 | Human | PASS only if clearly more premium / deeper / more atmospheric / more futuristic than V3, still calm and musical. Details: `docs/compliance/VIS-SCENE-LEXI-2036-CINEMATIC.md`. |
 
+## VIS-SCENE-LEXI family — consolidation + scene browser
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — **HUMAN-PROVEN = PENDING**. Do not merge. VIS + LEXI library + UI only. ENC / STRESS / AUDIO / AFE / mux untouched.
+
+| | |
+| --- | --- |
+| Base | PR #31 tip `38df270` (furthest LEXI stack). Inventory also covers PR #27 V1, #28 V2, #29 V3 + minimal, #30 2036, #31 ref-level. |
+| What | Every inventoried LEXI version is a separately selectable scene. Hierarchical browser (ALL / LEXI / CLASSIC → five LEXI families → scene click applies). Flagship `lexi` FLOW quality pass; exact ref-level snapshot kept as `lexi-ref`. |
+| Families | FLOW (all current LEXI scenes) · GEOMETRY · SYNTHWAVE · PARTICLE / NEBULA · STAGE (empty families stay in the UI). |
+| Retained ids | `lexi` · `lexi-ref` · `lexi-2036` · `lexi-v3` · `lexi-v2` · `lexi-minimal` · `lexi-v1` |
+| Registry | `SCENE_CATALOG` is the single metadata source. No hardcoded second dropdown. |
+| Select | Inspector / VIS-lane browser: LEXI → family → scene. Cycle remains a fallback. |
+| Human | PENDING. Checklist: `docs/compliance/VIS-SCENE-LEXI-FAMILY.md`. EXE pending coordinator MODE B. |
+| Untouched | AFE; AVC/ENC; AAC; mix; MP4 mux; STRESS; 2h buffer. |
+
 ## Verification paths
 
 | Mode | Name | What it is | What it may claim |

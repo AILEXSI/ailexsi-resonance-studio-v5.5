@@ -68,7 +68,7 @@ describe("VIS cues", () => {
     expect(events.some((e) => e.startMs === 3000 && e.sceneId === "tunnel-spiral")).toBe(true);
   });
 
-  it("nextSceneId walks the 18-id cycle including 3D scenes and sceneAt follows them", () => {
+  it("nextSceneId walks the catalog cycle including 3D scenes and sceneAt follows them", () => {
     expect(VISUALIZER_SCENE_IDS).toContain("particle-field");
     expect(VISUALIZER_SCENE_IDS).toContain("resonance-wave");
     expect(VISUALIZER_SCENE_IDS).toContain("tunnel-spiral");
@@ -80,8 +80,8 @@ describe("VIS cues", () => {
     expect(nextSceneId("nebula-helix")).toBe("accretion-disk");
     expect(nextSceneId("accretion-disk")).toBe("crystal-storm");
     expect(nextSceneId("crystal-storm")).toBe("lexi");
-    expect(nextSceneId("lexi")).toBe("lexi-minimal");
-    expect(nextSceneId("lexi-minimal")).toBe("spectrum-bars");
+    expect(nextSceneId("lexi")).toBe("lexi-ref");
+    expect(nextSceneId("lexi-v1")).toBe("spectrum-bars");
     expect(sceneShortName("void-lattice")).toBe("Lattice");
     expect(sceneShortName("nebula-helix")).toBe("Helix");
     expect(sceneShortName("accretion-disk")).toBe("Disk");

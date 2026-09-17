@@ -29,6 +29,7 @@ import {
   LEXI_2036_FG_TRACES,
   LEXI_2036_HERO_FILAMENTS,
   LEXI_2036_SIGNAL_TOWERS,
+  LEXI_FLOW_FG_GRID,
   LEXI_DEFAULT_THEME,
   LEXI_REF_DUNE_CONTOURS,
   LEXI_REF_DUNE_MERIDIANS,
@@ -118,8 +119,8 @@ describe("VIS-SCENE-LEXI registry", () => {
     expect(sceneShortName("lexi")).toBe("LEXI");
     expect(sceneShortName("lexi-minimal")).toBe("LEXI Min");
     expect(nextSceneId("crystal-storm")).toBe("lexi");
-    expect(nextSceneId("lexi")).toBe("lexi-minimal");
-    expect(nextSceneId("lexi-minimal")).toBe("spectrum-bars");
+    expect(nextSceneId("lexi")).toBe("lexi-ref");
+    expect(nextSceneId("lexi-v1")).toBe("spectrum-bars");
   });
 
   it("ships gold / champagne as the default and keeps later palettes as data", () => {
@@ -175,6 +176,7 @@ describe("VIS-SCENE-LEXI reference-level cinematic language", () => {
     expect(LEXI_REF_SURFACE_POINTS).toBeGreaterThanOrEqual(600);
     expect(LEXI_REF_MOUNTAIN_PEAKS).toBeGreaterThanOrEqual(7);
     expect(LEXI_REF_FG_BOKEH).toBeGreaterThanOrEqual(16);
+    expect(LEXI_FLOW_FG_GRID).toBeGreaterThanOrEqual(12);
     expect(LEXI_REFLECT.cyan).toMatch(/^#/);
     expect(LEXI_REFLECT.magenta).toMatch(/^#/);
     const minimal = paint("lexi-minimal", features).fingerprint();

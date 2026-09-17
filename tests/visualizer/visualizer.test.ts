@@ -231,7 +231,7 @@ describe("visualizer project persist", () => {
 });
 
 describe("Visualz scene registry", () => {
-  it("registers all 18 Visualz ids and isVisualizerSceneId accepts each", () => {
+  it("registers all catalog Visualz ids and isVisualizerSceneId accepts each", () => {
     expect(VISUALIZER_SCENE_IDS).toEqual([
       "spectrum-bars",
       "pulse-orb",
@@ -250,9 +250,14 @@ describe("Visualz scene registry", () => {
       "accretion-disk",
       "crystal-storm",
       "lexi",
+      "lexi-ref",
+      "lexi-2036",
+      "lexi-v3",
+      "lexi-v2",
       "lexi-minimal",
+      "lexi-v1",
     ]);
-    expect(new Set(VISUALIZER_SCENE_IDS).size).toBe(18);
+    expect(new Set(VISUALIZER_SCENE_IDS).size).toBe(VISUALIZER_SCENE_IDS.length);
     expect(builtinScenes.map((s) => s.id)).toEqual([...VISUALIZER_SCENE_IDS]);
     for (const id of VISUALIZER_SCENE_IDS) {
       expect(isVisualizerSceneId(id)).toBe(true);
@@ -263,7 +268,7 @@ describe("Visualz scene registry", () => {
     expect(isVisualizerSceneId("")).toBe(false);
   });
 
-  it("nextSceneId cycles all 18 without repeats until wrap", () => {
+  it("nextSceneId cycles all catalog ids without repeats until wrap", () => {
     const seen: string[] = [];
     let current: VisualizerSceneId = VISUALIZER_SCENE_IDS[0]!;
     for (let i = 0; i < VISUALIZER_SCENE_IDS.length; i++) {
@@ -275,11 +280,11 @@ describe("Visualz scene registry", () => {
     expect(current).toBe(VISUALIZER_SCENE_IDS[0]);
     expect(nextSceneId("lita-bloom")).toBe("void-lattice");
     expect(nextSceneId("crystal-storm")).toBe("lexi");
-    expect(nextSceneId("lexi")).toBe("lexi-minimal");
-    expect(nextSceneId("lexi-minimal")).toBe("spectrum-bars");
+    expect(nextSceneId("lexi")).toBe("lexi-ref");
+    expect(nextSceneId("lexi-v1")).toBe("spectrum-bars");
   });
 
-  it("each Visualz scene paints non-empty pixels and the eighteen frames differ", () => {
+  it("each Visualz scene paints non-empty pixels and the catalog frames differ", () => {
     const features = featuresAt(0, 10_000);
     const prints = new Map<string, string>();
     for (const id of VISUALIZER_SCENE_IDS) {
@@ -290,7 +295,9 @@ describe("Visualz scene registry", () => {
       prints.set(id, buf.fingerprint());
     }
     const unique = new Set(prints.values());
-    expect(unique.size, `fingerprints ${JSON.stringify(Object.fromEntries(prints))}`).toBe(18);
+    expect(unique.size, `fingerprints ${JSON.stringify(Object.fromEntries(prints))}`).toBe(
+      VISUALIZER_SCENE_IDS.length,
+    );
   });
 
   it("each scene render function can be called without throwing", () => {
@@ -308,7 +315,7 @@ describe("Visualz scene registry", () => {
     }
   });
 
-  it("createVisualEngine lists the 18 builtins and setScene switches", () => {
+  it("createVisualEngine lists the catalog builtins and setScene switches", () => {
     const engine = createVisualEngine({ canvas: stubCanvas(), initialSceneId: "resonance-wave" });
     const ids = engine.listScenes().map((s) => s.id);
     expect(ids).toEqual([...VISUALIZER_SCENE_IDS]);

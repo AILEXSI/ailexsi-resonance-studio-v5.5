@@ -12,6 +12,7 @@ import {
   type Project,
   type TrackId,
   type VisualizerEvent,
+  type VisualizerSceneId,
 } from "../../core/models";
 import { fadeHandlesVisible, fadesFromHandleDrag } from "../../core/fade-handles";
 import { durationMsFromHandleDrag, transitionDurationSnapTargets } from "../../core/transition-handles";
@@ -40,6 +41,7 @@ import {
 } from "../../core/layout-prefs";
 import { clampScrollMs, maxScrollMs, RULER_PAD_PX } from "../../core/zoom";
 import { formatVisEventLabel, sceneAt, sceneShortName, visualizerEventsOf } from "../../core/visualizer";
+import { VisSceneBrowser } from "../inspector/VisSceneBrowser";
 import { CLIP_MENU_SHORTCUTS } from "../shortcuts/labels";
 import { AudioClipWave, VideoClipStrip } from "./ClipPreview";
 import { buildRulerTicks } from "../../core/ruler";
@@ -117,6 +119,7 @@ interface Props {
   onSelectTrack?: (trackId: TrackId, opts?: { toggle?: boolean }) => void;
   onToggleVisualizerMute: () => void;
   onCycleVisualizerScene: () => void;
+  onSetVisualizerScene?: (sceneId: VisualizerSceneId) => void;
   onSelectVis?: () => void;
   onSelectVisEvent?: (eventId: string) => void;
   onInsertVisEvent?: () => void;
@@ -367,6 +370,7 @@ export function Timeline({
   onSelectTrack,
   onToggleVisualizerMute,
   onCycleVisualizerScene,
+  onSetVisualizerScene,
   onSelectVis,
   onSelectVisEvent,
   onInsertVisEvent,
@@ -456,6 +460,7 @@ export function Timeline({
     null,
   );
   const [viewWidth, setViewWidth] = useState(1000);
+  const [visBrowserOpen, setVisBrowserOpen] = useState(false);
   const duration = Math.max(10_000, projectDurationMs(project) + 2000);
   const panMaxMs = maxScrollMs(
     projectDurationMs(project),
@@ -1319,6 +1324,10 @@ export function Timeline({
               data-testid="visualizer-scene"
               onClick={(e) => {
                 e.stopPropagation();
+                if (onSetVisualizerScene) {
+                  setVisBrowserOpen((open) => !open);
+                  return;
+                }
                 onCycleVisualizerScene();
               }}
             >
@@ -1330,6 +1339,32 @@ export function Timeline({
                   project.visualizer.sceneId,
               )}
             </button>
+            {visBrowserOpen && onSetVisualizerScene ? (
+              <div
+                className="vis-lane-browser"
+                data-testid="vis-lane-browser"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <VisSceneBrowser
+                  value={
+                    (selectedVisEventId
+                      ? visualizerEventsOf(project).find((e) => e.id === selectedVisEventId)?.sceneId
+                      : undefined) ??
+                    sceneAt(project, project.playheadMs) ??
+                    project.visualizer.sceneId
+                  }
+                  onSelect={(sceneId) => {
+                    onSetVisualizerScene(sceneId);
+                    setVisBrowserOpen(false);
+                  }}
+                  variant="popover"
+                  testIdPrefix="vis-lane-browser"
+                  onCycle={() => {
+                    onCycleVisualizerScene();
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
         <div

@@ -1,9 +1,7 @@
 /**
- * Scene: lexi — LEXI family flagship FLOW.
- * Quality pass on the PR #31 ref-level dunes: darker cinematic space, volumetric
- * haze, layered terrain, hero ribbon + floor reflection, FG particle-grid.
- * The exact ref-level snapshot remains selectable as lexi-ref.
- * Preview and Export both read presented AudioFeatures.
+ * Scene: lexi-ref — LEXI Ref-Level (PR #31 tip 38df270).
+ * Exact reference-level particle-dune snapshot before the family flagship polish.
+ * Retained as a selectable library scene. Preview === Export (applyVisResponse).
  */
 
 import { hexToRgba } from "../color";
@@ -29,36 +27,22 @@ import {
   LEXI_REFLECT,
   LEXI_THEMES,
   LEXI_TITLE_SAFE,
-  isLexiThemeId,
   resolveLexiTheme,
 } from "./lexi-theme";
 
-export {
-  LEXI_DEFAULT_THEME,
-  LEXI_REFLECT,
-  LEXI_THEMES,
-  LEXI_TITLE_SAFE,
-  isLexiThemeId,
-  resolveLexiTheme,
-};
-export type { LexiThemeId } from "./lexi-theme";
-
 /** FG / MG / BG. Visible depth stack, not a flat horizon wash. */
-export const LEXI_V3_DEPTH_PLANES = 3;
+const LEXI_V3_DEPTH_PLANES = 3;
 /** Supporting mid-ground energy filaments (hero stream is separate). */
-export const LEXI_V3_LIGHT_BANDS = 3;
-export const LEXI_2036_HERO_FILAMENTS = 7;
-export const LEXI_2036_FG_TRACES = 4;
-export const LEXI_2036_SIGNAL_TOWERS = 8;
+const LEXI_V3_LIGHT_BANDS = 3;
+const LEXI_2036_FG_TRACES = 4;
+const LEXI_2036_SIGNAL_TOWERS = 8;
 /** Reference-level density — particle dunes, not sparse meridians. */
-export const LEXI_REF_DUNE_MERIDIANS = 64;
-export const LEXI_REF_DUNE_CONTOURS = 16;
-export const LEXI_REF_SURFACE_POINTS = 840;
-export const LEXI_REF_MOUNTAIN_PEAKS = 9;
-export const LEXI_REF_FG_BOKEH = 28;
-export const LEXI_REF_SKY_ARC = 1;
-/** Near-field dotted particle-grid (flagship FLOW quality pass). */
-export const LEXI_FLOW_FG_GRID = 18;
+const LEXI_REF_DUNE_MERIDIANS = 58;
+const LEXI_REF_DUNE_CONTOURS = 14;
+const LEXI_REF_SURFACE_POINTS = 720;
+const LEXI_REF_MOUNTAIN_PEAKS = 9;
+const LEXI_REF_FG_BOKEH = 22;
+const LEXI_REF_SKY_ARC = 1;
 
 const MAX_MERIDIANS = 72;
 const MAX_CONTOURS = 20;
@@ -67,8 +51,8 @@ const MAX_RIBBON = 80;
 const MAX_TRACE = 48;
 const MAX_STROKE = 80;
 const MAX_TOWERS = 10;
-const MAX_SURFACE = 960;
-const MAX_BOKEH = 36;
+const MAX_SURFACE = 640;
+const MAX_BOKEH = 28;
 const MAX_MOUNTAIN = 12;
 const PARTICLE_CAP = 220;
 
@@ -110,7 +94,7 @@ function hash01(i: number): number {
   return x - Math.floor(x);
 }
 
-function resetLexiState(): void {
+function resetLexiRefState(): void {
   phase = 0;
   lastTimeMs = -1;
   sRms = 0;
@@ -224,10 +208,10 @@ function finite(n: number, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-export const lexiScene: Scene = {
-  id: "lexi",
-  name: "LEXI",
-  description: "Flagship FLOW — cinematic energy landscape, volumetric haze, layered dunes, hero ribbon",
+export const lexiRefScene: Scene = {
+  id: "lexi-ref",
+  name: "LEXI Ref-Level",
+  description: "Reference-level particle dunes — dense meridians, silk stream, atmospheric depth",
   defaultParams: {
     intensity: 0.86,
     colorPrimary: DEFAULT_GOLD.colorPrimary,
@@ -246,11 +230,11 @@ export const lexiScene: Scene = {
   },
 
   onEnter() {
-    resetLexiState();
+    resetLexiRefState();
   },
 
   onExit() {
-    resetLexiState();
+    resetLexiRefState();
   },
 
   render(ctxWrap: SceneContext, features: AudioFeatures, params: SceneParams, dt: number) {
@@ -334,12 +318,11 @@ export const lexiScene: Scene = {
     ctx.lineJoin = "round";
 
     const sky = ctx.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, hexToRgba("#020309", 1));
-    sky.addColorStop(0.18, hexToRgba(cool, 0.016 + backgroundLevel * 0.018 + ambient * 0.012));
-    sky.addColorStop(0.36, secondary);
-    sky.addColorStop(0.5, secondary);
-    sky.addColorStop(0.58, hexToRgba(primary, 0.006 + backgroundLevel * 0.008));
-    sky.addColorStop(1, hexToRgba("#050408", 1));
+    sky.addColorStop(0, hexToRgba(cool, 0.028 + backgroundLevel * 0.03 + ambient * 0.02));
+    sky.addColorStop(0.28, hexToRgba(secondary, 1));
+    sky.addColorStop(0.46, secondary);
+    sky.addColorStop(0.55, hexToRgba(primary, 0.008 + backgroundLevel * 0.01));
+    sky.addColorStop(1, hexToRgba(secondary, 1));
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, width, height);
 
@@ -409,17 +392,6 @@ export const lexiScene: Scene = {
       band.addColorStop(1, hexToRgba(secondary, 0));
       ctx.fillStyle = band;
       ctx.fillRect(0, y0, width, hazeH * 0.85);
-    }
-    for (let slab = 0; slab < 2; slab++) {
-      const y0 = horizonY - hazeH * (1.35 + slab * 0.22);
-      const vol = ctx.createLinearGradient(0, y0, 0, y0 + hazeH * (1.1 + slab * 0.2));
-      const a = (0.028 + ambient * 0.04 + glow * 0.018) * intensity * (slab === 0 ? 1 : 0.7);
-      vol.addColorStop(0, hexToRgba(cool, 0));
-      vol.addColorStop(0.4, hexToRgba(champagne, a * 0.35));
-      vol.addColorStop(0.55, hexToRgba(primary, a * 0.55));
-      vol.addColorStop(1, hexToRgba(secondary, 0));
-      ctx.fillStyle = vol;
-      ctx.fillRect(0, y0, width, hazeH * (1.1 + slab * 0.2));
     }
 
     for (let m = 0; m < mountains; m++) {
@@ -709,16 +681,6 @@ export const lexiScene: Scene = {
     ctx.lineCap = "butt";
     stampDots(ctx, nHero, hexToRgba(highlight, (0.28 + flash * 0.18 + shimmer * 0.1) * intensity), 2.1, 1);
 
-    const nReflect = fillCrest(-height * 0.045, 0.08);
-    for (let i = 0; i < nReflect; i++) {
-      if (!pok[i]) continue;
-      py[i] = horizonY * 2 - py[i]! + height * 0.08;
-    }
-    ctx.lineCap = "round";
-    strokeProjected(ctx, nReflect, hexToRgba(champagne, (0.1 + ambient * 0.05 + ribbonW * 0.04) * intensity), coreW * 0.7);
-    strokeProjected(ctx, nReflect, hexToRgba(highlight, (0.05 + flash * 0.06) * intensity), Math.max(0.8, coreW * 0.18));
-    ctx.lineCap = "butt";
-
     const heroZ = 2.65 + form * 0.16;
     const sampleHero3 = (s: number, yOff: number, zOff: number) => {
       const x =
@@ -770,23 +732,6 @@ export const lexiScene: Scene = {
         ng.addColorStop(1, hexToRgba(primary, 0));
         ctx.fillStyle = ng;
         ctx.fillRect(px[ni]! - 22, py[ni]! - 22, 44, 44);
-      }
-    }
-
-    const gridN = Math.max(10, Math.min(28, LEXI_FLOW_FG_GRID + Math.round(particleAmount * 8)));
-    const gridRows = 5;
-    for (let row = 0; row < gridRows; row++) {
-      const u = row / Math.max(1, gridRows - 1);
-      const y = lerp(height * 0.72, height * 0.97, u);
-      for (let col = 0; col < gridN; col++) {
-        const s = col / Math.max(1, gridN - 1);
-        const x = lerp(-width * 0.02, width * 1.02, s) + Math.sin(phase * 0.15 + row + col * 0.2) * (1.2 + u * 2);
-        const sheen = sheenAt(s);
-        const a = (0.08 + u * 0.16 + sheen * 0.08 + shimmer * 0.05 + presence * 0.04) * intensity;
-        const tint = col % 9 === 0 ? cool : col % 7 === 0 ? champagne : primary;
-        ctx.fillStyle = hexToRgba(tint, Math.min(0.55, a * (tint === cool ? 0.4 : 1)));
-        const sz = 1.1 + u * (1.8 + particleAmount * 0.8);
-        ctx.fillRect(x, y + Math.sin(s * Math.PI * 2 + phase * 0.2 + row) * (2 + lift * 3), sz, sz);
       }
     }
 

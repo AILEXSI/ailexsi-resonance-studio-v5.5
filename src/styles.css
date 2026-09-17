@@ -479,11 +479,95 @@ body.media-asset-dragging .project-overlay-drawer {
 .preview-meta { padding: 6px 10px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
 
 .inspector dl { display: grid; grid-template-columns: 86px 1fr; gap: 7px 8px; margin: 0; font-size: 12px; align-items: center; }
+.inspector [data-testid="inspector-vis"] { align-items: start; }
 .inspector dt { color: var(--muted); }
 .inspector dd { margin: 0; display: flex; align-items: center; gap: 8px; }
 .inspector .tc { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .inspector-clip-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .inspector-unlink { margin-top: 0; }
+.inspector-vis-scene-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+}
+.vis-scene-native-select {
+  width: 100%;
+}
+.vis-scene-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.vis-scene-browser-trigger {
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.vis-scene-browser-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: #121822;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.vis-scene-browser-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vis-scene-browser-row button,
+.vis-scene-browser-scenes button {
+  font-size: 11px;
+  padding: 3px 7px;
+}
+.vis-scene-browser-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow: auto;
+}
+.vis-scene-browser-scenes button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+}
+.vis-scene-browser-scenes em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.vis-scene-browser-empty,
+.vis-scene-browser-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.vis-scene-browser-cycle {
+  align-self: flex-start;
+}
+.vis-lane-browser {
+  position: absolute;
+  left: 8px;
+  top: 28px;
+  z-index: 30;
+  width: min(320px, 42vw);
+}
+.vis-scene-browser-popover .vis-scene-browser-panel {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.lane.vis-lane .lane-label {
+  position: relative;
+}
 
 .transport { border-top: 1px solid var(--line); }
 .transport [data-testid="timecode"] {

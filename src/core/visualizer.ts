@@ -12,6 +12,7 @@ import {
 import { contextFromProject, resolvePictureSource } from "./transition";
 import { getRegisteredScene } from "./visualz";
 import type { AudioFeatures } from "./visualz";
+import { sceneShortNameFromCatalog } from "./visualz/scene-catalog";
 import {
   createOfflineFeatureExtractor,
   isSilentEnergy,
@@ -59,27 +60,6 @@ export interface VisualizerFeatures extends AudioFeatures {
   energy: number;
   high: number;
 }
-
-const SCENE_SHORT: Record<VisualizerSceneId, string> = {
-  "spectrum-bars": "Bars",
-  "pulse-orb": "Orb",
-  "aurora-veil": "Aurora",
-  "star-bloom": "Stars",
-  "liquid-gold": "Gold",
-  "kaleido-hex": "Kaleido",
-  "sun-core": "Sun",
-  "ember-rain": "Ember",
-  "particle-field": "Field",
-  "resonance-wave": "Wave",
-  "tunnel-spiral": "Tunnel",
-  "lita-bloom": "Bloom",
-  "void-lattice": "Lattice",
-  "nebula-helix": "Helix",
-  "accretion-disk": "Disk",
-  "crystal-storm": "Crystal",
-  lexi: "LEXI",
-  "lexi-minimal": "LEXI Min",
-};
 
 /** 120 BPM grid (or `bpm`) from 0 inclusive to duration exclusive. */
 export function beatGrid(durationMs: number, bpm = DEFAULT_VISUALIZER_BPM): number[] {
@@ -287,7 +267,7 @@ export function nextSceneId(current: VisualizerSceneId): VisualizerSceneId {
 }
 
 export function sceneShortName(sceneId: VisualizerSceneId): string {
-  return SCENE_SHORT[sceneId] ?? sceneId;
+  return sceneShortNameFromCatalog(sceneId);
 }
 
 /** durationMs <= 0 means the overlay covers the whole timeline (legacy). */

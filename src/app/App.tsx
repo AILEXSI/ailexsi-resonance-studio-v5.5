@@ -1596,6 +1596,7 @@ export function App() {
         onToggleSolo={(id) => runCommand({ type: "toggleSolo", trackId: id })}
         onToggleVisualizerMute={() => setSession(applyToggleVisualizerMute(session))}
         onCycleVisualizerScene={() => setSession(applyCycleVisualizerScene(session))}
+        onSetVisualizerScene={(sceneId) => setSession(applySetVisualizer(session, { sceneId }))}
         onSelectVis={() => setSession(applySelectVis(session))}
         onSelectVisEvent={(eventId) =>
           setSession((s) => applyCommand(s, { type: "selectVisEvent", eventId }))
