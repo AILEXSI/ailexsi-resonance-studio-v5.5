@@ -202,6 +202,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | | |
 | --- | --- |
 | Base | LEXI Polish V2 tip `8d46dbfbd9397b9184180d11f32d83e17b1e3ac6` on `cursor/vis-scene-lexi-polish-v2-f909` (PR #28), on HUMAN-PROVEN main `59f6c18`. |
+| Tip | Implementation `fa90d65b32a5c2abacb0279c9c3a748f1fa21384` on `cursor/vis-scene-lexi-v3-cinematic-depth-9f48` (draft PR **#29**). Coordinator MODE-B EXE from the branch tip after this stamp. |
 | What | Flagship `lexi` / **LEXI** is a new image language: perspective terrain, vanishing point, FG/MG/BG, hero peak, kick pressure waves, bass lift/spread, mid form, high shimmer only, highlight bloom. V2 lives on as `lexi-minimal` / **LEXI Minimal Horizon**. |
 | Audio | Same `applyVisResponse` packet. V3 helpers (`lexiFormShift`, `lexiPressureWave`, `lexiHighlightBloom`, `lexiPeakBias`) are additive. Lattice/Wave/V2 coefficients unchanged. Preview === Export. |
 | Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry. |

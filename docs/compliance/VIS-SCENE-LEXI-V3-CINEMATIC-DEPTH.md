@@ -4,6 +4,8 @@
 
 Base tip: LEXI Polish V2 `8d46dbfbd9397b9184180d11f32d83e17b1e3ac6` on `cursor/vis-scene-lexi-polish-v2-f909` (PR #28), already on LEXI V1 + HUMAN-PROVEN main `59f6c18`. VIS-only. ENC / STRESS / AUDIO / VIS-SYNC / VIS-RESPONSE analysers and Lattice/Wave geometry are untouched.
 
+Implementation SHA: `fa90d65b32a5c2abacb0279c9c3a748f1fa21384`. Coordinator MODE-B EXE from the branch tip of `cursor/vis-scene-lexi-v3-cinematic-depth-9f48` (draft PR **#29**).
+
 ## Product decision
 
 V2 is technically good and aesthetically usable — **not flagship**. It is kept, not thrown away.
