@@ -174,13 +174,25 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 
 | | |
 | --- | --- |
-| What | New Visualz scene `lexi` (display **LEXI**). Dark field + gold energy horizon + receding terrain. Signature look, not a Lattice/Wave/Gold clone. |
-| Audio | Same `applyVisResponse` packet as every other scene. `bass` → lift; `rms` → glow/amp; `onset`/`beatPulse` → soft accent; spectrum → sheen. Preview === Export. |
-| Params | intensity, glowStrength, lineThickness, waveAmplitude, depthStrength, reactivity, smoothing, particleAmount, colorPrimary, colorSecondary, backgroundLevel. Gold default; other themes data-only. |
+| What | Visualz scene `lexi` (display **LEXI**). Dark field + gold/champagne energy horizon + receding terrain. Signature look, not a Lattice/Wave/Gold clone. |
+| Audio | Same `applyVisResponse` packet as every other scene. `bass` → lift/body; `rms` → glow/amp; `mid` → terrain spread; `onset`/`beatPulse` → soft accent; spectrum/treble → sheen/shimmer. Preview === Export. |
+| Params | intensity, glowStrength, depthStrength, smoothing, lineThickness, complexity (density), waveAmplitude, reactivity, particleAmount, palette (gold default), colorPrimary, colorSecondary, backgroundLevel. |
 | Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry. |
 | Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 17. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC. |
 | Select | Inspector VIS scene → **LEXI**, or cycle VIS until lane says LEXI. Crystal → LEXI → Bars. |
 | Human | Checklist in `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. Preview musical, Export similar, calm/premium, long-form not annoying, distinct. |
+
+## VIS-SCENE-LEXI Polish V2
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — not HUMAN-PROVEN. Do not merge from this pass. VIS-only. Do not reopen AFE / ENC / AUDIO / STRESS.
+
+| | |
+| --- | --- |
+| Base | LEXI V1 tip `37dfd7b` on `cursor/vis-scene-lexi-horizon-e5c2` (draft PR #27), already on HUMAN-PROVEN main `59f6c18`. |
+| Why | V1 read as a prototype: thin mesh + one ribbon. Needed depth, elegant impact, musical readability, premium finish. |
+| Diff | Layered haze / radial bloom / ground wash; ghost+core+highlight filaments; complexity-scaled terrain; mid→spread, bass/kick→body, highs→shimmer; LEXI helper retune only. Preview === Export. |
+| Skipped | `shadowBlur` / additive compositing (parity + long-form overbright risk). Inspector option spam. Shared VIS-RESPONSE/VIS-SYNC cores. |
+| Human | Short 1–2 min export; kick/onset; quiet calmer; lower volume → lower VIS; aesthetic over a few minutes. Details: `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. |
 
 ## Verification paths
 

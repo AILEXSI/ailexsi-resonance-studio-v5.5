@@ -40,26 +40,37 @@ export function latticeNodePulse(features: AudioFeatures): number {
 /**
  * LEXI horizon lift — bass pressure + kick punch.
  * Distinct from latticeWarp (no pad-heavy occupancy) and Wave ring pulse.
+ * V2: kick reads harder than V1; still a decaying envelope, not a strobe.
  */
 export function lexiHorizonLift(features: AudioFeatures, intensity: number): number {
-  return (features.bass * 0.36 + features.beatPulse * 0.24 + (features.onset ? 0.07 : 0)) * intensity;
+  return (features.bass * 0.34 + features.beatPulse * 0.38 + (features.onset ? 0.1 : 0)) * intensity;
 }
 
 /** Glow / overall amplitude. Scenes read rms, not presentation `energy`. */
 export function lexiGlow(features: AudioFeatures, intensity: number): number {
-  return (features.rms * 0.74 + features.bass * 0.16) * intensity;
+  return (features.rms * 0.68 + features.bass * 0.18 + features.mid * 0.12) * intensity;
 }
 
 /** Soft line breathe / pressure-wave accent. No hard strobe. */
 export function lexiAccent(features: AudioFeatures): number {
-  return features.beatPulse * 0.26 + (features.onset ? 0.07 : 0);
+  return features.beatPulse * 0.38 + (features.onset ? 0.1 : 0);
+}
+
+/** Bass + kick thicken the energy band and near ridges. */
+export function lexiHorizonBody(features: AudioFeatures, intensity: number): number {
+  return (features.bass * 0.48 + features.beatPulse * 0.32 + (features.onset ? 0.08 : 0)) * intensity;
+}
+
+/** Mid shapes terrain wavelength / lateral spread. */
+export function lexiTerrainSpread(features: AudioFeatures, intensity: number): number {
+  return (features.mid * 0.62 + features.rms * 0.16) * intensity;
 }
 
 /** Fine surface sheen from spectrum + mid/high. `t` is 0..1 along the horizon. */
 export function lexiSheen(features: AudioFeatures, t: number): number {
   const spec = features.spectrum;
   const u = t < 0 ? 0 : t > 1 ? 1 : t;
-  if (!spec.length) return features.mid * 0.32 + features.treble * 0.18;
+  if (!spec.length) return features.mid * 0.32 + features.treble * 0.22;
   const idx = Math.min(spec.length - 1, Math.max(0, Math.floor(u * (spec.length - 1))));
-  return (spec[idx] ?? 0) * 0.52 + features.mid * 0.18 + features.treble * 0.1;
+  return (spec[idx] ?? 0) * 0.46 + features.mid * 0.22 + features.treble * 0.16;
 }

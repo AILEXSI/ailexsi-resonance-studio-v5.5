@@ -10,8 +10,21 @@ import {
   visFeaturesForPreview,
 } from "../../src/core/visualizer";
 import { builtinScenes, getRegisteredScene } from "../../src/core/visualz";
-import { lexiAccent, lexiGlow, lexiHorizonLift, lexiSheen } from "../../src/core/visualz/scene-impact";
-import { LEXI_DEFAULT_THEME, LEXI_THEMES, LEXI_TITLE_SAFE, lexiScene } from "../../src/core/visualz/scenes/lexi";
+import {
+  lexiAccent,
+  lexiGlow,
+  lexiHorizonBody,
+  lexiHorizonLift,
+  lexiSheen,
+  lexiTerrainSpread,
+} from "../../src/core/visualz/scene-impact";
+import {
+  LEXI_DEFAULT_THEME,
+  LEXI_THEMES,
+  LEXI_TITLE_SAFE,
+  lexiScene,
+  resolveLexiTheme,
+} from "../../src/core/visualz/scenes/lexi";
 import type { AudioFeatures } from "../../src/core/visualz";
 import { createPixelCanvas } from "../helpers/pixel-canvas";
 
@@ -55,11 +68,15 @@ describe("VIS-SCENE-LEXI registry", () => {
     expect(nextSceneId("lexi")).toBe("spectrum-bars");
   });
 
-  it("ships one gold default and keeps later themes as data only", () => {
+  it("ships gold / champagne as the default and keeps later palettes as data", () => {
     expect(LEXI_DEFAULT_THEME).toBe("gold");
     expect(lexiScene.defaultParams.colorPrimary).toBe(LEXI_THEMES.gold.colorPrimary);
     expect(lexiScene.defaultParams.colorSecondary).toBe(LEXI_THEMES.gold.colorSecondary);
+    expect(lexiScene.defaultParams.palette).toBe("gold");
     expect(Object.keys(LEXI_THEMES)).toEqual(["gold", "cyan", "red", "green", "violet"]);
+    expect(resolveLexiTheme(lexiScene.defaultParams)).toBe(LEXI_THEMES.gold);
+    expect(resolveLexiTheme({ ...lexiScene.defaultParams, palette: "cyan" })).toBe(LEXI_THEMES.cyan);
+    expect(LEXI_THEMES.gold.champagne).toMatch(/^#/);
     expect(LEXI_TITLE_SAFE.x0).toBeLessThan(LEXI_TITLE_SAFE.x1);
     expect(LEXI_TITLE_SAFE.y0).toBeLessThan(LEXI_TITLE_SAFE.y1);
   });
@@ -78,6 +95,8 @@ describe("VIS-SCENE-LEXI registry", () => {
       "colorPrimary",
       "colorSecondary",
       "backgroundLevel",
+      "palette",
+      "complexity",
     ]) {
       expect(p[key], key).toBeDefined();
     }
@@ -108,8 +127,30 @@ describe("VIS-SCENE-LEXI paint + identity", () => {
   it("stays calmer on quiet signal than on a kick packet", () => {
     expect(lexiGlow(QUIET, 0.82)).toBeLessThan(lexiGlow(LOUD, 0.82) * 0.2);
     expect(lexiHorizonLift(QUIET, 0.82)).toBeLessThan(lexiHorizonLift(LOUD, 0.82) * 0.25);
+    expect(lexiHorizonBody(QUIET, 0.82)).toBeLessThan(lexiHorizonBody(LOUD, 0.82) * 0.25);
+    expect(lexiTerrainSpread(QUIET, 0.82)).toBeLessThan(lexiTerrainSpread(LOUD, 0.82));
     expect(lexiAccent(QUIET)).toBeLessThan(lexiAccent(LOUD));
     expect(lexiSheen(LOUD, 0.4)).toBeGreaterThan(lexiSheen(QUIET, 0.4));
+  });
+
+  it("paints a quieter frame than a kick frame", () => {
+    lexiScene.onEnter?.({ width: 96, height: 54, ctx: paint("lexi", QUIET).ctx }, lexiScene.defaultParams);
+    const quiet = paint("lexi", QUIET);
+    lexiScene.onEnter?.({ width: 96, height: 54, ctx: paint("lexi", QUIET).ctx }, lexiScene.defaultParams);
+    const loud = paint("lexi", LOUD);
+    expect(quiet.fingerprint()).not.toBe(loud.fingerprint());
+    expect(loud.nonemptyCount()).toBeGreaterThan(quiet.nonemptyCount() * 0.55);
+  });
+
+  it("uses complexity as terrain density, not a dead knob", () => {
+    const ctx = paint("lexi", LOUD).ctx;
+    lexiScene.onEnter?.({ width: 96, height: 54, ctx }, lexiScene.defaultParams);
+    const sparse = createPixelCanvas(96, 54);
+    lexiScene.render({ width: 96, height: 54, ctx: sparse.ctx }, LOUD, { ...lexiScene.defaultParams, complexity: 0.1 }, 1 / 30);
+    const dense = createPixelCanvas(96, 54);
+    lexiScene.onEnter?.({ width: 96, height: 54, ctx: dense.ctx }, lexiScene.defaultParams);
+    lexiScene.render({ width: 96, height: 54, ctx: dense.ctx }, LOUD, { ...lexiScene.defaultParams, complexity: 0.95 }, 1 / 30);
+    expect(sparse.fingerprint()).not.toBe(dense.fingerprint());
   });
 });
 
@@ -126,6 +167,8 @@ describe("VIS-SCENE-LEXI drivers (Preview === Export)", () => {
     const exported = visFeaturesForExport(raw.timeMs, 10_000);
     expect(lexiHorizonLift(presented, 1)).toBeCloseTo(lexiHorizonLift(preview, 1), 5);
     expect(lexiGlow(presented, 1)).toBeCloseTo(lexiGlow(preview, 1), 5);
+    expect(lexiHorizonBody(presented, 1)).toBeCloseTo(lexiHorizonBody(preview, 1), 5);
+    expect(lexiTerrainSpread(presented, 1)).toBeCloseTo(lexiTerrainSpread(preview, 1), 5);
     expect(exported.tempoBpm).toBe(120);
     expect(lexiAccent(presented)).toBeGreaterThan(0);
   });
