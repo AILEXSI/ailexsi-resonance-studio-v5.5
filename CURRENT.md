@@ -190,8 +190,9 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | --- | --- |
 | Base | LEXI V1 tip `37dfd7b` on `cursor/vis-scene-lexi-horizon-e5c2` (draft PR #27), already on HUMAN-PROVEN main `59f6c18`. |
 | Why | V1 read as a prototype: thin mesh + one ribbon. Needed depth, elegant impact, musical readability, premium finish. |
-| Diff | Layered haze / radial bloom / ground wash; ghost+core+highlight filaments; complexity-scaled terrain; mid→spread, bass/kick→body, highs→shimmer; LEXI helper retune only. Preview === Export. |
+| Diff | Layered haze / radial bloom; ghost+core+highlight filaments; height-scaled receding sea; complexity density; mid→spread, bass/kick→body, highs→shimmer; LEXI helper retune only. Preview === Export. |
 | Skipped | `shadowBlur` / additive compositing (parity + long-form overbright risk). Inspector option spam. Shared VIS-RESPONSE/VIS-SYNC cores. |
+| Gates | `tsc --noEmit` clean. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC **97/97**. |
 | Human | Short 1–2 min export; kick/onset; quiet calmer; lower volume → lower VIS; aesthetic over a few minutes. Details: `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. |
 
 ## Verification paths

@@ -20,6 +20,7 @@ V1 was a readable prototype (mesh + one ribbon). V2 is the same scene with more 
 | Depth | One mesh, one haze slab | Parallax haze planes + ground wash + radial bloom |
 | Terrain | 10 thin ridges | Complexity-scaled ridges (9–18); bass thickens near body |
 | Horizon | One 2D ribbon + faint 3D line | Ghost / mid / core / highlight filaments + 3D crest |
+| Sea | 10 thin 3D ridges (often unread at preview) | Height-scaled receding contours + faint far mesh |
 | Audio | Lift / glow / accent / sheen | + body (bass/kick thickness) + spread (mids) + shimmer (highs) |
 | Motion | Single phase | Phase + slow drift; far ridges lag; camera micro-parallax |
 | Palette | Gold colors; other themes unused | `palette` knob (gold default; cyan/red/green/violet data) |

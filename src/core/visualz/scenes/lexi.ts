@@ -248,12 +248,11 @@ export const lexiScene: Scene = {
     const rows = Math.max(9, Math.min(MAX_ROWS, 9 + Math.round(complexity * 9)));
 
     const sky = ctx.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, hexToRgba(accentHex, 0.2 + backgroundLevel * 0.12));
-    sky.addColorStop(0.28, hexToRgba(secondary, 0.96));
-    sky.addColorStop(0.46, secondary);
-    sky.addColorStop(0.52, hexToRgba(primary, 0.05 + backgroundLevel * 0.05 + glow * 0.03));
-    sky.addColorStop(0.72, hexToRgba(accentHex, 0.05 + backgroundLevel * 0.04));
-    sky.addColorStop(1, hexToRgba(primary, 0.08 + backgroundLevel * 0.09 + body * 0.04));
+    sky.addColorStop(0, hexToRgba(accentHex, 0.18 + backgroundLevel * 0.1));
+    sky.addColorStop(0.34, secondary);
+    sky.addColorStop(0.5, hexToRgba(primary, 0.035 + backgroundLevel * 0.03 + glow * 0.02));
+    sky.addColorStop(0.62, secondary);
+    sky.addColorStop(1, hexToRgba(accentHex, 0.04 + backgroundLevel * 0.03));
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, width, height);
 
@@ -280,10 +279,11 @@ export const lexiScene: Scene = {
       zs[row] = zNear + ((zFar - zNear) * row) / (rows - 1);
     }
 
-    for (let row = rows - 1; row >= 0; row--) {
+    const farStart = Math.max(0, Math.floor(rows * 0.42));
+    for (let row = rows - 1; row >= farStart; row--) {
       const z = zs[row]!;
       const fog = 1 - row / (rows - 1);
-      const rowPhase = phase * (0.42 + fog * 0.58) + drift * (0.35 + fog * 0.4);
+      const rowPhase = phase * (0.36 + fog * 0.4) + drift * (0.3 + fog * 0.3);
       let started = false;
       let hadPath = false;
       ctx.beginPath();
@@ -291,7 +291,7 @@ export const lexiScene: Scene = {
         const x = xs[col]!;
         const t = col / (cols - 1);
         const sheen = lexiSheen(presented, t);
-        const y = ridgeY(x, z, fog, wave, lift, spread, sheen, rowPhase);
+        const y = ridgeY(x, z, fog, wave * 0.55, lift * 0.55, spread, sheen * 0.7, rowPhase);
         const p = project3(x, y, z, cam, width, height);
         if (!p.ok) {
           started = false;
@@ -304,46 +304,10 @@ export const lexiScene: Scene = {
         } else ctx.lineTo(p.x, p.y);
       }
       if (!hadPath) continue;
-      const warmA = (0.16 + fog * 0.36 + glow * 0.16 + body * 0.08) * intensity;
-      const coolA = (0.08 + fog * 0.16 + glow * 0.06) * intensity;
-      ctx.strokeStyle = hexToRgba(row % 2 === 0 ? primary : accentHex, row % 2 === 0 ? warmA : coolA);
-      ctx.lineWidth = 0.85 + fog * (1.15 + body * 0.7) * (0.7 + lineThickness * 0.5);
+      const warmA = (0.05 + fog * 0.1 + glow * 0.06) * intensity;
+      ctx.strokeStyle = hexToRgba(row % 2 === 0 ? primary : accentHex, warmA);
+      ctx.lineWidth = 0.7 + fog * 0.5;
       ctx.stroke();
-      ctx.lineTo(width + 8, height + 8);
-      ctx.lineTo(-8, height + 8);
-      ctx.closePath();
-      ctx.fillStyle = hexToRgba(
-        row % 2 === 0 ? primary : accentHex,
-        (0.028 + fog * 0.055 + glow * 0.03 + body * 0.035) * intensity,
-      );
-      ctx.fill();
-    }
-
-    const traces = 3;
-    ctx.lineWidth = 1;
-    for (let m = 0; m < traces; m++) {
-      const x = -xSpan * 0.42 + ((xSpan * 0.84) * m) / (traces - 1);
-      ctx.beginPath();
-      let started = false;
-      for (let row = 0; row < rows; row++) {
-        const z = zs[row]!;
-        const fog = 1 - row / (rows - 1);
-        const rowPhase = phase * (0.42 + fog * 0.58);
-        const y = ridgeY(x, z, fog, wave * 0.72, lift, spread, 0.16, rowPhase);
-        const p = project3(x, y, z, cam, width, height);
-        if (!p.ok) {
-          started = false;
-          continue;
-        }
-        if (!started) {
-          ctx.moveTo(p.x, p.y);
-          started = true;
-        } else ctx.lineTo(p.x, p.y);
-      }
-      if (started) {
-        ctx.strokeStyle = hexToRgba(accentHex, (0.06 + glow * 0.05) * intensity);
-        ctx.stroke();
-      }
     }
 
     const horizonZ = 4.05 + depthStrength * 0.85;
@@ -369,28 +333,28 @@ export const lexiScene: Scene = {
     }
     const horizonScreenY = hCount ? hSumY / hCount : height * 0.47;
     const bloom = glowStrength * (0.52 + glow * 0.5 + accent * 0.42 + body * 0.12);
-    const hazeH = height * (0.3 + depthStrength * 0.06);
+    const hazeH = height * (0.16 + depthStrength * 0.04);
 
     for (let plane = 0; plane < MAX_PLANES; plane++) {
       const u = plane / (MAX_PLANES - 1);
-      const y0 = horizonScreenY - hazeH * (0.72 - u * 0.28) + Math.sin(drift * 2.1 + plane) * (3 + depthStrength * 4);
-      const band = ctx.createLinearGradient(0, y0, 0, y0 + hazeH * 0.7);
-      const a = (0.035 + (1 - u) * 0.04 + glow * 0.03) * bloom * intensity;
+      const y0 = horizonScreenY - hazeH * (1.15 - u * 0.35) + Math.sin(drift * 2.1 + plane) * (2 + depthStrength * 3);
+      const band = ctx.createLinearGradient(0, y0, 0, y0 + hazeH * 0.85);
+      const a = (0.03 + (1 - u) * 0.035 + glow * 0.025) * bloom * intensity;
       band.addColorStop(0, hexToRgba(plane % 2 === 0 ? primary : accentHex, 0));
       band.addColorStop(0.5, hexToRgba(plane % 2 === 0 ? champagne : accentHex, a));
       band.addColorStop(1, hexToRgba(secondary, 0));
       ctx.fillStyle = band;
-      ctx.fillRect(0, y0, width, hazeH * 0.7);
+      ctx.fillRect(0, y0, width, hazeH * 0.85);
     }
 
-    const haze = ctx.createLinearGradient(0, horizonScreenY - hazeH, 0, horizonScreenY + hazeH * 1.15);
+    const haze = ctx.createLinearGradient(0, horizonScreenY - hazeH, 0, horizonScreenY + hazeH * 0.7);
     haze.addColorStop(0, hexToRgba(primary, 0));
-    haze.addColorStop(0.4, hexToRgba(primary, 0.1 * bloom));
-    haze.addColorStop(0.5, hexToRgba(champagne, (0.2 + accent * 0.14 + body * 0.06) * bloom));
-    haze.addColorStop(0.6, hexToRgba(primary, 0.09 * bloom));
-    haze.addColorStop(1, hexToRgba(accentHex, 0.025));
+    haze.addColorStop(0.42, hexToRgba(primary, 0.09 * bloom));
+    haze.addColorStop(0.5, hexToRgba(champagne, (0.18 + accent * 0.12 + body * 0.05) * bloom));
+    haze.addColorStop(0.62, hexToRgba(primary, 0.07 * bloom));
+    haze.addColorStop(1, hexToRgba(accentHex, 0));
     ctx.fillStyle = haze;
-    ctx.fillRect(0, horizonScreenY - hazeH, width, hazeH * 2.15);
+    ctx.fillRect(0, horizonScreenY - hazeH, width, hazeH * 1.7);
 
     const radial = ctx.createRadialGradient(
       width * 0.5,
@@ -398,23 +362,39 @@ export const lexiScene: Scene = {
       width * 0.02,
       width * 0.5,
       horizonScreenY,
-      width * (0.42 + glow * 0.1),
+      width * (0.38 + glow * 0.08),
     );
-    radial.addColorStop(0, hexToRgba(highlight, (0.16 + accent * 0.14 + glow * 0.08) * bloom));
-    radial.addColorStop(0.35, hexToRgba(champagne, (0.08 + accent * 0.06) * bloom));
+    radial.addColorStop(0, hexToRgba(highlight, (0.14 + accent * 0.12 + glow * 0.07) * bloom));
+    radial.addColorStop(0.38, hexToRgba(champagne, (0.07 + accent * 0.05) * bloom));
     radial.addColorStop(1, hexToRgba(primary, 0));
     ctx.fillStyle = radial;
-    ctx.fillRect(0, horizonScreenY - height * 0.22, width, height * 0.44);
-
-    const ground = ctx.createLinearGradient(0, horizonScreenY, 0, height);
-    ground.addColorStop(0, hexToRgba(primary, (0.05 + body * 0.05 + glow * 0.03) * intensity));
-    ground.addColorStop(0.45, hexToRgba(accentHex, 0.025 * intensity));
-    ground.addColorStop(1, hexToRgba(secondary, 0));
-    ctx.fillStyle = ground;
-    ctx.fillRect(0, horizonScreenY, width, height - horizonScreenY);
+    ctx.fillRect(0, horizonScreenY - height * 0.16, width, height * 0.3);
 
     const step = Math.max(4, Math.round(width / 96));
-    const ribbonAmp = 2.4 + wave * 9 + shimmer * 4;
+    const flowPx = height * (0.01 + wave * 0.055 + shimmer * 0.012);
+    const ribbonAmp = flowPx * (0.7 + body * 0.25);
+    const seaRows = 5 + Math.round(complexity * 3);
+    for (let s = seaRows - 1; s >= 0; s--) {
+      const u = s / Math.max(1, seaRows - 1);
+      const yBase = horizonScreenY + lerp(height * 0.028, height * 0.4, 1 - u);
+      const amp = flowPx * lerp(0.22, 1.05, 1 - u) * (0.6 + body * 0.55 + spread * 0.4);
+      const seaPhase = phase * (0.4 + (1 - u) * 0.5) + drift * (0.3 + u * 0.4);
+      ctx.beginPath();
+      for (let x = 0; x <= width; x += step) {
+        const t = x / width;
+        const sheen = lexiSheen(presented, t);
+        const y =
+          yBase +
+          Math.sin(t * Math.PI * (1.6 + spread * 1.4) + seaPhase) * amp * (0.7 + sheen * 0.35) +
+          Math.sin(t * Math.PI * 3.1 - seaPhase * 0.7) * amp * 0.2;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      const seaA = (0.12 + (1 - u) * 0.2 + glow * 0.1 + body * 0.08) * intensity;
+      ctx.strokeStyle = hexToRgba(s % 2 === 0 ? primary : accentHex, seaA);
+      ctx.lineWidth = 0.7 + (1 - u) * (1.3 + body * 0.8) * (0.55 + lineThickness * 0.5);
+      ctx.stroke();
+    }
     const drawRibbon = (amp: number, yOff: number, localPhase: number, color: string, widthPx: number) => {
       ctx.beginPath();
       for (let x = 0; x <= width; x += step) {
@@ -425,7 +405,7 @@ export const lexiScene: Scene = {
           yOff +
           Math.sin(t * Math.PI * 2 + localPhase) * amp +
           Math.sin(t * Math.PI * 4.2 + localPhase * 1.15) * amp * 0.18 +
-          (sheen - 0.2) * (5 + shimmer * 4) * reactivity;
+          (sheen - 0.2) * flowPx * 0.22 * reactivity;
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
@@ -437,17 +417,17 @@ export const lexiScene: Scene = {
     const core = 2.1 + lineThickness * 3.1 + body * 2.4 + accent * 2.6 + glow * 0.9;
     drawRibbon(
       ribbonAmp * 0.72,
-      -height * 0.012,
+      -height * 0.018,
       phase * 0.28 + drift,
-      hexToRgba(accentHex, 0.1 + glow * 0.08),
-      Math.max(1, core * 0.7),
+      hexToRgba(accentHex, 0.16 + glow * 0.1),
+      Math.max(1, core * 0.62),
     );
     drawRibbon(
       ribbonAmp * 0.88,
-      height * 0.01,
+      height * 0.016,
       phase * 0.33 + 0.7,
-      hexToRgba(primary, 0.12 + bloom * 0.1),
-      Math.max(1, core * 0.85),
+      hexToRgba(primary, 0.18 + bloom * 0.12),
+      Math.max(1, core * 0.78),
     );
     drawRibbon(ribbonAmp, 0, phase * 0.35, hexToRgba(primary, 0.2 + bloom * 0.26), core * 3.2);
     drawRibbon(ribbonAmp, 0, phase * 0.35, hexToRgba(champagne, 0.4 + bloom * 0.36 + accent * 0.18), core);
