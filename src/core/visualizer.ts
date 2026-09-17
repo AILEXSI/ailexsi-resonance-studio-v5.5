@@ -396,6 +396,45 @@ export function visualizerSceneAt(
   return sceneAt(vis, timeMs);
 }
 
+/**
+ * Set the VIS scene at t using the same cue rematerialize path as cycle,
+ * but with an explicit scene id (menu pick). Always rematerializes events
+ * so the lane / renderer cannot keep showing a stale covering event.
+ */
+export function setVisualizerSceneAt(
+  project: Project,
+  timeMs: number,
+  sceneId: VisualizerSceneId,
+): { project: Project; event?: VisualizerEvent } {
+  const t = Math.max(0, roundVisMs(timeMs));
+  const stamp = new Date().toISOString();
+  let nextCues = cuesOf(project);
+  if (t > 0 && !nextCues.some((c) => c.startMs === 0)) {
+    nextCues = [{ startMs: 0, sceneId: project.visualizer.sceneId }, ...nextCues];
+  }
+  nextCues = upsertCueList(nextCues, t, sceneId);
+  const events = rematerializeEventsFromCues(
+    { ...project, visualizer: { ...project.visualizer, cues: nextCues } },
+    nextCues,
+  );
+  const nextProject: Project = {
+    ...project,
+    visualizer: {
+      ...project.visualizer,
+      sceneId,
+      cues: nextCues,
+      events,
+    },
+    updatedAt: stamp,
+  };
+  return {
+    project: nextProject,
+    event:
+      events.find((e) => e.startMs === t) ??
+      events.find((e) => t >= e.startMs && t < e.startMs + e.durationMs),
+  };
+}
+
 export function insertCueAtPlayhead(
   project: Project,
   timeMs: number,

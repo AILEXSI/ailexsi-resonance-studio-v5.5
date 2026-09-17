@@ -5,10 +5,23 @@ import { Timeline } from "../../src/ui/timeline/Timeline";
 import { asset, clip, projectWith } from "../helpers";
 import { LEXI_SCENE_IDS } from "../../src/core/visualz/scene-catalog";
 import type { Project, TrackId, VisualizerSceneId } from "../../src/core/models";
+import {
+  applyCycleVisualizerScene,
+  applyPickVisualizerScene,
+  applySelectVis,
+  createSession,
+  type Session,
+} from "../../src/app/session";
+import { createMemoryBlobStore } from "../../src/core/persistence";
 import "../../src/styles.css";
 
 const noop = () => {};
 const noopMs = (_ms: number) => {};
+
+function pointer(type: string, init: MouseEventInit = {}): Event {
+  const Ctor = typeof PointerEvent === "undefined" ? MouseEvent : PointerEvent;
+  return new Ctor(type, { bubbles: true, cancelable: true, ...init });
+}
 
 function baseProject(sceneId: VisualizerSceneId = "resonance-wave"): Project {
   const project = projectWith(
@@ -48,6 +61,28 @@ function timelineProps(overrides: Record<string, unknown> = {}) {
     onLoopCommit: noop,
     ...overrides,
   };
+}
+
+function sessionFrom(project: Project): Session {
+  return { ...createSession(createMemoryBlobStore()), project };
+}
+
+function SessionHarness({ initial = "resonance-wave" as VisualizerSceneId }) {
+  const [session, setSession] = useState(() => sessionFrom(baseProject(initial)));
+  return (
+    <Timeline
+      {...timelineProps({
+        project: session.project,
+        selectedVis: session.selectedVis,
+        selectedVisEventId: session.selectedVisEventId,
+        selectedVisEventIds: session.selectedVisEventIds,
+        onSelectVis: () => setSession((s) => applySelectVis(s)),
+        onSetVisualizerScene: (sceneId: VisualizerSceneId) =>
+          setSession((s) => applyPickVisualizerScene(s, sceneId)),
+        onCycleVisualizerScene: () => setSession((s) => applyCycleVisualizerScene(s)),
+      })}
+    />
+  );
 }
 
 function Harness({ initial = "resonance-wave" as VisualizerSceneId }) {
@@ -146,6 +181,70 @@ describe("VIS lane header scene browser", () => {
     expect((host!.querySelector("[data-testid=visualizer-scene]") as HTMLButtonElement).textContent).toBe(
       "LEXI V3",
     );
+  });
+
+  it("menu pick after cycle updates the project scene (same path as cycle)", () => {
+    mount(<SessionHarness />);
+    act(() => {
+      (host!.querySelector("[data-testid=visualizer-scene]") as HTMLButtonElement).click();
+    });
+    act(() => {
+      (document.querySelector("[data-testid=vis-lane-browser-cycle]") as HTMLButtonElement).click();
+    });
+    const afterCycle = (host!.querySelector("[data-testid=visualizer-scene]") as HTMLButtonElement)
+      .textContent;
+    expect(afterCycle).not.toBe("Wave");
+    expect(document.querySelector("[data-testid=vis-lane-browser-panel]")).toBeTruthy();
+    act(() => {
+      (document.querySelector("[data-testid=vis-lane-browser-scene-lexi]") as HTMLButtonElement).click();
+    });
+    expect((host!.querySelector("[data-testid=visualizer-scene]") as HTMLButtonElement).textContent).toBe(
+      "LEXI",
+    );
+  });
+
+  it("drags the VIS styles panel and clamps it to the viewport", () => {
+    mount(<Harness />);
+    act(() => {
+      (host!.querySelector("[data-testid=vis-lane-name]") as HTMLElement).click();
+    });
+    const panel = document.querySelector("[data-testid=vis-lane-browser]") as HTMLElement;
+    expect(panel).toBeTruthy();
+    panel.getBoundingClientRect = () =>
+      ({
+        x: 108,
+        y: 72,
+        left: 108,
+        top: 72,
+        right: 548,
+        bottom: 552,
+        width: 440,
+        height: 480,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+    const handle = document.querySelector("[data-testid=vis-lane-browser-title]") as HTMLElement;
+    act(() => {
+      handle.dispatchEvent(pointer("pointerdown", { button: 0, clientX: 120, clientY: 80 }));
+    });
+    act(() => {
+      panel.dispatchEvent(pointer("pointermove", { clientX: 200, clientY: 160 }));
+    });
+    act(() => {
+      panel.dispatchEvent(pointer("pointerup", { clientX: 200, clientY: 160 }));
+    });
+    expect(Number.parseFloat(panel.style.left)).toBeGreaterThan(108);
+    expect(Number.parseFloat(panel.style.top)).toBeGreaterThan(72);
+
+    act(() => {
+      handle.dispatchEvent(pointer("pointerdown", { button: 0, clientX: 220, clientY: 180 }));
+    });
+    act(() => {
+      panel.dispatchEvent(pointer("pointermove", { clientX: 4000, clientY: 4000 }));
+    });
+    expect(Number.parseFloat(panel.style.left)).toBeLessThan(window.innerWidth);
+    expect(Number.parseFloat(panel.style.top)).toBeLessThan(window.innerHeight);
   });
 
   it("keeps cycle as fallback when the scene setter is not wired", () => {

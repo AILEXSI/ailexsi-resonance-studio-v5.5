@@ -56,10 +56,12 @@ Non-LEXI scenes stay available under **ALL** and **CLASSIC** (families CORE / FI
 ## Selector navigation
 
 1. **Primary:** click the VIS lane header (gold **VIS** + current short name such as Wave / LEXI). This opens a fixed overall **VIS styles** panel — not hover-only, not clipped inside the lane, not Inspector-only.
-2. Categories: **ALL** / **LEXI** / **CLASSIC** (click, not hover-only).
-3. **LEXI** exposes the five families. Click a family.
-4. Click a scene name — it applies immediately; the header short name updates.
-5. **Secondary:** Inspector hierarchical browser + native `<select>` stay available when VIS is selected.
+2. Drag the **VIS styles** title bar to move the panel. Position is clamped to the viewport and remembered for the session.
+3. When the arranger is short or the panel would clip the bottom, it opens **further up** (toward preview).
+4. Categories: **ALL** / **LEXI** / **CLASSIC** (click, not hover-only).
+5. **LEXI** exposes the five families. Click a family.
+6. Click a scene name — it applies through the same rematerialize path as cycle; the header short name and renderer update immediately. Mute **M** does not open the menu.
+7. **Secondary:** Inspector hierarchical browser + native `<select>` stay available when VIS is selected.
 
 Cycling the old next-scene button remains as a fallback (`Next in cycle` in the lane overlay; tests without the setter still cycle).
 

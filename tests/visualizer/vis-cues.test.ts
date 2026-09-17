@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applyCycleVisualizerScene, createSession, type Session } from "../../src/app/session";
+import {
+  applyCycleVisualizerScene,
+  applyPickVisualizerScene,
+  applySelectVis,
+  applySetVisualizer,
+  createSession,
+  type Session,
+} from "../../src/app/session";
 import { DEFAULT_VISUALIZER_SCENE_ID, VISUALIZER_SCENE_IDS } from "../../src/core/models";
 import { createMemoryBlobStore } from "../../src/core/persistence";
 import { createEmptyProject } from "../../src/core/project";
@@ -66,6 +73,26 @@ describe("VIS cues", () => {
     expect(events.length).toBeGreaterThanOrEqual(2);
     expect(events[0]!.sceneId).toBe(DEFAULT_VISUALIZER_SCENE_ID);
     expect(events.some((e) => e.startMs === 3000 && e.sceneId === "tunnel-spiral")).toBe(true);
+  });
+
+  it("menu pick uses the cycle rematerialize path so the VIS track scene actually changes", () => {
+    const project = createEmptyProject("Pick");
+    project.playheadMs = 2000;
+    const cycled = applyCycleVisualizerScene(sessionOf(project));
+    expect(sceneAt(cycled.project, 2000)).toBe("tunnel-spiral");
+    const deselected = applySelectVis(cycled);
+    expect(deselected.selectedVisEventId).toBeNull();
+    const picked = applyPickVisualizerScene(deselected, "lexi");
+    expect(picked.project.visualizer.sceneId).toBe("lexi");
+    expect(sceneAt(picked.project, 2000)).toBe("lexi");
+    expect(visualizerEventsOf(picked.project).some((e) => e.startMs === 2000 && e.sceneId === "lexi")).toBe(
+      true,
+    );
+    const again = applySetVisualizer(picked, { sceneId: "lexi-v3" });
+    expect(sceneAt(again.project, 2000)).toBe("lexi-v3");
+    expect(
+      visualizerEventsOf(again.project).some((e) => e.startMs === 2000 && e.sceneId === "lexi-v3"),
+    ).toBe(true);
   });
 
   it("nextSceneId walks the catalog cycle including 3D scenes and sceneAt follows them", () => {

@@ -38,6 +38,7 @@ import {
   type MediaKind,
   type Project,
   type TrackId,
+  type VisualizerSceneId,
 } from "../core/models";
 import { relinkClipsOnProject, relinkSelectionOf } from "../core/relink";
 import {
@@ -124,6 +125,7 @@ import {
   deleteVisualizerEvent,
   insertCueAtPlayhead,
   insertVisualizerEvent,
+  setVisualizerSceneAt,
   moveVisualizerEvent,
   pasteVisualizerEvent,
   setVisualizer,
@@ -1961,6 +1963,38 @@ export function applyToggleVisualizerMute(session: Session): Session {
   return { ...session, project: next, status: `${verb} VIS`, error: null };
 }
 
+/** Menu pick — same visible-scene path as cycle (selected event, else cue rematerialize). */
+export function applyPickVisualizerScene(session: Session, sceneId: VisualizerSceneId): Session {
+  const eventId = session.selectedVisEventId;
+  if (eventId) {
+    const selected = visualizerEventsOf(session.project).find((e) => e.id === eventId);
+    if (selected) {
+      const project = updateVisualizerEvent(session.project, eventId, { sceneId });
+      const event = visualizerEventsOf(project).find((e) => e.id === eventId);
+      return {
+        ...session,
+        project,
+        status: `Visualizer ${event?.sceneId ?? sceneId}`,
+        error: null,
+      };
+    }
+  }
+  const at = snapPlayheadSeek(session.project, session.project.playheadMs);
+  const { project, event } = setVisualizerSceneAt(session.project, at, sceneId);
+  return {
+    ...session,
+    project,
+    selectedClipId: null,
+    selectedClipIds: [],
+    selectedMarkerId: null,
+    selectedVis: true,
+    selectedVisEventId: event?.id ?? null,
+    selectedVisEventIds: event ? [event.id] : [],
+    status: `Visualizer ${sceneId}`,
+    error: null,
+  };
+}
+
 export function applyCycleVisualizerScene(session: Session): Session {
   const eventId = session.selectedVisEventId;
   if (eventId) {
@@ -2090,6 +2124,17 @@ export function applySetVisualizer(
   session: Session,
   patch: Partial<Pick<VisualizerState, "sceneId" | "startMs" | "durationMs">>,
 ): Session {
+  if (patch.sceneId) {
+    const picked = applyPickVisualizerScene(session, patch.sceneId);
+    const rest = { startMs: patch.startMs, durationMs: patch.durationMs };
+    if (rest.startMs == null && rest.durationMs == null) return picked;
+    return {
+      ...picked,
+      project: setVisualizer(picked.project, rest),
+      status: `Visualizer ${picked.project.visualizer.sceneId}`,
+      error: null,
+    };
+  }
   if (session.selectedVisEventId) {
     const project = updateVisualizerEvent(session.project, session.selectedVisEventId, patch);
     const event = visualizerEventsOf(project).find((e) => e.id === session.selectedVisEventId);

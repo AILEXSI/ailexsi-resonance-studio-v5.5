@@ -82,7 +82,11 @@ export function VisSceneBrowser({
           {sceneShortName(value)}
         </button>
       ) : variant === "overlay" ? (
-        <h3 className="vis-scene-browser-title" data-testid={`${testIdPrefix}-title`}>
+        <h3
+          className="vis-scene-browser-title vis-scene-browser-drag"
+          data-testid={`${testIdPrefix}-title`}
+          title="Drag to move"
+        >
           VIS styles
         </h3>
       ) : null}

@@ -92,6 +92,7 @@ import {
   applyCycleVisualizerScene,
   applySelectTracks,
   applySelectVis,
+  applyPickVisualizerScene,
   applySetVisualizer,
   applyToggleFollow,
   applyToggleSnap,
@@ -1596,7 +1597,7 @@ export function App() {
         onToggleSolo={(id) => runCommand({ type: "toggleSolo", trackId: id })}
         onToggleVisualizerMute={() => setSession(applyToggleVisualizerMute(session))}
         onCycleVisualizerScene={() => setSession(applyCycleVisualizerScene(session))}
-        onSetVisualizerScene={(sceneId) => setSession(applySetVisualizer(session, { sceneId }))}
+        onSetVisualizerScene={(sceneId) => setSession(applyPickVisualizerScene(session, sceneId))}
         onSelectVis={() => setSession(applySelectVis(session))}
         onSelectVisEvent={(eventId) =>
           setSession((s) => applyCommand(s, { type: "selectVisEvent", eventId }))

@@ -515,6 +515,14 @@ body.media-asset-dragging .project-overlay-drawer {
   text-transform: uppercase;
   color: var(--accent);
 }
+.vis-scene-browser-drag {
+  cursor: grab;
+  user-select: none;
+  padding: 6px 4px 2px;
+}
+.vis-lane-browser:active .vis-scene-browser-drag {
+  cursor: grabbing;
+}
 .vis-scene-browser-panel {
   display: flex;
   flex-direction: column;

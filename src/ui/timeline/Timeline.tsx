@@ -43,6 +43,14 @@ import {
 import { clampScrollMs, maxScrollMs, RULER_PAD_PX } from "../../core/zoom";
 import { formatVisEventLabel, sceneAt, sceneShortName, visualizerEventsOf } from "../../core/visualizer";
 import { VisSceneBrowser } from "../inspector/VisSceneBrowser";
+import {
+  VIS_BROWSER_PANEL_HEIGHT_EST,
+  VIS_BROWSER_PANEL_WIDTH,
+  clampVisBrowserPos,
+  placeVisBrowserPanel,
+  readVisBrowserPos,
+  writeVisBrowserPos,
+} from "../inspector/vis-browser-layout";
 import { CLIP_MENU_SHORTCUTS } from "../shortcuts/labels";
 import { AudioClipWave, VideoClipStrip } from "./ClipPreview";
 import { buildRulerTicks } from "../../core/ruler";
@@ -465,6 +473,7 @@ export function Timeline({
   const [visBrowserPos, setVisBrowserPos] = useState({ left: 108, top: 72 });
   const visHeaderRef = useRef<HTMLDivElement>(null);
   const visBrowserRef = useRef<HTMLDivElement>(null);
+  const visBrowserDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const visHeaderSceneId =
     (selectedVisEventId
       ? visualizerEventsOf(project).find((e) => e.id === selectedVisEventId)?.sceneId
@@ -472,16 +481,54 @@ export function Timeline({
     sceneAt(project, project.playheadMs) ??
     project.visualizer.sceneId;
 
+  const visBrowserViewport = () => ({
+    width: window.innerWidth || 1024,
+    height: window.innerHeight || 768,
+  });
+
+  const visBrowserPanelSize = () => {
+    const el = visBrowserRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return { width: rect.width, height: rect.height };
+      }
+    }
+    return { width: VIS_BROWSER_PANEL_WIDTH, height: VIS_BROWSER_PANEL_HEIGHT_EST };
+  };
+
+  const commitVisBrowserPos = (pos: { left: number; top: number }) => {
+    const next = clampVisBrowserPos(pos, visBrowserPanelSize(), visBrowserViewport());
+    setVisBrowserPos(next);
+    writeVisBrowserPos(next);
+  };
+
   const placeVisBrowser = () => {
     const rect = visHeaderRef.current?.getBoundingClientRect();
+    const viewport = visBrowserViewport();
+    const panel = visBrowserPanelSize();
+    const arrangerHeight = lanesRef.current?.clientHeight ?? timelineRef.current?.clientHeight;
     if (!rect || (rect.width === 0 && rect.height === 0)) {
-      setVisBrowserPos({ left: 108, top: 72 });
+      commitVisBrowserPos(
+        placeVisBrowserPanel({
+          header: { top: 72, right: 100, bottom: 120 },
+          panel,
+          viewport,
+          arrangerHeight,
+          lastPos: readVisBrowserPos(),
+        }),
+      );
       return;
     }
-    const width = 440;
-    const left = Math.min(rect.right + 8, Math.max(8, (window.innerWidth || 1024) - width - 8));
-    const top = Math.max(8, Math.min(rect.top, (window.innerHeight || 768) - 280));
-    setVisBrowserPos({ left, top });
+    commitVisBrowserPos(
+      placeVisBrowserPanel({
+        header: { top: rect.top, right: rect.right, bottom: rect.bottom },
+        panel,
+        viewport,
+        arrangerHeight,
+        lastPos: readVisBrowserPos(),
+      }),
+    );
   };
 
   const toggleVisBrowser = () => {
@@ -517,10 +564,16 @@ export function Timeline({
 
   useEffect(() => {
     if (!visBrowserOpen) return;
+    commitVisBrowserPos(visBrowserPos);
+  }, [visBrowserOpen]);
+
+  useEffect(() => {
+    if (!visBrowserOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setVisBrowserOpen(false);
     };
     const onPointer = (e: PointerEvent) => {
+      if (visBrowserDragRef.current) return;
       const t = e.target as Node | null;
       if (!t) return;
       if (visHeaderRef.current?.contains(t)) return;
@@ -534,6 +587,30 @@ export function Timeline({
       window.removeEventListener("pointerdown", onPointer, true);
     };
   }, [visBrowserOpen]);
+
+  const onVisBrowserDragPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return;
+    if (!(e.target as HTMLElement).closest("[data-testid=vis-lane-browser-title]")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = visBrowserRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    visBrowserDragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    el.setPointerCapture?.(e.pointerId);
+  };
+
+  const onVisBrowserDragPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    if (!visBrowserDragRef.current) return;
+    commitVisBrowserPos({
+      left: e.clientX - visBrowserDragRef.current.dx,
+      top: e.clientY - visBrowserDragRef.current.dy,
+    });
+  };
+
+  const onVisBrowserDragPointerUp = () => {
+    visBrowserDragRef.current = null;
+  };
 
   const audioCount = audioTrackIdsOf(project).length;
   useEffect(() => {
@@ -2207,7 +2284,13 @@ export function Timeline({
               className="vis-lane-browser"
               data-testid="vis-lane-browser"
               style={{ left: visBrowserPos.left, top: visBrowserPos.top }}
-              onPointerDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                onVisBrowserDragPointerDown(e);
+              }}
+              onPointerMove={onVisBrowserDragPointerMove}
+              onPointerUp={onVisBrowserDragPointerUp}
+              onPointerCancel={onVisBrowserDragPointerUp}
             >
               <VisSceneBrowser
                 value={visHeaderSceneId}
