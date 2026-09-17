@@ -4,7 +4,7 @@
 
 Base tip: LEXI 2036 `9553edf355c14198b03e536e26a1fa0d6fd8e47c` on `cursor/vis-scene-lexi-2036-cinematic-ef57` (PR **#30**). VIS-only. ENC / STRESS / AUDIO / VIS-SYNC / VIS-RESPONSE analysers and Lattice/Wave geometry are untouched.
 
-Coordinator MODE-B EXE from the branch tip of `cursor/vis-scene-lexi-ref-level-b8fe` after the stamp commit.
+Implementation SHA: `60decb1b6fd78025e3c0761f776a1c5f7224f502`. Coordinator MODE-B EXE from the branch tip of `cursor/vis-scene-lexi-ref-level-b8fe` after this stamp.
 
 ## Product decision
 
