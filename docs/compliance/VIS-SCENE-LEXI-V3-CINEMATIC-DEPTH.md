@@ -85,7 +85,11 @@ Center-safe title band: `LEXI_TITLE_SAFE` (particles skip it). No on-screen text
 - `src/core/models.ts` — `VISUALIZER_SCENE_IDS`
 - `src/core/visualizer.ts` — short names `LEXI` / `LEXI Min`
 - `src/core/visualz/scene-impact.ts` — V3 helpers additive
-- `tests/visualizer/vis-scene-lexi.test.ts`
+- `tests/visualizer/vis-scene-lexi.test.ts` + registry 18
+
+## Gates
+
+`tsc --noEmit` clean. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC + vis-lane-seek **103/103**.
 
 ## HUMAN checklist (1–2 min)
 

@@ -52,6 +52,11 @@ const zs = new Float32Array(MAX_CONTOURS);
 const px = new Float32Array(MAX_STROKE);
 const py = new Float32Array(MAX_STROKE);
 const pok = new Uint8Array(MAX_STROKE);
+const edgeL = new Float32Array(MAX_CONTOURS);
+const edgeR = new Float32Array(MAX_CONTOURS);
+const edgeYl = new Float32Array(MAX_CONTOURS);
+const edgeYr = new Float32Array(MAX_CONTOURS);
+const edgeOk = new Uint8Array(MAX_CONTOURS);
 
 const DEFAULT_GOLD = LEXI_THEMES.gold;
 
@@ -118,19 +123,19 @@ function terrainY(
   const span = Math.max(0.001, zFar - zNear);
   const u = clamp01((z - zNear) / span);
   const near = 1 - u;
-  const liftY = lift * (0.1 + near * 0.48);
-  const bodyY = body * near * 0.16;
+  const liftY = lift * (0.07 + near * 0.32);
+  const bodyY = body * near * 0.12;
   const formY =
-    Math.sin(x * (0.26 + form * 0.2) + z * 0.15 + localPhase * 0.2) * form * 0.4 +
-    Math.sin(x * 0.13 - z * 0.08 + localPhase * 0.1) * form * 0.18;
+    Math.sin(x * (0.22 + form * 0.18) + z * 0.14 + localPhase * 0.2) * form * 0.42 +
+    Math.sin(x * 0.11 - z * 0.07 + localPhase * 0.1) * form * 0.18;
   const dx = x - peakX;
   const dz = z - peakZ;
-  const peak = form * Math.exp(-(dx * dx * 0.7 + dz * dz * 0.2)) * (0.78 + lift * 0.38);
-  const peak2x = -1.18 + spread * 0.15;
-  const peak2 = form * 0.36 * Math.exp(-((x - peak2x) * (x - peak2x) * 1.05 + (z - 4.35) * (z - 4.35) * 0.28));
-  const valley = -0.07 * (1 - Math.min(1, Math.abs(x) * 0.22)) * u;
-  const ridge = Math.sin(x * 0.82 + z * 0.36 + localPhase * 0.38) * waveAmp * 0.11 * near;
-  const kick = accent * near * 0.07 * Math.cos(z * 2.05);
+  const peak = form * Math.exp(-(dx * dx * 0.55 + dz * dz * 0.16)) * (0.82 + lift * 0.28);
+  const peak2x = -1.35 + spread * 0.2;
+  const peak2 = form * 0.48 * Math.exp(-((x - peak2x) * (x - peak2x) * 0.9 + (z - 4.6) * (z - 4.6) * 0.24));
+  const valley = -0.1 * (1 - Math.min(1, Math.abs(x) * 0.2)) * u;
+  const ridge = Math.sin(x * 0.78 + z * 0.34 + localPhase * 0.38) * waveAmp * 0.14 * near;
+  const kick = accent * near * 0.1 * Math.cos(z * 1.85);
   return liftY + bodyY + formY + peak + peak2 + valley + ridge + kick;
 }
 
@@ -243,31 +248,31 @@ export const lexiScene: Scene = {
     const peakX = lexiPeakBias(tMs, speed);
     const peakZ = 3.05 + Math.sin(tMs * 0.00007 * speed) * 0.32;
 
-    const meridians = Math.max(12, Math.min(MAX_MERIDIANS, 12 + Math.round(complexity * 12)));
-    const contours = Math.max(9, Math.min(MAX_CONTOURS, 9 + Math.round(complexity * 9)));
-    const along = Math.max(16, Math.min(MAX_ALONG, 16 + Math.round(complexity * 10)));
+    const meridians = Math.max(13, Math.min(MAX_MERIDIANS, 13 + Math.round(complexity * 11)));
+    const contours = Math.max(10, Math.min(MAX_CONTOURS, 10 + Math.round(complexity * 8)));
+    const along = Math.max(18, Math.min(MAX_ALONG, 18 + Math.round(complexity * 10)));
 
     ctx.fillStyle = secondary;
     ctx.fillRect(0, 0, width, height);
-    const sky = ctx.createLinearGradient(0, 0, 0, height * 0.46);
-    sky.addColorStop(0, hexToRgba(accentHex, 0.05 + backgroundLevel * 0.06));
+    const sky = ctx.createLinearGradient(0, 0, 0, height * 0.42);
+    sky.addColorStop(0, hexToRgba(accentHex, 0.04 + backgroundLevel * 0.05));
     sky.addColorStop(1, hexToRgba(secondary, 0));
     ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, width, height * 0.46);
+    ctx.fillRect(0, 0, width, height * 0.42);
 
     const cam = cam3({
-      x: Math.sin(tMs * 0.000026 * speed) * 0.22 * (0.5 + depthStrength),
-      y: 1.14 + lift * 0.16 - form * 0.05,
-      z: -0.78 + Math.sin(tMs * 0.000018 * speed) * 0.07,
-      yaw: Math.sin(tMs * 0.00002 * speed) * 0.04 * (0.5 + depthStrength),
-      pitch: -0.37 - depthStrength * 0.028 + lift * 0.018,
-      fov: 1.08,
-      far: 14 + depthStrength * 2.4,
+      x: Math.sin(tMs * 0.000024 * speed) * 0.16 * (0.45 + depthStrength),
+      y: 0.88 + lift * 0.22 + body * 0.06,
+      z: -0.38 + Math.sin(tMs * 0.000016 * speed) * 0.05,
+      yaw: Math.sin(tMs * 0.000018 * speed) * 0.032 * (0.45 + depthStrength),
+      pitch: -0.24 - depthStrength * 0.018 + lift * 0.012,
+      fov: 1.12,
+      far: 16 + depthStrength * 2,
     });
 
-    const zNear = 1.28;
-    const zFar = 8.4 + depthStrength * 2.2;
-    const xSpan = 5.2 + depthStrength * 0.7;
+    const zNear = 1.05;
+    const zFar = 11.2 + depthStrength * 1.4;
+    const xSpan = 5.0 + depthStrength * 0.5;
     const waveAmp = waveAmplitude * (idle + form * 0.35 + lift * 0.22);
 
     const worldX = (col: number, uNear: number) => {
@@ -298,95 +303,105 @@ export const lexiScene: Scene = {
       peakSy = peakP.y;
     }
 
-    const nearL = project3(worldX(0, 1), sampleY(worldX(0, 1), zNear), zNear, cam, width, height);
-    const nearR = project3(worldX(meridians - 1, 1), sampleY(worldX(meridians - 1, 1), zNear), zNear, cam, width, height);
-    const farL = project3(worldX(0, 0), sampleY(worldX(0, 0), zFar), zFar, cam, width, height);
-    const farR = project3(worldX(meridians - 1, 0), sampleY(worldX(meridians - 1, 0), zFar), zFar, cam, width, height);
-    if (nearL.ok && nearR.ok && farL.ok && farR.ok) {
-      const plane = ctx.createLinearGradient(0, Math.min(nearL.y, nearR.y), 0, vpY);
-      const planeA = (0.045 + lift * 0.12 + body * 0.08 + form * 0.05) * intensity;
-      plane.addColorStop(0, hexToRgba(primary, planeA * 1.15));
-      plane.addColorStop(0.55, hexToRgba(primary, planeA * 0.45));
-      plane.addColorStop(1, hexToRgba(secondary, 0));
-      ctx.fillStyle = plane;
+    const fillContour = (row: number, destX: Float32Array, destY: Float32Array, destOk: Uint8Array) => {
+      const z = zs[row]!;
+      const u = (z - zNear) / (zFar - zNear);
+      for (let col = 0; col < meridians; col++) {
+        const x = worldX(col, 1 - u);
+        const p = project3(x, sampleY(x, z), z, cam, width, height);
+        destX[col] = p.x;
+        destY[col] = p.y;
+        destOk[col] = p.ok ? 1 : 0;
+      }
+      return u;
+    };
+
+    for (let row = 0; row < contours; row++) {
+      const z = zs[row]!;
+      const u = (z - zNear) / (zFar - zNear);
+      const xl = worldX(0, 1 - u);
+      const xr = worldX(meridians - 1, 1 - u);
+      const pl = project3(xl, sampleY(xl, z), z, cam, width, height);
+      const pr = project3(xr, sampleY(xr, z), z, cam, width, height);
+      edgeL[row] = pl.x;
+      edgeYl[row] = pl.y;
+      edgeR[row] = pr.x;
+      edgeYr[row] = pr.y;
+      edgeOk[row] = pl.ok && pr.ok ? 1 : 0;
+    }
+    for (let row = contours - 2; row >= 0; row--) {
+      if (!edgeOk[row] || !edgeOk[row + 1]) continue;
+      const u = row / Math.max(1, contours - 1);
+      const nearness = 1 - u;
+      const planeA = (0.028 + nearness * 0.09 + lift * 0.22 + body * 0.12 + form * 0.08) * intensity;
+      ctx.fillStyle = hexToRgba(primary, planeA);
       ctx.beginPath();
-      ctx.moveTo(nearL.x, nearL.y);
-      ctx.lineTo(nearR.x, nearR.y);
-      ctx.lineTo(farR.x, farR.y);
-      ctx.lineTo(farL.x, farL.y);
+      ctx.moveTo(edgeL[row]!, edgeYl[row]!);
+      ctx.lineTo(edgeR[row]!, edgeYr[row]!);
+      ctx.lineTo(edgeR[row + 1]!, edgeYr[row + 1]!);
+      ctx.lineTo(edgeL[row + 1]!, edgeYl[row + 1]!);
       ctx.closePath();
       ctx.fill();
     }
 
-    const vpGlow = ctx.createRadialGradient(vpX, vpY, 1, vpX, vpY, width * (0.055 + bloom * 0.04));
-    vpGlow.addColorStop(0, hexToRgba(highlight, (0.1 + bloom * 0.22 + accent * 0.08) * intensity));
-    vpGlow.addColorStop(0.42, hexToRgba(champagne, (0.045 + bloom * 0.08) * intensity));
+    const vpGlow = ctx.createRadialGradient(vpX, vpY, 1, vpX, vpY, width * (0.05 + bloom * 0.035));
+    vpGlow.addColorStop(0, hexToRgba(highlight, (0.12 + bloom * 0.24 + accent * 0.08) * intensity));
+    vpGlow.addColorStop(0.4, hexToRgba(champagne, (0.05 + bloom * 0.08) * intensity));
     vpGlow.addColorStop(1, hexToRgba(primary, 0));
     ctx.fillStyle = vpGlow;
-    ctx.fillRect(vpX - width * 0.12, vpY - height * 0.1, width * 0.24, height * 0.2);
+    ctx.fillRect(vpX - width * 0.1, vpY - height * 0.08, width * 0.2, height * 0.16);
 
-    const drawMeridians = (plane: 0 | 1 | 2) => {
-      for (let col = 0; col < meridians; col++) {
-        let n = 0;
-        for (let i = 0; i < along; i++) {
-          const u = i / (along - 1);
-          if (planeOf(u) !== plane) {
-            pok[n] = 0;
-            n += 1;
-            continue;
-          }
-          const z = zNear + (zFar - zNear) * u;
-          const x = worldX(col, 1 - u);
-          const p = project3(x, sampleY(x, z), z, cam, width, height);
-          px[n] = p.x;
-          py[n] = p.y;
-          pok[n] = p.ok ? 1 : 0;
-          n += 1;
-        }
-        const nearness = plane === 0 ? 1 : plane === 1 ? 0.55 : 0.22;
-        const sheen = lexiSheen(presented, col / Math.max(1, meridians - 1));
-        const a = (0.05 + nearness * 0.16 + lift * 0.08 + form * 0.04 + sheen * shimmer * 0.08) * intensity;
-        const w = (0.55 + nearness * (1.15 + lineThickness * 0.9 + body * 0.7)) * (plane === 0 ? 1 : 0.75);
-        strokeProjected(ctx, n, hexToRgba(col % 3 === 0 ? champagne : primary, a), w);
+    const projectMeridian = (col: number, u0: number, u1: number) => {
+      let n = 0;
+      for (let i = 0; i < along; i++) {
+        const t = i / (along - 1);
+        const u = lerp(u0, u1, t);
+        const z = zNear + (zFar - zNear) * u;
+        const x = worldX(col, 1 - u);
+        const p = project3(x, sampleY(x, z), z, cam, width, height);
+        px[n] = p.x;
+        py[n] = p.y;
+        pok[n] = p.ok ? 1 : 0;
+        n += 1;
       }
+      return n;
     };
 
-    const drawContours = (plane: 0 | 1 | 2) => {
-      for (let row = contours - 1; row >= 0; row--) {
-        const z = zs[row]!;
-        const u = (z - zNear) / (zFar - zNear);
-        if (planeOf(u) !== plane) continue;
-        let n = 0;
-        for (let col = 0; col < meridians; col++) {
-          const x = worldX(col, 1 - u);
-          const p = project3(x, sampleY(x, z), z, cam, width, height);
-          px[n] = p.x;
-          py[n] = p.y;
-          pok[n] = p.ok ? 1 : 0;
-          n += 1;
-        }
-        const nearness = plane === 0 ? 1 : plane === 1 ? 0.5 : 0.2;
-        const a = (0.045 + nearness * 0.14 + body * 0.07 + glow * 0.03) * intensity;
-        const w = 0.55 + nearness * (1.05 + lineThickness * 0.7 + lift * 0.45);
-        strokeProjected(ctx, n, hexToRgba(row % 2 === 0 ? primary : accentHex, a), w);
-      }
-    };
+    for (let col = 0; col < meridians; col++) {
+      const sheen = lexiSheen(presented, col / Math.max(1, meridians - 1));
+      const n = projectMeridian(col, 0, 1);
+      const a = (0.08 + lift * 0.16 + form * 0.1 + sheen * shimmer * 0.08) * intensity;
+      strokeProjected(ctx, n, hexToRgba(col % 3 === 0 ? champagne : primary, a), 0.85 + lineThickness * 0.35);
+      const nFg = projectMeridian(col, 0, 0.32);
+      strokeProjected(
+        ctx,
+        nFg,
+        hexToRgba(col % 3 === 0 ? champagne : primary, (0.16 + body * 0.16 + lift * 0.14) * intensity),
+        1.35 + lineThickness * 0.9 + body * 0.8,
+      );
+    }
 
-    drawMeridians(2);
-    drawContours(2);
+    for (let row = contours - 1; row >= 0; row--) {
+      const u = fillContour(row, px, py, pok);
+      const plane = planeOf(u);
+      const nearness = plane === 0 ? 1 : plane === 1 ? 0.55 : 0.22;
+      const a = (0.1 + nearness * 0.18 + body * 0.08 + glow * 0.03) * intensity;
+      const w = 0.7 + nearness * (1.25 + lineThickness * 0.8 + lift * 0.5);
+      strokeProjected(ctx, meridians, hexToRgba(row % 2 === 0 ? primary : accentHex, a), w);
+    }
 
     const bandN = Math.max(18, Math.min(MAX_BAND, 22 + Math.round(complexity * 12)));
     for (let b = LEXI_V3_LIGHT_BANDS - 1; b >= 0; b--) {
       const u = b / (LEXI_V3_LIGHT_BANDS - 1);
-      const z0 = lerp(2.15, 7.1, u);
+      const z0 = lerp(1.55, 6.8, u);
       let n = 0;
       for (let i = 0; i < bandN; i++) {
         const s = i / (bandN - 1);
         const x =
-          lerp(-xSpan * 0.82, xSpan * 0.82, s) +
-          Math.sin(s * Math.PI * 2.1 + phase * 0.55 + b * 0.9) * (0.28 + form * 0.45 + spread * 0.2);
-        const z = z0 + Math.sin(s * Math.PI * 3.2 + phase * 0.4 + b) * (0.22 + form * 0.18);
-        const y = sampleY(x, z) + 0.035 + form * 0.025;
+          lerp(-xSpan * 0.78, xSpan * 0.78, s) +
+          Math.sin(s * Math.PI * 2.1 + phase * 0.55 + b * 0.9) * (0.32 + form * 0.55 + spread * 0.22);
+        const z = z0 + Math.sin(s * Math.PI * 3.2 + phase * 0.4 + b) * (0.18 + form * 0.16);
+        const y = sampleY(x, z) + 0.04 + form * 0.03;
         const p = project3(x, y, z, cam, width, height);
         px[n] = p.x;
         py[n] = p.y;
@@ -395,41 +410,36 @@ export const lexiScene: Scene = {
       }
       const nearness = 1 - u;
       const sheen = lexiSheen(presented, 0.35 + u * 0.4);
-      const a = (0.08 + nearness * 0.16 + form * 0.1 + lift * 0.05 + sheen * shimmer * 0.1) * intensity;
-      const w = 0.8 + nearness * (1.6 + lineThickness * 1.1 + body * 0.8);
+      const a = (0.14 + nearness * 0.2 + form * 0.12 + lift * 0.06 + sheen * shimmer * 0.1) * intensity;
+      const w = 1.05 + nearness * (2.1 + lineThickness * 1.2 + body * 1.0);
       strokeProjected(ctx, n, hexToRgba(b % 2 === 0 ? champagne : primary, a), w);
-      if (nearness > 0.45) {
-        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.45 + shimmer * 0.1), Math.max(0.7, w * 0.28));
+      if (nearness > 0.4) {
+        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.42 + shimmer * 0.1), Math.max(0.8, w * 0.28));
       }
     }
-
-    drawMeridians(1);
-    drawContours(1);
-    drawMeridians(0);
-    drawContours(0);
 
     if (pressure > 0.06) {
       const rings = 2;
       for (let r = 0; r < rings; r++) {
-        const progress = clamp01(1 - (pressure - r * 0.2));
-        const radius = 0.38 + progress * (2.35 + r * 0.7) + lift * 0.15;
-        const cx = peakX * 0.22;
-        const cz = 2.05 + r * 0.12;
+        const progress = clamp01(1 - (pressure - r * 0.22));
+        const radius = 0.34 + progress * (1.05 + r * 0.35) + lift * 0.08;
+        const cx = peakX * 0.18;
+        const cz = 2.15 + r * 0.1;
         let n = 0;
         for (let i = 0; i < MAX_RING; i++) {
-          const a = (i / (MAX_RING - 1)) * Math.PI * 2;
-          const x = cx + Math.cos(a) * radius * (1.05 + spread * 0.25);
-          const z = cz + Math.sin(a) * radius * 1.55;
-          const y = sampleY(x, z) + 0.03;
+          const ang = (i / (MAX_RING - 1)) * Math.PI * 2;
+          const x = cx + Math.cos(ang) * radius * (1.25 + spread * 0.3);
+          const z = cz + Math.sin(ang) * radius * 0.62;
+          const y = sampleY(x, z) + 0.025;
           const p = project3(x, y, z, cam, width, height);
           px[n] = p.x;
           py[n] = p.y;
           pok[n] = p.ok ? 1 : 0;
           n += 1;
         }
-        const a = (0.1 + pressure * 0.38 - r * 0.08) * intensity;
-        strokeProjected(ctx, n, hexToRgba(r === 0 ? champagne : primary, a), 1.1 + pressure * 1.4 + lineThickness * 0.4);
-        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.35), 0.7);
+        const a = (0.16 + pressure * 0.42 - r * 0.07) * intensity;
+        strokeProjected(ctx, n, hexToRgba(r === 0 ? champagne : primary, a), 1.35 + pressure * 1.6 + lineThickness * 0.45);
+        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.38), 0.8);
       }
     }
 

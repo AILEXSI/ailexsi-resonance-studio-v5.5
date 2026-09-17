@@ -205,7 +205,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | What | Flagship `lexi` / **LEXI** is a new image language: perspective terrain, vanishing point, FG/MG/BG, hero peak, kick pressure waves, bass lift/spread, mid form, high shimmer only, highlight bloom. V2 lives on as `lexi-minimal` / **LEXI Minimal Horizon**. |
 | Audio | Same `applyVisResponse` packet. V3 helpers (`lexiFormShift`, `lexiPressureWave`, `lexiHighlightBloom`, `lexiPeakBias`) are additive. Lattice/Wave/V2 coefficients unchanged. Preview === Export. |
 | Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry. |
-| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 18. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC. |
+| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 18. `tsc --noEmit` clean. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC + vis-lane-seek **103/103**. |
 | Select | Inspector **LEXI** (flagship) or **LEXI Min**. Cycle: Crystal → LEXI → LEXI Min → Bars. |
 | Human | 1–2 min: depth at a glance, kick pressure wave, bass lift, quiet darker, lower volume → lower VIS, not gold soup. Details: `docs/compliance/VIS-SCENE-LEXI-V3-CINEMATIC-DEPTH.md`. |
 
