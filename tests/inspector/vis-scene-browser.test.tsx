@@ -93,4 +93,35 @@ describe("VIS scene browser", () => {
     });
     expect(seen).toEqual(["lexi-ref", "lexi-v1"]);
   });
+
+  it("overlay variant opens immediately without a second trigger click", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const seen: string[] = [];
+    act(() => {
+      root!.render(
+        <VisSceneBrowser
+          value="resonance-wave"
+          onSelect={(id) => seen.push(id)}
+          variant="overlay"
+          hideTrigger
+          testIdPrefix="vis-overlay"
+        />,
+      );
+    });
+    expect(host.querySelector("[data-testid=vis-overlay-trigger]")).toBeNull();
+    expect(host.querySelector("[data-testid=vis-overlay-panel]")).toBeTruthy();
+    expect(host.querySelector("[data-testid=vis-overlay-title]")?.textContent).toBe("VIS styles");
+    act(() => {
+      (host!.querySelector("[data-testid=vis-overlay-category-LEXI]") as HTMLButtonElement).click();
+    });
+    act(() => {
+      (host!.querySelector("[data-testid=vis-overlay-family-FLOW]") as HTMLButtonElement).click();
+    });
+    act(() => {
+      (host!.querySelector("[data-testid=vis-overlay-scene-lexi]") as HTMLButtonElement).click();
+    });
+    expect(seen).toEqual(["lexi"]);
+  });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   clipEndMs,
   audioTrackIdsOf,
@@ -461,6 +462,37 @@ export function Timeline({
   );
   const [viewWidth, setViewWidth] = useState(1000);
   const [visBrowserOpen, setVisBrowserOpen] = useState(false);
+  const [visBrowserPos, setVisBrowserPos] = useState({ left: 108, top: 72 });
+  const visHeaderRef = useRef<HTMLDivElement>(null);
+  const visBrowserRef = useRef<HTMLDivElement>(null);
+  const visHeaderSceneId =
+    (selectedVisEventId
+      ? visualizerEventsOf(project).find((e) => e.id === selectedVisEventId)?.sceneId
+      : undefined) ??
+    sceneAt(project, project.playheadMs) ??
+    project.visualizer.sceneId;
+
+  const placeVisBrowser = () => {
+    const rect = visHeaderRef.current?.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      setVisBrowserPos({ left: 108, top: 72 });
+      return;
+    }
+    const width = 440;
+    const left = Math.min(rect.right + 8, Math.max(8, (window.innerWidth || 1024) - width - 8));
+    const top = Math.max(8, Math.min(rect.top, (window.innerHeight || 768) - 280));
+    setVisBrowserPos({ left, top });
+  };
+
+  const toggleVisBrowser = () => {
+    if (!onSetVisualizerScene) return;
+    if (visBrowserOpen) {
+      setVisBrowserOpen(false);
+      return;
+    }
+    placeVisBrowser();
+    setVisBrowserOpen(true);
+  };
   const duration = Math.max(10_000, projectDurationMs(project) + 2000);
   const panMaxMs = maxScrollMs(
     projectDurationMs(project),
@@ -482,6 +514,26 @@ export function Timeline({
   useEffect(() => {
     onViewport?.(viewWidth);
   }, [viewWidth, onViewport]);
+
+  useEffect(() => {
+    if (!visBrowserOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setVisBrowserOpen(false);
+    };
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (visHeaderRef.current?.contains(t)) return;
+      if (visBrowserRef.current?.contains(t)) return;
+      setVisBrowserOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer, true);
+    };
+  }, [visBrowserOpen]);
 
   const audioCount = audioTrackIdsOf(project).length;
   useEffect(() => {
@@ -1288,16 +1340,26 @@ export function Timeline({
         style={fixedLaneBoxStyle(heights.vis)}
       >
         <div
-          className="lane-label"
+          ref={visHeaderRef}
+          className={`lane-label${onSetVisualizerScene ? " vis-lane-label-menu" : ""}`}
           data-testid="lane-label-VIS"
           data-header-pack={visHeaderInline ? "inline" : "stack"}
+          aria-haspopup={onSetVisualizerScene ? "dialog" : undefined}
+          aria-expanded={onSetVisualizerScene ? visBrowserOpen : undefined}
           onClick={(e) => {
-            if ((e.target as HTMLElement).closest("button")) return;
+            if ((e.target as HTMLElement).closest("[data-testid=mute-VIS]")) return;
+            if ((e.target as HTMLElement).closest("[data-testid=lane-label-splitter]")) return;
             onSelectVis?.();
+            if (
+              onSetVisualizerScene &&
+              !(e.target as HTMLElement).closest("[data-testid=visualizer-scene]")
+            ) {
+              toggleVisBrowser();
+            }
           }}
         >
           {laneLabelSplitter}
-          <span>VIS</span>
+          <span data-testid="vis-lane-name">VIS</span>
           <div className="vis-lane-btns">
             <button
               type="button"
@@ -1313,58 +1375,23 @@ export function Timeline({
             </button>
             <button
               type="button"
-              className="scene-btn"
-              title={
-                (selectedVisEventId
-                  ? visualizerEventsOf(project).find((e) => e.id === selectedVisEventId)?.sceneId
-                  : undefined) ??
-                sceneAt(project, project.playheadMs) ??
-                project.visualizer.sceneId
-              }
+              className={`scene-btn${visBrowserOpen ? " open" : ""}`}
+              title={visHeaderSceneId}
               data-testid="visualizer-scene"
+              aria-haspopup={onSetVisualizerScene ? "dialog" : undefined}
+              aria-expanded={onSetVisualizerScene ? visBrowserOpen : undefined}
               onClick={(e) => {
                 e.stopPropagation();
                 if (onSetVisualizerScene) {
-                  setVisBrowserOpen((open) => !open);
+                  onSelectVis?.();
+                  toggleVisBrowser();
                   return;
                 }
                 onCycleVisualizerScene();
               }}
             >
-              {sceneShortName(
-                (selectedVisEventId
-                  ? visualizerEventsOf(project).find((e) => e.id === selectedVisEventId)?.sceneId
-                  : undefined) ??
-                  sceneAt(project, project.playheadMs) ??
-                  project.visualizer.sceneId,
-              )}
+              {sceneShortName(visHeaderSceneId)}
             </button>
-            {visBrowserOpen && onSetVisualizerScene ? (
-              <div
-                className="vis-lane-browser"
-                data-testid="vis-lane-browser"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <VisSceneBrowser
-                  value={
-                    (selectedVisEventId
-                      ? visualizerEventsOf(project).find((e) => e.id === selectedVisEventId)?.sceneId
-                      : undefined) ??
-                    sceneAt(project, project.playheadMs) ??
-                    project.visualizer.sceneId
-                  }
-                  onSelect={(sceneId) => {
-                    onSetVisualizerScene(sceneId);
-                    setVisBrowserOpen(false);
-                  }}
-                  variant="popover"
-                  testIdPrefix="vis-lane-browser"
-                  onCycle={() => {
-                    onCycleVisualizerScene();
-                  }}
-                />
-              </div>
-            ) : null}
           </div>
         </div>
         <div
@@ -2173,6 +2200,33 @@ export function Timeline({
           ) : null}
         </div>
       ) : null}
+      {visBrowserOpen && onSetVisualizerScene
+        ? createPortal(
+            <div
+              ref={visBrowserRef}
+              className="vis-lane-browser"
+              data-testid="vis-lane-browser"
+              style={{ left: visBrowserPos.left, top: visBrowserPos.top }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <VisSceneBrowser
+                value={visHeaderSceneId}
+                onSelect={(sceneId) => {
+                  onSetVisualizerScene(sceneId);
+                  setVisBrowserOpen(false);
+                }}
+                variant="overlay"
+                hideTrigger
+                defaultOpen
+                testIdPrefix="vis-lane-browser"
+                onCycle={() => {
+                  onCycleVisualizerScene();
+                }}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
       {visMenu ? (
         <div
           className="clip-menu"

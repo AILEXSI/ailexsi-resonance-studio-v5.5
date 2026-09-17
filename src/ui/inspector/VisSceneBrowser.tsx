@@ -14,8 +14,12 @@ import { sceneShortName } from "../../core/visualizer";
 interface Props {
   value: VisualizerSceneId;
   onSelect: (sceneId: VisualizerSceneId) => void;
-  /** Compact popover (VIS lane) vs inspector stack. */
-  variant?: "inspector" | "popover";
+  /** Inspector stack, compact popover, or overall VIS-header overlay. */
+  variant?: "inspector" | "popover" | "overlay";
+  /** When true, panel is open on mount (overlay / explicit lane open). */
+  defaultOpen?: boolean;
+  /** Header is the trigger — hide the inner name button. */
+  hideTrigger?: boolean;
   testIdPrefix?: string;
   onCycle?: () => void;
 }
@@ -24,11 +28,16 @@ export function VisSceneBrowser({
   value,
   onSelect,
   variant = "inspector",
+  defaultOpen,
+  hideTrigger = false,
   testIdPrefix = "vis-browser",
   onCycle,
 }: Props) {
   const current = getCatalogEntry(value);
-  const [open, setOpen] = useState(variant === "inspector");
+  const startsOpen = defaultOpen ?? (variant === "inspector" || variant === "overlay");
+  const [open, setOpen] = useState(startsOpen);
+  const showTrigger = !hideTrigger && variant !== "overlay";
+  const showPanel = variant === "overlay" || variant === "inspector" || open;
   const [category, setCategory] = useState<VisBrowserCategory>(current?.suite === "LEXI" ? "LEXI" : "ALL");
   const [family, setFamily] = useState<string | undefined>(
     current?.suite === "LEXI" ? current.family : undefined,
@@ -62,17 +71,28 @@ export function VisSceneBrowser({
 
   return (
     <div className={`vis-scene-browser vis-scene-browser-${variant}`} data-testid={testIdPrefix}>
-      <button
-        type="button"
-        className="vis-scene-browser-trigger"
-        data-testid={`${testIdPrefix}-trigger`}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {sceneShortName(value)}
-      </button>
-      {open ? (
-        <div className="vis-scene-browser-panel" data-testid={`${testIdPrefix}-panel`}>
+      {showTrigger ? (
+        <button
+          type="button"
+          className="vis-scene-browser-trigger"
+          data-testid={`${testIdPrefix}-trigger`}
+          aria-expanded={showPanel}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {sceneShortName(value)}
+        </button>
+      ) : variant === "overlay" ? (
+        <h3 className="vis-scene-browser-title" data-testid={`${testIdPrefix}-title`}>
+          VIS styles
+        </h3>
+      ) : null}
+      {showPanel ? (
+        <div
+          className="vis-scene-browser-panel"
+          data-testid={`${testIdPrefix}-panel`}
+          role="dialog"
+          aria-label="VIS styles"
+        >
           <div className="vis-scene-browser-row" data-testid={`${testIdPrefix}-categories`}>
             {VIS_BROWSER_CATEGORIES.map((id) => (
               <button
