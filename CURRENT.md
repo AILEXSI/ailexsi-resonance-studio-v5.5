@@ -189,6 +189,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | | |
 | --- | --- |
 | Base | LEXI V1 tip `37dfd7b` on `cursor/vis-scene-lexi-horizon-e5c2` (draft PR #27), already on HUMAN-PROVEN main `59f6c18`. |
+| Tip | `82a3e5a8cf4da00814a0bb2fa795caf219ac535a` on `cursor/vis-scene-lexi-polish-v2-f909` (draft PR **#28**). Coordinator MODE-B EXE from this SHA. |
 | Why | V1 read as a prototype: thin mesh + one ribbon. Needed depth, elegant impact, musical readability, premium finish. |
 | Diff | Layered haze / radial bloom; ghost+core+highlight filaments; height-scaled receding sea; complexity density; mid→spread, bass/kick→body, highs→shimmer; LEXI helper retune only. Preview === Export. |
 | Skipped | `shadowBlur` / additive compositing (parity + long-form overbright risk). Inspector option spam. Shared VIS-RESPONSE/VIS-SYNC cores. |
