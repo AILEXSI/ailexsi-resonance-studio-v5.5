@@ -85,6 +85,6 @@ Do **not** merge. Freeze this branch tip. Coordinator builds one `AILEXSI Resona
 
 Identity: `productVersion` **5.5.0** · `frameEngine` **AILEXSI** · branch `cursor/vis-lexi-family-consolidation-0a86` · `gitSha` = this tip after stamp.
 
-HUMAN UI follow-up: VIS lane header (gold **VIS** + short name) opens a fixed overall **VIS styles** panel. Click applies immediately; header label updates. Inspector remains secondary. Cycle remains fallback.
+HUMAN UX follow-up: VIS styles title bar is freely draggable (pointer capture, viewport clamp, session persist). Short arranger / bottom-clip opens the panel further up. Menu pick uses `applyPickVisualizerScene` (same rematerialize path as cycle) so LEXI applies without Next in cycle. Mute **M** excluded. Inspector secondary.
 
-Automated gates this pass: LEXI family 8 + browser 3 + vis-lane-browser 3 + vis-scene-lexi 15 + visualizer 30 + lane-chrome 7; inspector / timeline / visualizer **308/308**. `tsc --noEmit` clean. ENC / AAC / STRESS / AFE not re-run (untouched).
+Automated gates this pass: LEXI family 8 + browser 3 + vis-lane-browser 5 + vis-browser-layout 3 + vis-scene-lexi 15 + visualizer 30 + vis-cues 5 + lane-chrome 7; inspector / timeline / visualizer **314/314**. `tsc --noEmit` clean. ENC / AAC / STRESS / AFE not re-run (untouched).

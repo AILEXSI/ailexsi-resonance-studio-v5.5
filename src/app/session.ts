@@ -1969,7 +1969,11 @@ export function applyPickVisualizerScene(session: Session, sceneId: VisualizerSc
   if (eventId) {
     const selected = visualizerEventsOf(session.project).find((e) => e.id === eventId);
     if (selected) {
-      const project = updateVisualizerEvent(session.project, eventId, { sceneId });
+      const updated = updateVisualizerEvent(session.project, eventId, { sceneId });
+      const project = {
+        ...updated,
+        visualizer: { ...updated.visualizer, sceneId },
+      };
       const event = visualizerEventsOf(project).find((e) => e.id === eventId);
       return {
         ...session,
