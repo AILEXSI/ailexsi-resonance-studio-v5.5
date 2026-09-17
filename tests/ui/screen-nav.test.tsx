@@ -65,6 +65,10 @@ describe("ScreenNav click + TAB", () => {
     expect(host.querySelector("[data-testid=lane-A1]")).toBeTruthy();
     expect(host.querySelector("[data-testid=lane-A2]")).toBeTruthy();
     expect(arrangeBtn?.getAttribute("data-active")).toBe("true");
+    expect(nav?.getAttribute("role")).toBe("group");
+    expect(arrangeBtn?.className).toContain("screen-nav-item");
+    expect(arrangeBtn?.className).toContain("on");
+    expect(cutterBtn?.className).not.toContain("on");
   });
 
   it("TAB still cycles after a click; form focus does not", async () => {

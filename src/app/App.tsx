@@ -127,29 +127,40 @@ import { relinkSelectionForAsset, relinkSelectionOf } from "../core/relink";
 import { Cutter } from "../ui/cutter/Cutter";
 import {
   ARRANGE_MIN_PX,
+  H_SPLITTER_PX,
+  INSPECTOR_COLLAPSED_PX,
   INSPECTOR_MIN_PX,
   PREVIEW_H_MIN_PX,
   PREVIEW_MIN_PX,
+  SPLITTER_PX,
   applyHSplitPointer,
   applyMixerWidthPointer,
   applySplitPointer,
+  applyTimelineFocusToggle,
   browserLayoutStorage,
+  clampHSplitRatio,
   loadCollapsedGroupIds,
   loadOpenVolumeLaneIds,
   loadHSplitRatio,
+  loadInspectorCollapsed,
   loadLaneHeights,
   loadLaneLabelPx,
   loadMixerCollapsed,
   loadMixerWidth,
+  loadNormalSplitRatio,
   loadSplitRatio,
+  loadTimelineFocus,
   saveCollapsedGroupIds,
   saveOpenVolumeLaneIds,
   saveHSplitRatio,
+  saveInspectorCollapsed,
   saveLaneHeights,
   saveLaneLabelPx,
   saveMixerCollapsed,
   saveMixerWidth,
+  saveNormalSplitRatio,
   saveSplitRatio,
+  saveTimelineFocus,
   toggleCollapsedGroupId,
   toggleOpenVolumeLaneId,
   TIMELINE_MIN_PX,
@@ -181,6 +192,7 @@ export function App() {
   shortcutsOpenRef.current = shortcutsOpen;
   const layoutStore = browserLayoutStorage();
   const [mixerCollapsed, setMixerCollapsed] = useState(() => loadMixerCollapsed(layoutStore));
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() => loadInspectorCollapsed(layoutStore));
   const [collapsedGroupIds, setCollapsedGroupIds] = useState(() => loadCollapsedGroupIds(layoutStore));
   const [openVolumeLaneIds, setOpenVolumeLaneIds] = useState(() => loadOpenVolumeLaneIds(layoutStore));
   const [mixerWidthPx, setMixerWidthPx] = useState(() => loadMixerWidth(layoutStore));
@@ -188,9 +200,22 @@ export function App() {
   mixerWidthRef.current = mixerWidthPx;
   const mixerResizeDragRef = useRef(false);
   const arrangeRowRef = useRef<HTMLDivElement>(null);
-  const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio(layoutStore));
+  const [timelineFocus, setTimelineFocus] = useState(() => loadTimelineFocus(layoutStore));
+  const [normalSplitRatio, setNormalSplitRatio] = useState(() => loadNormalSplitRatio(layoutStore));
+  const [splitRatio, setSplitRatio] = useState(() => {
+    if (!loadTimelineFocus(layoutStore)) return loadSplitRatio(layoutStore);
+    return applyTimelineFocusToggle({
+      currentlyFocused: false,
+      currentRatio: loadNormalSplitRatio(layoutStore),
+      storedNormalRatio: loadNormalSplitRatio(layoutStore),
+    }).liveRatio;
+  });
   const splitRatioRef = useRef(splitRatio);
   splitRatioRef.current = splitRatio;
+  const normalSplitRatioRef = useRef(normalSplitRatio);
+  normalSplitRatioRef.current = normalSplitRatio;
+  const timelineFocusRef = useRef(timelineFocus);
+  timelineFocusRef.current = timelineFocus;
   const [hSplitRatio, setHSplitRatio] = useState(() => loadHSplitRatio(layoutStore));
   const hSplitRatioRef = useRef(hSplitRatio);
   hSplitRatioRef.current = hSplitRatio;
@@ -1146,6 +1171,31 @@ export function App() {
     });
   };
 
+  const toggleInspectorCollapsed = () => {
+    setInspectorCollapsed((prev) => {
+      const next = !prev;
+      saveInspectorCollapsed(layoutStore, next);
+      return next;
+    });
+  };
+
+  const toggleTimelineFocus = () => {
+    const stage = stageRef.current;
+    const available = stage ? Math.max(1, stage.getBoundingClientRect().height - SPLITTER_PX) : undefined;
+    const next = applyTimelineFocusToggle({
+      currentlyFocused: timelineFocusRef.current,
+      currentRatio: splitRatioRef.current,
+      storedNormalRatio: normalSplitRatioRef.current,
+      availablePx: available,
+    });
+    setTimelineFocus(next.focused);
+    setSplitRatio(next.liveRatio);
+    setNormalSplitRatio(next.normalRatio);
+    saveTimelineFocus(layoutStore, next.focused);
+    saveNormalSplitRatio(layoutStore, next.normalRatio);
+    if (!next.focused) saveSplitRatio(layoutStore, next.liveRatio);
+  };
+
   const toggleGroupCollapsed = (groupId: string) => {
     setCollapsedGroupIds((prev) => {
       const next = toggleCollapsedGroupId(prev, groupId);
@@ -1231,7 +1281,11 @@ export function App() {
       window.removeEventListener("pointerup", up);
       if (!splitDragRef.current) return;
       splitDragRef.current = false;
-      saveSplitRatio(layoutStore, splitRatioRef.current);
+      if (!timelineFocusRef.current) {
+        saveSplitRatio(layoutStore, splitRatioRef.current);
+        saveNormalSplitRatio(layoutStore, splitRatioRef.current);
+        setNormalSplitRatio(splitRatioRef.current);
+      }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1268,6 +1322,19 @@ export function App() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  useEffect(() => {
+    const onResize = () => {
+      if (inspectorCollapsed) return;
+      const workspace = workspaceRef.current;
+      if (!workspace) return;
+      const available = workspace.getBoundingClientRect().width - H_SPLITTER_PX;
+      const next = clampHSplitRatio(hSplitRatioRef.current, available);
+      if (next !== hSplitRatioRef.current) setHSplitRatio(next);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [inspectorCollapsed]);
 
   const applyMixerWidthFromEvent = (clientX: number) => {
     const row = arrangeRowRef.current;
@@ -1427,17 +1494,23 @@ export function App() {
 
       <div className="stage" data-testid="stage" ref={stageRef}>
       <div
-        className="workspace"
+        className={`workspace${inspectorCollapsed ? " inspector-collapsed" : ""}`}
         data-testid="preview-pane"
         data-preview-ratio={splitRatio}
         data-h-split-ratio={hSplitRatio}
+        data-inspector-collapsed={inspectorCollapsed ? "true" : "false"}
+        data-timeline-focus={timelineFocus ? "true" : "false"}
         ref={workspaceRef}
         style={{ flex: `${splitRatio} 1 ${PREVIEW_MIN_PX}px` }}
       >
         <div
           className="workspace-preview"
           data-testid="workspace-preview"
-          style={{ flex: `${hSplitRatio} 1 ${PREVIEW_H_MIN_PX}px` }}
+          style={
+            inspectorCollapsed
+              ? { flex: `1 1 ${PREVIEW_H_MIN_PX}px` }
+              : { flex: `${hSplitRatio} 1 ${PREVIEW_H_MIN_PX}px` }
+          }
         >
           <Preview
             project={session.project}
@@ -1447,47 +1520,84 @@ export function App() {
             onLevels={setMixPeaks}
           />
         </div>
+        {inspectorCollapsed ? null : (
+          <div
+            className="layout-split-v"
+            data-testid="layout-split-h"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Preview und Inspector teilen"
+            title="Preview / Inspector"
+            style={{ cursor: "ew-resize" }}
+            onPointerDown={onHSplitPointerDown}
+          >
+            <span className="layout-split-v-grip" data-testid="layout-split-h-grip" aria-hidden="true" />
+          </div>
+        )}
         <div
-          className="layout-split-v"
-          data-testid="layout-split-h"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Preview und Inspector teilen"
-          title="Preview / Inspector"
-          style={{ cursor: "ew-resize" }}
-          onPointerDown={onHSplitPointerDown}
-        >
-          <span className="layout-split-v-grip" data-testid="layout-split-h-grip" aria-hidden="true" />
-        </div>
-        <div
-          className="workspace-inspector"
+          className={`workspace-inspector${inspectorCollapsed ? " collapsed" : ""}`}
           data-testid="workspace-inspector"
-          style={{ flex: `${1 - hSplitRatio} 1 ${INSPECTOR_MIN_PX}px` }}
+          data-collapsed={inspectorCollapsed ? "true" : "false"}
+          style={
+            inspectorCollapsed
+              ? {
+                  flex: `0 0 ${INSPECTOR_COLLAPSED_PX}px`,
+                  width: INSPECTOR_COLLAPSED_PX,
+                  minWidth: INSPECTOR_COLLAPSED_PX,
+                  maxWidth: INSPECTOR_COLLAPSED_PX,
+                }
+              : { flex: `${1 - hSplitRatio} 1 ${INSPECTOR_MIN_PX}px` }
+          }
         >
-          <Inspector
-            project={session.project}
-            selectedClipId={session.selectedClipId}
-            selectedClipIds={session.selectedClipIds}
-            selectedMarkerId={session.selectedMarkerId}
-            selectedVis={session.selectedVis}
-            selectedVisEventId={session.selectedVisEventId}
-            onChange={(clipId, patch) => setSession(applyUpdateClip(session, clipId, patch))}
-            onSetEnabled={(enabled) => runCommand({ type: "setClipsEnabled", enabled })}
-            onSetLocked={(locked) => runCommand({ type: "setClipsLocked", locked })}
-            onFades={(clipId, fadeInMs, fadeOutMs) =>
-              setSession(applyCommand(session, { type: "setClipFades", clipId, fadeInMs, fadeOutMs }))
-            }
-            onRate={(clipId, rate) =>
-              setSession(applyCommand(session, { type: "setClipRate", clipId, rate }))
-            }
-            onUnlink={(clipId) => setSession(applyCommand(session, { type: "unlinkClips", clipId }))}
-            onRelink={() => void runRelink()}
-            onRenameMarker={(markerId, label) =>
-              setSession(applyCommand(session, { type: "renameMarker", markerId, label }))
-            }
-            onTransition={(cmd) => setSession(applyCommand(session, cmd))}
-            onVisualizer={(patch) => setSession(applySetVisualizer(session, patch))}
-          />
+          <div className="inspector-chrome">
+            <button
+              type="button"
+              className="inspector-collapse"
+              data-testid="inspector-collapse"
+              aria-expanded={!inspectorCollapsed}
+              aria-controls="inspector-body"
+              title={inspectorCollapsed ? "Inspector ausklappen" : "Inspector einklappen"}
+              onClick={toggleInspectorCollapsed}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                {inspectorCollapsed ? (
+                  <path d="M4 2 L9 6 L4 10" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                ) : (
+                  <path d="M8 2 L3 6 L8 10" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                )}
+              </svg>
+              {inspectorCollapsed ? <span className="inspector-reopen-label">INS</span> : null}
+            </button>
+            {inspectorCollapsed ? null : <span className="inspector-chrome-label">Ins</span>}
+          </div>
+          {inspectorCollapsed ? null : (
+            <div id="inspector-body" className="inspector-body">
+              <Inspector
+                project={session.project}
+                selectedClipId={session.selectedClipId}
+                selectedClipIds={session.selectedClipIds}
+                selectedMarkerId={session.selectedMarkerId}
+                selectedVis={session.selectedVis}
+                selectedVisEventId={session.selectedVisEventId}
+                onChange={(clipId, patch) => setSession(applyUpdateClip(session, clipId, patch))}
+                onSetEnabled={(enabled) => runCommand({ type: "setClipsEnabled", enabled })}
+                onSetLocked={(locked) => runCommand({ type: "setClipsLocked", locked })}
+                onFades={(clipId, fadeInMs, fadeOutMs) =>
+                  setSession(applyCommand(session, { type: "setClipFades", clipId, fadeInMs, fadeOutMs }))
+                }
+                onRate={(clipId, rate) =>
+                  setSession(applyCommand(session, { type: "setClipRate", clipId, rate }))
+                }
+                onUnlink={(clipId) => setSession(applyCommand(session, { type: "unlinkClips", clipId }))}
+                onRelink={() => void runRelink()}
+                onRenameMarker={(markerId, label) =>
+                  setSession(applyCommand(session, { type: "renameMarker", markerId, label }))
+                }
+                onTransition={(cmd) => setSession(applyCommand(session, cmd))}
+                onVisualizer={(patch) => setSession(applySetVisualizer(session, patch))}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1502,6 +1612,20 @@ export function App() {
         onPointerDown={onSplitPointerDown}
       >
         <span className="layout-split-grip" data-testid="layout-split-grip" aria-hidden="true" />
+        <button
+          type="button"
+          className={`timeline-focus${timelineFocus ? " active" : ""}`}
+          data-testid="timeline-focus"
+          aria-pressed={timelineFocus}
+          title={timelineFocus ? "Exit Timeline Focus" : "Timeline Focus"}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleTimelineFocus();
+          }}
+        >
+          {timelineFocus ? "Normal" : "Focus"}
+        </button>
       </div>
 
       <div

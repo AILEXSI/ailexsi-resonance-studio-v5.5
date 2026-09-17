@@ -4,11 +4,14 @@ import { exportFrameEngineLabel, getFrameSourceBackend } from "../../src/core/ex
 import {
   GROUP_COLLAPSED_KEY,
   H_SPLIT_RATIO_KEY,
+  INSPECTOR_COLLAPSED_KEY,
   LANE_HEIGHTS_KEY,
   LANE_LABEL_PX_KEY,
   MIXER_COLLAPSED_KEY,
   MIXER_WIDTH_KEY,
+  NORMAL_SPLIT_RATIO_KEY,
   SPLIT_RATIO_KEY,
+  TIMELINE_FOCUS_KEY,
   VOLUME_LANE_OPEN_KEY,
 } from "../../src/core/layout-prefs";
 
@@ -50,8 +53,11 @@ describe("V5.5 product identity", () => {
   it("AppData / localStorage keys use resonance-studio-v5-5*", () => {
     const keys = [
       MIXER_COLLAPSED_KEY,
+      INSPECTOR_COLLAPSED_KEY,
       SPLIT_RATIO_KEY,
       H_SPLIT_RATIO_KEY,
+      TIMELINE_FOCUS_KEY,
+      NORMAL_SPLIT_RATIO_KEY,
       LANE_LABEL_PX_KEY,
       LANE_HEIGHTS_KEY,
       GROUP_COLLAPSED_KEY,

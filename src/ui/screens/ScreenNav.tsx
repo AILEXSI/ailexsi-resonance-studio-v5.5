@@ -14,7 +14,7 @@ export function ScreenNav({
   onSelect: (screen: ProductionScreen) => void;
 }) {
   return (
-    <div className="screen-nav" data-testid="screen-nav" aria-label="Production screen">
+    <div className="screen-nav" data-testid="screen-nav" role="group" aria-label="Production screen">
       {PRODUCTION_SCREENS.map((id) => (
         <button
           key={id}
@@ -26,7 +26,7 @@ export function ScreenNav({
           aria-pressed={id === screen}
           onClick={() => onSelect(id)}
         >
-          [{LABELS[id]}]
+          {LABELS[id]}
         </button>
       ))}
     </div>

@@ -1,8 +1,11 @@
-/** Session chrome (mixer fold/width + preview/arrange split). localStorage is enough. */
+/** Session chrome (mixer/inspector fold + preview/arrange split). localStorage is enough. */
 
 export const MIXER_COLLAPSED_KEY = "resonance-studio-v5-5-mixer-collapsed";
+export const INSPECTOR_COLLAPSED_KEY = "resonance-studio-v5-5-inspector-collapsed";
 export const SPLIT_RATIO_KEY = "resonance-studio-v5-5-preview-split";
 export const H_SPLIT_RATIO_KEY = "resonance-studio-v5-5-preview-h-split";
+export const TIMELINE_FOCUS_KEY = "resonance-studio-v5-5-timeline-focus";
+export const NORMAL_SPLIT_RATIO_KEY = "resonance-studio-v5-5-normal-preview-split";
 export const LANE_LABEL_PX_KEY = "resonance-studio-v5-5-lane-label-px";
 export const LANE_HEIGHTS_KEY = "resonance-studio-v5-5-lane-heights";
 
@@ -55,6 +58,11 @@ export const MIXER_MAX_PX = 8192;
 /** Thin usable timeline (lane labels + a clip sliver). Divider can reach Follow. */
 export const TIMELINE_MIN_PX = 160;
 export const MIXER_SPLITTER_PX = 8;
+/** Closed inspector: reopen strip only. Same workspace language as MIXER_COLLAPSED_PX. */
+export const INSPECTOR_COLLAPSED_PX = 28;
+/** Compact Preview height while Timeline Focus is on. Existing splitter still works. */
+export const TIMELINE_FOCUS_PREVIEW_PX = 160;
+export const TIMELINE_FOCUS_SPLIT_RATIO = 0.22;
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -169,6 +177,31 @@ export function saveMixerCollapsed(storage: StorageLike | null | undefined, coll
   }
 }
 
+/** Default open (missing key). Workspace pref — not project data. */
+export function loadInspectorCollapsed(storage?: StorageLike | null): boolean {
+  try {
+    return storage?.getItem(INSPECTOR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveInspectorCollapsed(storage: StorageLike | null | undefined, collapsed: boolean): void {
+  try {
+    storage?.setItem(INSPECTOR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function loadInspectorOpen(storage?: StorageLike | null): boolean {
+  return !loadInspectorCollapsed(storage);
+}
+
+export function saveInspectorOpen(storage: StorageLike | null | undefined, open: boolean): void {
+  saveInspectorCollapsed(storage, !open);
+}
+
 export function mixerWidthMax(arrangeWidthPx?: number): number {
   if (arrangeWidthPx != null && Number.isFinite(arrangeWidthPx) && arrangeWidthPx > 0) {
     return Math.max(MIXER_MIN_PX, arrangeWidthPx - TIMELINE_MIN_PX);
@@ -275,6 +308,77 @@ export function saveHSplitRatio(storage: StorageLike | null | undefined, ratio: 
   } catch {
     /* quota / private mode */
   }
+}
+
+/** inspectorWidth — existing preview↔inspector split. Reuse; do not invent a second width store. */
+export const loadInspectorWidthRatio = loadHSplitRatio;
+export const saveInspectorWidthRatio = saveHSplitRatio;
+
+export function loadTimelineFocus(storage?: StorageLike | null): boolean {
+  try {
+    return storage?.getItem(TIMELINE_FOCUS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveTimelineFocus(storage: StorageLike | null | undefined, focused: boolean): void {
+  try {
+    storage?.setItem(TIMELINE_FOCUS_KEY, focused ? "1" : "0");
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function loadNormalSplitRatio(storage?: StorageLike | null): number {
+  try {
+    const raw = storage?.getItem(NORMAL_SPLIT_RATIO_KEY);
+    if (raw == null) return loadSplitRatio(storage);
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return loadSplitRatio(storage);
+    return clampSplitRatio(n, PREVIEW_MIN_PX + ARRANGE_MIN_PX + 400);
+  } catch {
+    return loadSplitRatio(storage);
+  }
+}
+
+export function saveNormalSplitRatio(storage: StorageLike | null | undefined, ratio: number): void {
+  try {
+    if (!Number.isFinite(ratio)) return;
+    storage?.setItem(NORMAL_SPLIT_RATIO_KEY, String(ratio));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function timelineFocusSplitRatio(availablePx?: number): number {
+  if (availablePx != null && Number.isFinite(availablePx) && availablePx > 0) {
+    return clampSplitRatio(TIMELINE_FOCUS_PREVIEW_PX / availablePx, availablePx);
+  }
+  return clampSplitRatio(TIMELINE_FOCUS_SPLIT_RATIO, PREVIEW_MIN_PX + ARRANGE_MIN_PX + 400);
+}
+
+/** NORMAL ↔ Timeline Focus. Leaving restores the exact stored normal divider. */
+export function applyTimelineFocusToggle(opts: {
+  currentlyFocused: boolean;
+  currentRatio: number;
+  storedNormalRatio: number;
+  availablePx?: number;
+}): { focused: boolean; liveRatio: number; normalRatio: number } {
+  if (!opts.currentlyFocused) {
+    const normalRatio = Number.isFinite(opts.currentRatio) ? opts.currentRatio : DEFAULT_SPLIT_RATIO;
+    return {
+      focused: true,
+      liveRatio: timelineFocusSplitRatio(opts.availablePx),
+      normalRatio,
+    };
+  }
+  const restored = Number.isFinite(opts.storedNormalRatio) ? opts.storedNormalRatio : DEFAULT_SPLIT_RATIO;
+  return {
+    focused: false,
+    liveRatio: restored,
+    normalRatio: restored,
+  };
 }
 
 export function clampLaneLabelPx(px: number): number {
