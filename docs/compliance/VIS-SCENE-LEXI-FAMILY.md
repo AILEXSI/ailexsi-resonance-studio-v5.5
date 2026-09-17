@@ -83,4 +83,6 @@ Do **not** merge. Freeze this branch tip. Coordinator builds one `AILEXSI Resona
 
 Identity: `productVersion` **5.5.0** · `frameEngine` **AILEXSI** · branch `cursor/vis-lexi-family-consolidation-0a86` · `gitSha` = this tip after stamp.
 
-Automated gates this pass: LEXI family 8 + browser 2 + vis-scene-lexi 15 + visualizer 30; broader VIS/inspector/timeline/export/AUDIO/identity **175/175**; ENC-01 + AAC + STRESS-02/03-stage **26/26**. `tsc --noEmit` clean. `vite build` clean.
+HUMAN UI follow-up: VIS lane header (gold **VIS** + short name) opens a fixed overall **VIS styles** panel. Click applies immediately; header label updates. Inspector remains secondary. Cycle remains fallback.
+
+Automated gates this pass: LEXI family 8 + browser 3 + vis-lane-browser 3 + vis-scene-lexi 15 + visualizer 30 + lane-chrome 7; inspector / timeline / visualizer **308/308**. `tsc --noEmit` clean. ENC / AAC / STRESS / AFE not re-run (untouched).
