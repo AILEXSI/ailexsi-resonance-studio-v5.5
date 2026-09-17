@@ -278,7 +278,6 @@ export const lexiScene: Scene = {
     const sampleY = (x: number, z: number) =>
       terrainY(x, z, zNear, zFar, lift, body, form, spread, waveAmp, accent, peakX, peakZ, phase);
 
-    for (let col = 0; col < meridians; col++) xs[col] = worldX(col, 1);
     for (let row = 0; row < contours; row++) {
       zs[row] = zNear + ((zFar - zNear) * row) / (contours - 1);
     }
@@ -345,7 +344,8 @@ export const lexiScene: Scene = {
           n += 1;
         }
         const nearness = plane === 0 ? 1 : plane === 1 ? 0.55 : 0.22;
-        const a = (0.05 + nearness * 0.16 + lift * 0.08 + form * 0.04) * intensity;
+        const sheen = lexiSheen(presented, col / Math.max(1, meridians - 1));
+        const a = (0.05 + nearness * 0.16 + lift * 0.08 + form * 0.04 + sheen * shimmer * 0.08) * intensity;
         const w = (0.55 + nearness * (1.15 + lineThickness * 0.9 + body * 0.7)) * (plane === 0 ? 1 : 0.75);
         strokeProjected(ctx, n, hexToRgba(col % 3 === 0 ? champagne : primary, a), w);
       }
@@ -394,11 +394,12 @@ export const lexiScene: Scene = {
         n += 1;
       }
       const nearness = 1 - u;
-      const a = (0.08 + nearness * 0.16 + form * 0.1 + lift * 0.05) * intensity;
+      const sheen = lexiSheen(presented, 0.35 + u * 0.4);
+      const a = (0.08 + nearness * 0.16 + form * 0.1 + lift * 0.05 + sheen * shimmer * 0.1) * intensity;
       const w = 0.8 + nearness * (1.6 + lineThickness * 1.1 + body * 0.8);
       strokeProjected(ctx, n, hexToRgba(b % 2 === 0 ? champagne : primary, a), w);
       if (nearness > 0.45) {
-        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.45 + shimmer * 0.08), Math.max(0.7, w * 0.28));
+        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.45 + shimmer * 0.1), Math.max(0.7, w * 0.28));
       }
     }
 
