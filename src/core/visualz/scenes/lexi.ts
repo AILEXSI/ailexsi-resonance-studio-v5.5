@@ -55,7 +55,6 @@ const MAX_ALONG = 32;
 const MAX_BAND = 48;
 const MAX_RIBBON = 56;
 const MAX_TRACE = 36;
-const MAX_RING = 36;
 const MAX_STROKE = 56;
 const MAX_TOWERS = 6;
 const PARTICLE_CAP = 40;
@@ -176,6 +175,36 @@ function strokeProjected(
   return true;
 }
 
+function drawScreenRibbon(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  yBase: number,
+  amp: number,
+  localPhase: number,
+  sheenAt: (t: number) => number,
+  color: string,
+  widthPx: number,
+  yOff: number,
+): void {
+  const step = Math.max(4, Math.round(width / 110));
+  ctx.beginPath();
+  for (let x = 0; x <= width; x += step) {
+    const t = x / width;
+    const sheen = sheenAt(t);
+    const y =
+      yBase +
+      yOff +
+      Math.sin(t * Math.PI * 1.85 + localPhase) * amp +
+      Math.sin(t * Math.PI * 3.6 + localPhase * 1.12) * amp * 0.2 +
+      (sheen - 0.2) * amp * 0.18;
+    if (x === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = widthPx;
+  ctx.stroke();
+}
+
 export const lexiScene: Scene = {
   id: "lexi",
   name: "LEXI",
@@ -273,22 +302,26 @@ export const lexiScene: Scene = {
 
     ctx.fillStyle = secondary;
     ctx.fillRect(0, 0, width, height);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-    const zenith = ctx.createLinearGradient(0, 0, 0, height * 0.46);
-    zenith.addColorStop(0, hexToRgba(cool, 0.035 + backgroundLevel * 0.04 + ambient * 0.03));
-    zenith.addColorStop(0.42, hexToRgba(accentHex, 0.045 + backgroundLevel * 0.04));
-    zenith.addColorStop(1, hexToRgba(secondary, 0));
-    ctx.fillStyle = zenith;
-    ctx.fillRect(0, 0, width, height * 0.46);
+    const sky = ctx.createLinearGradient(0, 0, 0, height);
+    sky.addColorStop(0, hexToRgba(cool, 0.055 + backgroundLevel * 0.05 + ambient * 0.03));
+    sky.addColorStop(0.32, hexToRgba(accentHex, 0.06 + backgroundLevel * 0.04));
+    sky.addColorStop(0.48, secondary);
+    sky.addColorStop(0.58, hexToRgba(primary, 0.02 + backgroundLevel * 0.02 + glow * 0.015));
+    sky.addColorStop(1, hexToRgba(secondary, 1));
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, width, height);
 
     const cam = cam3({
-      x: Math.sin(tMs * 0.00002 * speed) * 0.14 * (0.45 + depthStrength),
-      y: 0.92 + lift * 0.2 + body * 0.05,
-      z: -0.42 + Math.sin(tMs * 0.000014 * speed) * 0.04,
-      yaw: Math.sin(tMs * 0.000016 * speed) * 0.028 * (0.45 + depthStrength),
-      pitch: -0.21 - depthStrength * 0.016 + lift * 0.01,
-      fov: 1.1,
-      far: 17 + depthStrength * 2.2,
+      x: Math.sin(tMs * 0.00002 * speed) * 0.12 * (0.45 + depthStrength),
+      y: 1.18 + lift * 0.18 + body * 0.05,
+      z: -0.18 + Math.sin(tMs * 0.000014 * speed) * 0.035,
+      yaw: Math.sin(tMs * 0.000016 * speed) * 0.024 * (0.45 + depthStrength),
+      pitch: -0.34 - depthStrength * 0.02 + lift * 0.01,
+      fov: 1.06,
+      far: 16 + depthStrength * 2,
     });
 
     const zNear = 1.02;
@@ -324,50 +357,71 @@ export const lexiScene: Scene = {
       peakSy = peakP.y;
     }
 
-    const horizonHaze = ctx.createLinearGradient(0, vpY - height * 0.18, 0, vpY + height * 0.28);
-    const hazeA = (0.05 + ambient * 0.08 + glow * 0.04 + backgroundLevel * 0.04) * intensity;
-    horizonHaze.addColorStop(0, hexToRgba(cool, 0));
-    horizonHaze.addColorStop(0.38, hexToRgba(accentHex, hazeA * 0.45));
-    horizonHaze.addColorStop(0.52, hexToRgba(champagne, hazeA * 0.7));
-    horizonHaze.addColorStop(0.68, hexToRgba(primary, hazeA * 0.35));
-    horizonHaze.addColorStop(1, hexToRgba(secondary, 0));
-    ctx.fillStyle = horizonHaze;
-    ctx.fillRect(0, vpY - height * 0.18, width, height * 0.46);
+    let horizonY = vpY;
+    let hCount = 0;
+    let hSum = 0;
+    for (let col = 0; col < meridians; col++) {
+      const x = worldX(col, 0.35);
+      const p = project3(x, sampleY(x, 4.2), 4.2, cam, width, height);
+      if (!p.ok) continue;
+      hSum += p.y;
+      hCount += 1;
+    }
+    if (hCount) horizonY = hSum / hCount;
 
-    const vpGlow = ctx.createRadialGradient(vpX, vpY, 1, vpX, vpY, width * (0.16 + ambient * 0.08 + bloom * 0.04));
-    vpGlow.addColorStop(0, hexToRgba(highlight, (0.07 + bloom * 0.14 + ambient * 0.05) * intensity));
-    vpGlow.addColorStop(0.35, hexToRgba(champagne, (0.04 + bloom * 0.06 + ambient * 0.03) * intensity));
-    vpGlow.addColorStop(0.7, hexToRgba(cool, (0.018 + ambient * 0.02) * intensity));
+    const hazeH = height * (0.2 + depthStrength * 0.04 + ambient * 0.04);
+    for (let plane = 0; plane < LEXI_V3_DEPTH_PLANES; plane++) {
+      const u = plane / (LEXI_V3_DEPTH_PLANES - 1);
+      const y0 = horizonY - hazeH * (1.2 - u * 0.32) + Math.sin(tMs * 0.00008 * speed + plane) * (2 + depthStrength * 2);
+      const band = ctx.createLinearGradient(0, y0, 0, y0 + hazeH * 0.9);
+      const a = (0.045 + (1 - u) * 0.05 + glow * 0.035 + ambient * 0.04) * intensity;
+      const tint = plane === 1 ? cool : plane === 2 ? rose : primary;
+      band.addColorStop(0, hexToRgba(tint, 0));
+      band.addColorStop(0.5, hexToRgba(plane === 0 ? champagne : tint, a));
+      band.addColorStop(1, hexToRgba(secondary, 0));
+      ctx.fillStyle = band;
+      ctx.fillRect(0, y0, width, hazeH * 0.9);
+    }
+
+    const horizonHaze = ctx.createLinearGradient(0, horizonY - hazeH, 0, horizonY + hazeH * 0.85);
+    const hazeA = (0.08 + ambient * 0.1 + glow * 0.05 + backgroundLevel * 0.04) * intensity;
+    horizonHaze.addColorStop(0, hexToRgba(cool, 0));
+    horizonHaze.addColorStop(0.4, hexToRgba(primary, hazeA * 0.55));
+    horizonHaze.addColorStop(0.5, hexToRgba(champagne, hazeA * 0.95));
+    horizonHaze.addColorStop(0.64, hexToRgba(primary, hazeA * 0.45));
+    horizonHaze.addColorStop(1, hexToRgba(accentHex, 0));
+    ctx.fillStyle = horizonHaze;
+    ctx.fillRect(0, horizonY - hazeH, width, hazeH * 1.85);
+
+    const vpGlow = ctx.createRadialGradient(vpX, horizonY, 2, vpX, horizonY, width * (0.34 + ambient * 0.1 + bloom * 0.05));
+    vpGlow.addColorStop(0, hexToRgba(highlight, (0.12 + bloom * 0.18 + ambient * 0.07) * intensity));
+    vpGlow.addColorStop(0.32, hexToRgba(champagne, (0.07 + bloom * 0.08 + ambient * 0.04) * intensity));
+    vpGlow.addColorStop(0.62, hexToRgba(cool, (0.03 + ambient * 0.025) * intensity));
     vpGlow.addColorStop(1, hexToRgba(primary, 0));
     ctx.fillStyle = vpGlow;
-    ctx.fillRect(vpX - width * 0.28, vpY - height * 0.16, width * 0.56, height * 0.32);
+    ctx.fillRect(0, horizonY - height * 0.2, width, height * 0.4);
 
     for (let t = 0; t < towers; t++) {
       const hx = hash01(t + 3);
       const hz = hash01(t + 17);
       const hh = hash01(t + 41);
-      const x = lerp(-xSpan * 0.82, xSpan * 0.82, hx);
-      const z = lerp(7.4, 11.4, hz);
-      const h = 0.42 + hh * 0.95 + form * 0.22 + ambient * 0.12;
-      const y0 = sampleY(x, z);
-      const p0 = project3(x, y0, z, cam, width, height);
-      const p1 = project3(x, y0 + h, z, cam, width, height);
-      if (!p0.ok || !p1.ok) continue;
-      const fog = 0.22 + (1 - hz) * 0.28;
+      const sx = width * (0.07 + hx * 0.86);
+      const shaftH = height * (0.14 + hh * 0.24 + form * 0.06 + ambient * 0.05);
+      const x0 = sx - (1.2 + hz * 1.6);
       const tint = t % 3 === 0 ? cool : t % 3 === 1 ? rose : champagne;
-      const a = (0.05 + fog * 0.08 + ambient * 0.04 + glow * 0.03) * intensity;
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = hexToRgba(tint, a);
-      ctx.lineWidth = 0.7 + (1 - hz) * 0.9;
-      ctx.stroke();
-      const tip = ctx.createRadialGradient(p1.x, p1.y, 0.4, p1.x, p1.y, 10 + ambient * 8);
-      tip.addColorStop(0, hexToRgba(highlight, (0.08 + bloom * 0.08 + flash * 0.06) * intensity));
-      tip.addColorStop(0.45, hexToRgba(tint, (0.04 + ambient * 0.03) * intensity));
+      const shaft = ctx.createLinearGradient(sx, horizonY - shaftH, sx, horizonY + 6);
+      const a = (0.1 + (1 - hz) * 0.1 + ambient * 0.06 + glow * 0.04) * intensity;
+      shaft.addColorStop(0, hexToRgba(highlight, a * 0.55 + bloom * 0.04));
+      shaft.addColorStop(0.35, hexToRgba(tint, a));
+      shaft.addColorStop(1, hexToRgba(tint, 0));
+      ctx.fillStyle = shaft;
+      ctx.fillRect(x0, horizonY - shaftH, 2.4 + hz * 3.2, shaftH + 8);
+      const tip = ctx.createRadialGradient(sx, horizonY - shaftH, 0.4, sx, horizonY - shaftH, 14 + ambient * 10);
+      tip.addColorStop(0, hexToRgba(highlight, (0.14 + bloom * 0.1 + flash * 0.08) * intensity));
+      tip.addColorStop(0.5, hexToRgba(tint, (0.06 + ambient * 0.04) * intensity));
       tip.addColorStop(1, hexToRgba(tint, 0));
       ctx.fillStyle = tip;
-      ctx.fillRect(p1.x - 12, p1.y - 12, 24, 24);
+      ctx.fillRect(sx - 16, horizonY - shaftH - 16, 32, 32);
     }
 
     for (let row = 0; row < contours; row++) {
@@ -387,7 +441,7 @@ export const lexiScene: Scene = {
       if (!edgeOk[row] || !edgeOk[row + 1]) continue;
       const u = row / Math.max(1, contours - 1);
       const nearness = 1 - u;
-      const planeA = (0.034 + nearness * 0.1 + lift * 0.2 + body * 0.1 + form * 0.07 + ambient * 0.04) * intensity;
+      const planeA = (0.02 + nearness * 0.055 + lift * 0.1 + body * 0.06 + form * 0.04 + ambient * 0.02) * intensity;
       ctx.fillStyle = hexToRgba(primary, planeA);
       ctx.beginPath();
       ctx.moveTo(edgeL[row]!, edgeYl[row]!);
@@ -427,22 +481,24 @@ export const lexiScene: Scene = {
       return n;
     };
 
-    const ribStep = Math.max(2, Math.round(meridians / 5));
-    for (let col = 0; col < meridians; col += ribStep) {
-      const sheen = lexiSheen(presented, col / Math.max(1, meridians - 1));
-      const n = projectMeridian(col, 0.08, 0.92);
-      const a = (0.035 + lift * 0.08 + form * 0.05 + sheen * shimmer * 0.04) * intensity;
-      strokeProjected(ctx, n, hexToRgba(col % 2 === 0 ? champagne : primary, a), 0.7 + lineThickness * 0.2);
+    if (complexity > 0.72) {
+      const ribStep = Math.max(3, Math.round(meridians / 4));
+      for (let col = 0; col < meridians; col += ribStep) {
+        const sheen = lexiSheen(presented, col / Math.max(1, meridians - 1));
+        const n = projectMeridian(col, 0.12, 0.78);
+        const a = (0.02 + lift * 0.04 + sheen * shimmer * 0.03) * intensity;
+        strokeProjected(ctx, n, hexToRgba(champagne, a), 0.6);
+      }
     }
 
     for (let row = contours - 1; row >= 0; row--) {
       if (row % 2 === 1 && row < contours - 2 && row > 1) continue;
       const u = fillContour(row);
       const plane = planeOf(u);
-      const nearness = plane === 0 ? 1 : plane === 1 ? 0.48 : 0.16;
-      const a = (0.06 + nearness * 0.16 + body * 0.06 + glow * 0.025) * intensity;
-      const w = 0.65 + nearness * (1.15 + lineThickness * 0.7 + lift * 0.4);
-      strokeProjected(ctx, meridians, hexToRgba(row % 2 === 0 ? primary : accentHex, a), w);
+      const nearness = plane === 0 ? 1 : plane === 1 ? 0.42 : 0.12;
+      const a = (0.05 + nearness * 0.14 + body * 0.06 + glow * 0.02) * intensity;
+      const w = 0.7 + nearness * (1.35 + lineThickness * 0.7 + lift * 0.35);
+      strokeProjected(ctx, meridians, hexToRgba(row % 2 === 0 ? primary : champagne, a), w);
     }
 
     const bandN = Math.max(20, Math.min(MAX_BAND, 24 + Math.round(complexity * 14)));
@@ -470,6 +526,52 @@ export const lexiScene: Scene = {
       const tint = b % 3 === 0 ? champagne : b % 3 === 1 ? primary : cool;
       strokeProjected(ctx, n, hexToRgba(tint, a * (tint === cool ? 0.55 : 1)), w);
     }
+
+    const sheenAt = (t: number) => lexiSheen(presented, t);
+    const flowPx = height * (0.012 + waveAmp * 0.045 + shimmer * 0.01 + lift * 0.01);
+    const seaRows = 6 + Math.round(complexity * 3);
+    const step = Math.max(4, Math.round(width / 110));
+    for (let s = seaRows - 1; s >= 0; s--) {
+      const u = s / Math.max(1, seaRows - 1);
+      const yBase = horizonY + lerp(height * 0.03, height * 0.44, 1 - u);
+      const amp = flowPx * lerp(0.28, 1.15, 1 - u) * (0.65 + body * 0.5 + spread * 0.35);
+      const seaPhase = phase * (0.32 + (1 - u) * 0.42) + tMs * 0.00003 * speed;
+      ctx.beginPath();
+      for (let x = 0; x <= width; x += step) {
+        const t = x / width;
+        const sheen = sheenAt(t);
+        const y =
+          yBase +
+          Math.sin(t * Math.PI * (1.5 + spread * 1.2) + seaPhase) * amp * (0.72 + sheen * 0.3) +
+          Math.sin(t * Math.PI * 3.0 - seaPhase * 0.65) * amp * 0.18;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      const seaA = (0.1 + (1 - u) * 0.2 + glow * 0.08 + body * 0.07 + ambient * 0.04) * intensity;
+      ctx.strokeStyle = hexToRgba(s % 2 === 0 ? primary : accentHex, seaA);
+      ctx.lineWidth = 0.85 + (1 - u) * (1.55 + body * 0.9) * (0.55 + lineThickness * 0.5);
+      ctx.stroke();
+    }
+
+    const ribbonAmp = flowPx * (0.95 + body * 0.3 + form * 0.2);
+    const core = 4.2 + lineThickness * 4.2 + ribbonW * 6.2 + body * 2.8 + ambient * 2.6 + accent * 2.4 + glow * 1.1;
+    const ribPhase = phase * 0.3 + tMs * 0.000028 * speed;
+    drawScreenRibbon(ctx, width, horizonY, ribbonAmp * 0.7, ribPhase + 0.4, sheenAt, hexToRgba(accentHex, 0.16 + glow * 0.1 + ambient * 0.08), Math.max(1.2, core * 0.7), -height * 0.02);
+    drawScreenRibbon(ctx, width, horizonY, ribbonAmp * 0.82, ribPhase + 0.85, sheenAt, hexToRgba(cool, 0.08 + ambient * 0.07 + shimmer * 0.04), Math.max(1, core * 0.55), height * 0.018);
+    drawScreenRibbon(ctx, width, horizonY, ribbonAmp * 0.78, ribPhase + 1.2, sheenAt, hexToRgba(rose, 0.06 + ambient * 0.05 + flash * 0.04), Math.max(1, core * 0.48), -height * 0.01);
+    drawScreenRibbon(ctx, width, horizonY, ribbonAmp, ribPhase, sheenAt, hexToRgba(primary, 0.22 + bloom * 0.14 + ambient * 0.09), core * 3.8, 0);
+    drawScreenRibbon(ctx, width, horizonY, ribbonAmp, ribPhase, sheenAt, hexToRgba(champagne, 0.48 + bloom * 0.3 + ribbonW * 0.18 + accent * 0.16), core * 1.15, 0);
+    drawScreenRibbon(
+      ctx,
+      width,
+      horizonY,
+      ribbonAmp,
+      ribPhase,
+      sheenAt,
+      hexToRgba(highlight, 0.34 + accent * 0.18 + flash * 0.2 + shimmer * 0.1),
+      Math.max(1.15, core * 0.3),
+      0,
+    );
 
     const heroZ = 2.85 + form * 0.18;
     const sampleHero = (s: number, yOff: number, zOff: number) => {
@@ -509,37 +611,64 @@ export const lexiScene: Scene = {
     );
 
     if (pressure > 0.06) {
-      const burstR = 0.22 + pressure * 0.42 + lift * 0.06;
-      let n = 0;
-      for (let i = 0; i < MAX_RING; i++) {
-        const ang = (i / (MAX_RING - 1)) * Math.PI * 2;
-        const x = peakX * 0.22 + Math.cos(ang) * burstR * (1.15 + spread * 0.2);
-        const z = 2.05 + Math.sin(ang) * burstR * 0.48;
-        const y = sampleY(x, z) + 0.04;
-        const p = project3(x, y, z, cam, width, height);
-        px[n] = p.x;
-        py[n] = p.y;
-        pok[n] = p.ok ? 1 : 0;
-        n += 1;
-      }
-      const a = (0.12 + pressure * 0.32) * intensity;
-      strokeProjected(ctx, n, hexToRgba(champagne, a), 1.15 + pressure * 1.2 + lineThickness * 0.35);
-      strokeProjected(ctx, n, hexToRgba(highlight, a * 0.42), 0.7);
+      const burstX = peakSx;
+      const burstY = horizonY;
+      const burst = ctx.createRadialGradient(
+        burstX,
+        burstY,
+        2,
+        burstX,
+        burstY,
+        width * (0.06 + pressure * 0.08 + lift * 0.02),
+      );
+      burst.addColorStop(0, hexToRgba(highlight, (0.18 + pressure * 0.28) * intensity));
+      burst.addColorStop(0.4, hexToRgba(champagne, (0.08 + pressure * 0.12) * intensity));
+      burst.addColorStop(1, hexToRgba(primary, 0));
+      ctx.fillStyle = burst;
+      ctx.fillRect(burstX - width * 0.12, burstY - height * 0.08, width * 0.24, height * 0.16);
       const nodeS = clamp01((phase * 0.12 + pressure * 0.35) % 1);
       const node = sampleHero(nodeS, 0.02, 0);
       if (node.ok) {
-        const ng = ctx.createRadialGradient(node.x, node.y, 0.5, node.x, node.y, 14 + pressure * 10);
-        ng.addColorStop(0, hexToRgba(highlight, (0.16 + pressure * 0.28) * intensity));
-        ng.addColorStop(0.4, hexToRgba(champagne, (0.07 + pressure * 0.1) * intensity));
+        const ng = ctx.createRadialGradient(node.x, node.y, 0.5, node.x, node.y, 16 + pressure * 12);
+        ng.addColorStop(0, hexToRgba(highlight, (0.18 + pressure * 0.3) * intensity));
+        ng.addColorStop(0.45, hexToRgba(champagne, (0.08 + pressure * 0.1) * intensity));
         ng.addColorStop(1, hexToRgba(primary, 0));
         ctx.fillStyle = ng;
-        ctx.fillRect(node.x - 18, node.y - 18, 36, 36);
+        ctx.fillRect(node.x - 20, node.y - 20, 40, 40);
       }
     }
 
     const traceN = Math.max(18, Math.min(MAX_TRACE, 20 + Math.round(complexity * 12)));
     for (let t = 0; t < LEXI_2036_FG_TRACES; t++) {
       const u = t / Math.max(1, LEXI_2036_FG_TRACES - 1);
+      const yBase = horizonY + height * (0.1 + u * 0.22);
+      const amp = flowPx * (1.05 + (1 - u) * 0.55 + accent * 0.35);
+      const a = (0.16 + (1 - u) * 0.18 + body * 0.1 + accent * 0.14 + flash * 0.08) * intensity;
+      const w = 1.4 + (1 - u) * (2.2 + lineThickness * 1.2 + accent * 1.4);
+      drawScreenRibbon(
+        ctx,
+        width,
+        yBase,
+        amp,
+        phase * (0.55 + u * 0.3) + t * 0.9,
+        sheenAt,
+        hexToRgba(t === 1 ? champagne : primary, a),
+        w,
+        0,
+      );
+      if (t === 1) {
+        drawScreenRibbon(
+          ctx,
+          width,
+          yBase,
+          amp,
+          phase * 0.7 + 0.9,
+          sheenAt,
+          hexToRgba(highlight, a * 0.42 + flash * 0.18),
+          Math.max(0.9, w * 0.28),
+          0,
+        );
+      }
       const z0 = lerp(1.12, 2.05, u);
       let n = 0;
       for (let i = 0; i < traceN; i++) {
@@ -555,12 +684,7 @@ export const lexiScene: Scene = {
         pok[n] = p.ok ? 1 : 0;
         n += 1;
       }
-      const a = (0.14 + (1 - u) * 0.16 + body * 0.1 + accent * 0.12 + flash * 0.08) * intensity;
-      const w = 1.15 + (1 - u) * (1.8 + lineThickness * 1.1 + accent * 1.2);
-      strokeProjected(ctx, n, hexToRgba(t === 1 ? champagne : primary, a), w);
-      if (t === 1) {
-        strokeProjected(ctx, n, hexToRgba(highlight, a * 0.45 + flash * 0.16), Math.max(0.8, w * 0.28));
-      }
+      strokeProjected(ctx, n, hexToRgba(t === 1 ? champagne : primary, a * 0.55), Math.max(0.8, w * 0.45));
     }
 
     if (bloom > 0.04 || form > 0.12 || ribbonW > 0.12) {
@@ -608,10 +732,10 @@ export const lexiScene: Scene = {
       ctx.fill();
     }
 
-    const falloff = ctx.createLinearGradient(0, height * 0.78, 0, height);
+    const falloff = ctx.createLinearGradient(0, height * 0.62, 0, height);
     falloff.addColorStop(0, hexToRgba(secondary, 0));
-    falloff.addColorStop(1, hexToRgba(secondary, 0.22 + (1 - ambient) * 0.08));
+    falloff.addColorStop(1, hexToRgba(secondary, 0.55 + (1 - ambient) * 0.15));
     ctx.fillStyle = falloff;
-    ctx.fillRect(0, height * 0.78, width, height * 0.22);
+    ctx.fillRect(0, height * 0.62, width, height * 0.38);
   },
 };

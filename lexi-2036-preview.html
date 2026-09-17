@@ -105,13 +105,15 @@
       const W = 960;
       const H = 540;
 
-      function paint(scene, features, label) {
+      function paint(scene, features, label, w = W, h = H) {
         const canvas = document.createElement("canvas");
-        canvas.width = W;
-        canvas.height = H;
+        canvas.width = w;
+        canvas.height = h;
         const ctx = canvas.getContext("2d");
-        scene.onEnter?.({ width: W, height: H, ctx }, scene.defaultParams);
-        scene.render({ width: W, height: H, ctx }, features, scene.defaultParams, 1 / 30);
+        scene.onEnter?.({ width: w, height: h, ctx }, scene.defaultParams);
+        for (let i = 0; i < 36; i++) {
+          scene.render({ width: w, height: h, ctx }, { ...features, timeMs: features.timeMs + i * (1000 / 30) }, scene.defaultParams, 1 / 30);
+        }
         const fig = document.createElement("figure");
         const cap = document.createElement("figcaption");
         cap.textContent = label;
@@ -119,6 +121,8 @@
         grid.append(fig);
       }
 
+      paint(lexiScene, packets.pad, "LEXI 2036 — pad (hero)", 1280, 560);
+      paint(lexiMinimalScene, packets.pad, "LEXI Minimal Horizon — pad", 1280, 560);
       for (const [name, features] of Object.entries(packets)) {
         paint(lexiScene, features, `LEXI 2036 — ${name}`);
         paint(lexiMinimalScene, features, `LEXI Minimal Horizon — ${name}`);

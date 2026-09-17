@@ -4,7 +4,7 @@
 
 Base tip: LEXI V3 `0d0ee827b0d1d9cc199f7e5e0b66ca9c87f25ed8` on `cursor/vis-scene-lexi-v3-cinematic-depth-9f48` (PR **#29**), already on LEXI V2 Minimal Horizon + V3 cinematic depth. VIS-only. ENC / STRESS / AUDIO / VIS-SYNC / VIS-RESPONSE analysers and Lattice/Wave geometry are untouched.
 
-Implementation SHA: *(branch tip after this stamp — coordinator MODE-B EXE from `cursor/vis-scene-lexi-2036-cinematic-ef57`)*.
+Implementation SHA: stamped on the branch tip of `cursor/vis-scene-lexi-2036-cinematic-ef57` (draft PR **#30**). Coordinator MODE-B EXE from that tip.
 
 ## Product decision
 
@@ -85,7 +85,7 @@ Center-safe title band: `LEXI_TITLE_SAFE` (particles skip it). No on-screen text
 
 ## Gates
 
-`npx tsc --noEmit` clean. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC + vis-lane-seek *(counts on the PR)*.
+`./node_modules/.bin/tsc --noEmit` clean. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC + vis-lane-seek **104/104**.
 
 ## HUMAN checklist (1–2 min)
 
