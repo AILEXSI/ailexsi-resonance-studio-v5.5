@@ -3,7 +3,7 @@
 # parse parentheses as expressions.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$product = 'AILEXSI Resonance Studio V5.5'
+$product = 'AILEXSI Resonance Studio V5.6'
 $release = Join-Path $repo 'src-tauri\target\release'
 $dest = Join-Path $repo ($product + '.exe')
 

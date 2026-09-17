@@ -13,9 +13,9 @@ import { failExportDialog, openExportDialog } from "../../src/core/exporter/dial
 describe("AFE dump build identity", () => {
   const id = ailexsiBuildIdentity();
 
-  it("product version is 5.5.0 and frame engine is AILEXSI", () => {
-    expect(AILEXSI_PRODUCT_VERSION).toBe("5.5.0");
-    expect(id.productVersion).toBe("5.5.0");
+  it("product version is 5.6.0 and frame engine is AILEXSI", () => {
+    expect(AILEXSI_PRODUCT_VERSION).toBe("5.6.0");
+    expect(id.productVersion).toBe("5.6.0");
     expect(id.frameEngine).toBe(AILEXSI_FRAME_ENGINE);
     expect(id.frameEngine).toBe("AILEXSI");
   });
@@ -38,9 +38,9 @@ describe("AFE dump build identity", () => {
       hardDependencyCeiling: 20,
       decodeQueueSize: 21,
     });
-    expect(text.startsWith("productVersion 5.5.0; gitSha ")).toBe(true);
+    expect(text.startsWith("productVersion 5.6.0; gitSha ")).toBe(true);
     const head = text.slice(0, 480);
-    expect(head).toContain("productVersion 5.5.0");
+    expect(head).toContain("productVersion 5.6.0");
     expect(head).toContain(`gitSha ${id.gitSha}`);
     expect(head).toContain("frameEngine AILEXSI");
     expect(head).toContain(`branch ${id.branch}`);
@@ -57,7 +57,7 @@ describe("AFE dump build identity", () => {
       "AFE_DECODE_STALL requested sample 38",
     );
     expect(failed.error).toBe(`${prefix}; AFE_DECODE_STALL requested sample 38`);
-    expect(failed.error).toContain("productVersion 5.5.0");
+    expect(failed.error).toContain("productVersion 5.6.0");
     expect(failed.error).toContain("frameEngine AILEXSI");
     expect(withBuildIdentityPrefix(failed.error ?? "")).toBe(failed.error);
   });

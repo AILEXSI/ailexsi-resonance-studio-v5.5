@@ -60,7 +60,7 @@ describe("toolbar File button", () => {
     expect(group?.querySelector('[data-testid="open-input"]')).toBeNull();
     expect(group?.querySelector('[data-testid="revert-project"]')).toBeNull();
     expect(group?.querySelector('[data-testid="open-media"]')).toBeNull();
-    expect(host.querySelector('[data-testid="app-version"]')?.textContent).toBe("V5.5.0");
+    expect(host.querySelector('[data-testid="app-version"]')?.textContent).toBe("V5.6.0");
   });
 
   it("File toggles the project panel; Import stays in the toolbar", async () => {

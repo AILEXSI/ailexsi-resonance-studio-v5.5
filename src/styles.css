@@ -267,11 +267,9 @@ input[type="range"] { accent-color: var(--accent-2); }
   font-weight: 600;
 }
 .inspector-reopen-label {
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: 8px;
+  letter-spacing: 0.14em;
   font-weight: 700;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
   color: var(--muted);
 }
 .inspector-body {

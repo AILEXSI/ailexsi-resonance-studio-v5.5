@@ -1,6 +1,6 @@
-# AILEXSI Resonance Studio V5.5
+# AILEXSI Resonance Studio V5.6
 
-Version **5.5.0**. Product chip **`V5.5.0`**. JSON `schemaVersion` **5**.
+Version **5.6.0**. Product chip **`V5.6.0`**. JSON `schemaVersion` **5**.
 
 First-party Frame Engine. Mediabunny-free. Source lineage: V5 AFE-03 `4e80162` working tree (no V5 git history, V5 repo not modified, PR #23/#24/#25 not merged).
 
@@ -41,11 +41,11 @@ Standalone EXE (MODE B, Windows):
 npm run tauri:exe
 ```
 
-Copies `AILEXSI Resonance Studio V5.5.exe` to the repo root when the Windows toolchain is present.
+Copies `AILEXSI Resonance Studio V5.6.exe` to the repo root when the Windows toolchain is present.
 
 ## Top bar
 
-`File | Import | Export | [ARRANGE] | [CUTTER]` plus permanent top-right **`V5.5.0`**.
+`File | Import | Export | ARRANGE | CUTTER` plus permanent top-right **`V5.6.0`**.
 
 Export dialog shows **`Frame Engine: AILEXSI`** from `getFrameSourceBackend()`.
 

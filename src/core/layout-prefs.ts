@@ -59,7 +59,7 @@ export const MIXER_MAX_PX = 8192;
 export const TIMELINE_MIN_PX = 160;
 export const MIXER_SPLITTER_PX = 8;
 /** Closed inspector: reopen strip only. Same workspace language as MIXER_COLLAPSED_PX. */
-export const INSPECTOR_COLLAPSED_PX = 28;
+export const INSPECTOR_COLLAPSED_PX = 32;
 /** Compact Preview height while Timeline Focus is on. Existing splitter still works. */
 export const TIMELINE_FOCUS_PREVIEW_PX = 160;
 export const TIMELINE_FOCUS_SPLIT_RATIO = 0.22;
