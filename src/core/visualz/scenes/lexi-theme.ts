@@ -1,6 +1,6 @@
 /**
  * Shared LEXI palettes + title-safe band.
- * Used by flagship LEXI (2036) and LEXI Minimal Horizon (V2).
+ * Used by flagship LEXI (reference-level) and LEXI Minimal Horizon (V2).
  */
 
 /** Subtle cool / rose reflections for flagship 2036 only. Minimal ignores these. */

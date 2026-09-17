@@ -1,6 +1,6 @@
 /**
  * Scene: lexi-minimal — LEXI Minimal Horizon (Polish V2, quiet variant).
- * Calm parallel-horizon flow. Flagship LEXI is 2036 cinematic energy space.
+ * Calm parallel-horizon flow. Flagship LEXI is the reference-level energy space.
  * Preview and Export both read presented AudioFeatures (applyVisResponse).
  */
 

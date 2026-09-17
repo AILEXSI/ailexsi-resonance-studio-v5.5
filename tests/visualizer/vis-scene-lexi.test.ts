@@ -30,6 +30,11 @@ import {
   LEXI_2036_HERO_FILAMENTS,
   LEXI_2036_SIGNAL_TOWERS,
   LEXI_DEFAULT_THEME,
+  LEXI_REF_DUNE_CONTOURS,
+  LEXI_REF_DUNE_MERIDIANS,
+  LEXI_REF_FG_BOKEH,
+  LEXI_REF_MOUNTAIN_PEAKS,
+  LEXI_REF_SURFACE_POINTS,
   LEXI_REFLECT,
   LEXI_THEMES,
   LEXI_TITLE_SAFE,
@@ -155,16 +160,21 @@ describe("VIS-SCENE-LEXI registry", () => {
   });
 });
 
-describe("VIS-SCENE-LEXI 2036 cinematic language", () => {
+describe("VIS-SCENE-LEXI reference-level cinematic language", () => {
   it("is a new image language — distinct from Minimal, Lattice, Wave, Gold", () => {
     const features = featuresAt(0, 10_000);
     const lexi = paint("lexi", features);
     expect(lexi.nonemptyCount()).toBeGreaterThan(20);
     expect(LEXI_V3_DEPTH_PLANES).toBe(3);
     expect(LEXI_V3_LIGHT_BANDS).toBeGreaterThanOrEqual(3);
-    expect(LEXI_2036_HERO_FILAMENTS).toBeGreaterThanOrEqual(4);
+    expect(LEXI_2036_HERO_FILAMENTS).toBeGreaterThanOrEqual(6);
     expect(LEXI_2036_FG_TRACES).toBeGreaterThanOrEqual(3);
-    expect(LEXI_2036_SIGNAL_TOWERS).toBeGreaterThanOrEqual(4);
+    expect(LEXI_2036_SIGNAL_TOWERS).toBeGreaterThanOrEqual(6);
+    expect(LEXI_REF_DUNE_MERIDIANS).toBeGreaterThanOrEqual(48);
+    expect(LEXI_REF_DUNE_CONTOURS).toBeGreaterThanOrEqual(12);
+    expect(LEXI_REF_SURFACE_POINTS).toBeGreaterThanOrEqual(600);
+    expect(LEXI_REF_MOUNTAIN_PEAKS).toBeGreaterThanOrEqual(7);
+    expect(LEXI_REF_FG_BOKEH).toBeGreaterThanOrEqual(16);
     expect(LEXI_REFLECT.cyan).toMatch(/^#/);
     expect(LEXI_REFLECT.magenta).toMatch(/^#/);
     const minimal = paint("lexi-minimal", features).fingerprint();

@@ -1,6 +1,6 @@
 # VIS-SCENE-LEXI 2036 — Cinematic Future Energy Space
 
-**Status:** **IMPLEMENTED / AUTOMATED-TESTED** · **DRAFT** (not HUMAN-PROVEN). Do not merge until MODE B acceptance. Do not mark HUMAN-PROVEN from tests or agent screenshots.
+**Status:** **SUPERSEDED as flagship look** by `VIS-SCENE-LEXI-REF-LEVEL.md` (same `lexi` id). Kept as the 2036 architecture note. Do not mark HUMAN-PROVEN.
 
 Base tip: LEXI V3 `0d0ee827b0d1d9cc199f7e5e0b66ca9c87f25ed8` on `cursor/vis-scene-lexi-v3-cinematic-depth-9f48` (PR **#29**), already on LEXI V2 Minimal Horizon + V3 cinematic depth. VIS-only. ENC / STRESS / AUDIO / VIS-SYNC / VIS-RESPONSE analysers and Lattice/Wave geometry are untouched.
 

@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LEXI 2036 preview</title>
+    <title>LEXI reference-level preview</title>
     <style>
       html,
       body {
         margin: 0;
-        background: #07060a;
+        background: #05040a;
         color: #e8d2a8;
         font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
       }
@@ -23,6 +23,9 @@
       p {
         margin: 4px 0 0;
         opacity: 0.72;
+      }
+      .live {
+        padding: 8px 16px 12px;
       }
       .grid {
         display: grid;
@@ -48,12 +51,18 @@
   </head>
   <body>
     <header>
-      <h1>LEXI 2036 (superseded stills) — flagship vs Minimal Horizon</h1>
+      <h1>LEXI reference-level — flagship vs Minimal Horizon</h1>
       <p>
-        Historical 2036 preview page; flagship render is now the reference-level draft. Same presented packet. See
-        <code>lexi-ref-level-preview.html</code>. Not HUMAN-PROVEN.
+        Canvas V1 toward the attached CGI niveau. Same presented packet. Live + quiet / pad / kick / snare. Not
+        HUMAN-PROVEN.
       </p>
     </header>
+    <div class="live">
+      <figure>
+        <canvas id="live" width="1440" height="640"></canvas>
+        <figcaption>LEXI flagship — live (pad energy, slow cinematic)</figcaption>
+      </figure>
+    </div>
     <div class="grid" id="grid"></div>
     <script type="module">
       import { lexiScene } from "./src/core/visualz/scenes/lexi.ts";
@@ -105,17 +114,20 @@
       };
 
       const grid = document.getElementById("grid");
-      const W = 960;
-      const H = 540;
 
-      function paint(scene, features, label, w = W, h = H) {
+      function paint(scene, features, label, w = 960, h = 420) {
         const canvas = document.createElement("canvas");
         canvas.width = w;
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         scene.onEnter?.({ width: w, height: h, ctx }, scene.defaultParams);
-        for (let i = 0; i < 36; i++) {
-          scene.render({ width: w, height: h, ctx }, { ...features, timeMs: features.timeMs + i * (1000 / 30) }, scene.defaultParams, 1 / 30);
+        for (let i = 0; i < 8; i++) {
+          scene.render(
+            { width: w, height: h, ctx },
+            { ...features, timeMs: features.timeMs + i * (1000 / 30) },
+            scene.defaultParams,
+            1 / 30,
+          );
         }
         const fig = document.createElement("figure");
         const cap = document.createElement("figcaption");
@@ -124,12 +136,37 @@
         grid.append(fig);
       }
 
-      paint(lexiScene, packets.pad, "LEXI 2036 — pad (hero)", 1280, 560);
-      paint(lexiMinimalScene, packets.pad, "LEXI Minimal Horizon — pad", 1280, 560);
+      paint(lexiScene, packets.pad, "LEXI ref-level — pad (hero)", 1280, 520);
+      paint(lexiMinimalScene, packets.pad, "LEXI Minimal Horizon — pad", 1280, 520);
       for (const [name, features] of Object.entries(packets)) {
-        paint(lexiScene, features, `LEXI 2036 — ${name}`);
+        paint(lexiScene, features, `LEXI ref-level — ${name}`);
         paint(lexiMinimalScene, features, `LEXI Minimal Horizon — ${name}`);
       }
+
+      const live = document.getElementById("live");
+      const lctx = live.getContext("2d");
+      lexiScene.onEnter?.({ width: live.width, height: live.height, ctx: lctx }, lexiScene.defaultParams);
+      let t0 = performance.now();
+      let last = t0;
+      function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        const t = now - t0;
+        const pulse = 0.5 + 0.5 * Math.sin(t / 1400);
+        const features = {
+          ...packets.pad,
+          timeMs: t,
+          rms: 0.42 + pulse * 0.22,
+          bass: 0.22 + pulse * 0.2,
+          mid: 0.4 + 0.16 * Math.sin(t / 1800),
+          treble: 0.16 + 0.12 * Math.max(0, Math.sin(t / 520)),
+          beatPulse: Math.max(0, Math.sin(t / 620)) ** 8 * 0.85,
+          onset: Math.max(0, Math.sin(t / 620)) > 0.92,
+        };
+        lexiScene.render({ width: live.width, height: live.height, ctx: lctx }, features, lexiScene.defaultParams, dt);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
     </script>
   </body>
 </html>
