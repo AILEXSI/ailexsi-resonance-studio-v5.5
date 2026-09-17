@@ -74,3 +74,26 @@ export function lexiSheen(features: AudioFeatures, t: number): number {
   const idx = Math.min(spec.length - 1, Math.max(0, Math.floor(u * (spec.length - 1))));
   return (spec[idx] ?? 0) * 0.46 + features.mid * 0.22 + features.treble * 0.16;
 }
+
+/**
+ * LEXI V3 — mids drive large form (hero peak / valley), not glow.
+ * Additive. Does not change V2 Minimal Horizon coefficients.
+ */
+export function lexiFormShift(features: AudioFeatures, intensity: number): number {
+  return (features.mid * 0.74 + features.rms * 0.14) * intensity;
+}
+
+/** Kick / onset envelope for expanding pressure rings. High at hit, then decays. */
+export function lexiPressureWave(features: AudioFeatures): number {
+  return features.beatPulse * 0.78 + (features.onset ? 0.18 : 0);
+}
+
+/** Highlight-only bloom (localized). Must stay small — not a gold wash. */
+export function lexiHighlightBloom(features: AudioFeatures, intensity: number): number {
+  return (features.beatPulse * 0.42 + features.rms * 0.18 + features.bass * 0.1) * intensity;
+}
+
+/** Slow asymmetric hero-peak wander so the picture is not a screensaver. */
+export function lexiPeakBias(timeMs: number, speed: number): number {
+  return 0.88 + Math.sin(timeMs * 0.000092 * speed) * 0.58;
+}

@@ -1,12 +1,12 @@
 # VIS-SCENE-LEXI — cinematic horizon flow (Polish V2)
 
-**Status:** **IMPLEMENTED / AUTOMATED-TESTED** · **DRAFT** (not HUMAN-PROVEN). Do not merge until MODE B acceptance.
+**Status:** **IMPLEMENTED / AUTOMATED-TESTED** · **DRAFT** (not HUMAN-PROVEN). Repositioned as selectable **LEXI Minimal Horizon** (`lexi-minimal`). Flagship `lexi` / **LEXI** is V3 — see `VIS-SCENE-LEXI-V3-CINEMATIC-DEPTH.md`. Do not merge until MODE B acceptance.
 
 Base tip: LEXI V1 `cursor/vis-scene-lexi-horizon-e5c2` @ `37dfd7b` on HUMAN-PROVEN main `59f6c18`. VIS-only polish. ENC / STRESS / AUDIO / VIS-SYNC / VIS-RESPONSE analysers and Lattice/Wave geometry are untouched.
 
 ## What it is
 
-AILEXSI signature Visualz scene. Id `lexi`, display **LEXI**. Dark field, warm gold / champagne horizon, layered energy filaments, receding terrain, volumetric haze, sparse dust. Inspired by a minimalist “Flow” horizon language — not a 1:1 of Resonance Wave, Void Lattice, Liquid Gold, or any template.
+Quiet variant of the AILEXSI signature look. Id `lexi-minimal`, display **LEXI Minimal Horizon** (lane **LEXI Min**). Dark field, warm gold / champagne horizon, layered energy filaments, receding terrain, volumetric haze, sparse dust. Inspired by a minimalist “Flow” horizon language — not a 1:1 of Resonance Wave, Void Lattice, Liquid Gold, or any template. Kept as the calm parallel-horizon scene after V3 became flagship.
 
 Feel: Signal + Horizon + Light-flow + quiet energy. For long music videos, spoken-word, ambient, techno, cinematic.
 
@@ -66,18 +66,19 @@ Center-safe title band: `LEXI_TITLE_SAFE` (particles skip it). No on-screen text
 ## How to select
 
 1. Arrange → click the **VIS** lane (or a VIS event) so the inspector shows **VIS scene**.
-2. Dropdown: **LEXI** (value `lexi`).
-3. Or cycle the VIS scene button until the lane label reads **LEXI**. Cycle wrap: Crystal → LEXI → Bars.
+2. Dropdown: **LEXI Min** (value `lexi-minimal`). Flagship **LEXI** is V3.
+3. Or cycle the VIS scene button until the lane label reads **LEXI Min**. Cycle wrap: Crystal → LEXI → LEXI Min → Bars.
 
 ## Files
 
-- `src/core/visualz/scenes/lexi.ts` — render + theme resolve
+- `src/core/visualz/scenes/lexi-minimal.ts` — V2 render (quiet variant)
+- `src/core/visualz/scenes/lexi-theme.ts` — shared palettes
 - `src/core/visualz/scenes/index.ts` — registry
 - `src/core/models.ts` — `VISUALIZER_SCENE_IDS`
-- `src/core/visualizer.ts` — short name `LEXI`
+- `src/core/visualizer.ts` — short name `LEXI Min`
 - `src/core/visualz/scene-impact.ts` — LEXI drivers (Lattice/Wave untouched)
 - `src/ui/inspector/Inspector.tsx` — picker labels use `sceneShortName`
-- `tests/visualizer/vis-scene-lexi.test.ts` + registry count 17
+- `tests/visualizer/vis-scene-lexi.test.ts` + registry count 18
 
 ## HUMAN acceptance checklist
 

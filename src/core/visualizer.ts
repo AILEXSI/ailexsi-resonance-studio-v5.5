@@ -78,6 +78,7 @@ const SCENE_SHORT: Record<VisualizerSceneId, string> = {
   "accretion-disk": "Disk",
   "crystal-storm": "Crystal",
   lexi: "LEXI",
+  "lexi-minimal": "LEXI Min",
 };
 
 /** 120 BPM grid (or `bpm`) from 0 inclusive to duration exclusive. */

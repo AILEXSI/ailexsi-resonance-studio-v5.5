@@ -21,6 +21,7 @@ import { nebulaHelixScene } from "./nebula-helix";
 import { accretionDiskScene } from "./accretion-disk";
 import { crystalStormScene } from "./crystal-storm";
 import { lexiScene } from "./lexi";
+import { lexiMinimalScene } from "./lexi-minimal";
 
 export const builtinScenes: Scene[] = [
   spectrumBarsScene,
@@ -40,6 +41,7 @@ export const builtinScenes: Scene[] = [
   accretionDiskScene,
   crystalStormScene,
   lexiScene,
+  lexiMinimalScene,
 ];
 
 export {
@@ -60,4 +62,5 @@ export {
   accretionDiskScene,
   crystalStormScene,
   lexiScene,
+  lexiMinimalScene,
 };

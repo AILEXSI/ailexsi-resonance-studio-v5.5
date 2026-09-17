@@ -178,23 +178,36 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Audio | Same `applyVisResponse` packet as every other scene. `bass` → lift/body; `rms` → glow/amp; `mid` → terrain spread; `onset`/`beatPulse` → soft accent; spectrum/treble → sheen/shimmer. Preview === Export. |
 | Params | intensity, glowStrength, depthStrength, smoothing, lineThickness, complexity (density), waveAmplitude, reactivity, particleAmount, palette (gold default), colorPrimary, colorSecondary, backgroundLevel. |
 | Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry. |
-| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 17. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC. |
-| Select | Inspector VIS scene → **LEXI**, or cycle VIS until lane says LEXI. Crystal → LEXI → Bars. |
+| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 18. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC. |
+| Select | Inspector **LEXI** is now V3. V2 lives as **LEXI Min**. Cycle: Crystal → LEXI → LEXI Min → Bars. |
 | Human | Checklist in `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. Preview musical, Export similar, calm/premium, long-form not annoying, distinct. |
 
 ## VIS-SCENE-LEXI Polish V2
+
+**IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — not HUMAN-PROVEN. Repositioned as selectable **LEXI Minimal Horizon** (`lexi-minimal`). Flagship is V3.
+
+| | |
+| --- | --- |
+| Base | LEXI V1 tip `37dfd7b` on `cursor/vis-scene-lexi-horizon-e5c2` (draft PR #27), already on HUMAN-PROVEN main `59f6c18`. |
+| Tip | `8d46dbfbd9397b9184180d11f32d83e17b1e3ac6` on `cursor/vis-scene-lexi-polish-v2-f909` (draft PR **#28**). |
+| Why | V1 read as a prototype: thin mesh + one ribbon. Needed depth, elegant impact, musical readability, premium finish. |
+| Diff | Layered haze / radial bloom; ghost+core+highlight filaments; height-scaled receding sea; complexity density; mid→spread, bass/kick→body, highs→shimmer; LEXI helper retune only. Preview === Export. |
+| Now | Kept as the quiet parallel-horizon variant. Not thrown away. |
+| Human | Checklist in `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. |
+
+## VIS-SCENE-LEXI V3 — Cinematic Depth & Impact
 
 **IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — not HUMAN-PROVEN. Do not merge from this pass. VIS-only. Do not reopen AFE / ENC / AUDIO / STRESS.
 
 | | |
 | --- | --- |
-| Base | LEXI V1 tip `37dfd7b` on `cursor/vis-scene-lexi-horizon-e5c2` (draft PR #27), already on HUMAN-PROVEN main `59f6c18`. |
-| Tip | `82a3e5a8cf4da00814a0bb2fa795caf219ac535a` on `cursor/vis-scene-lexi-polish-v2-f909` (draft PR **#28**). Coordinator MODE-B EXE from this SHA. |
-| Why | V1 read as a prototype: thin mesh + one ribbon. Needed depth, elegant impact, musical readability, premium finish. |
-| Diff | Layered haze / radial bloom; ghost+core+highlight filaments; height-scaled receding sea; complexity density; mid→spread, bass/kick→body, highs→shimmer; LEXI helper retune only. Preview === Export. |
-| Skipped | `shadowBlur` / additive compositing (parity + long-form overbright risk). Inspector option spam. Shared VIS-RESPONSE/VIS-SYNC cores. |
-| Gates | `tsc --noEmit` clean. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC **97/97**. |
-| Human | Short 1–2 min export; kick/onset; quiet calmer; lower volume → lower VIS; aesthetic over a few minutes. Details: `docs/compliance/VIS-SCENE-LEXI-HORIZON-FLOW.md`. |
+| Base | LEXI Polish V2 tip `8d46dbfbd9397b9184180d11f32d83e17b1e3ac6` on `cursor/vis-scene-lexi-polish-v2-f909` (PR #28), on HUMAN-PROVEN main `59f6c18`. |
+| What | Flagship `lexi` / **LEXI** is a new image language: perspective terrain, vanishing point, FG/MG/BG, hero peak, kick pressure waves, bass lift/spread, mid form, high shimmer only, highlight bloom. V2 lives on as `lexi-minimal` / **LEXI Minimal Horizon**. |
+| Audio | Same `applyVisResponse` packet. V3 helpers (`lexiFormShift`, `lexiPressureWave`, `lexiHighlightBloom`, `lexiPeakBias`) are additive. Lattice/Wave/V2 coefficients unchanged. Preview === Export. |
+| Untouched | ENC-01; STRESS mux; AUDIO-01; VIS-SYNC analyser; VIS-RESPONSE defaults; Lattice/Wave geometry. |
+| Test | `tests/visualizer/vis-scene-lexi.test.ts` + registry 18. Focused VIS + visualizer + vis-events/cues/edit + VIS-RESPONSE + VIS-SYNC. |
+| Select | Inspector **LEXI** (flagship) or **LEXI Min**. Cycle: Crystal → LEXI → LEXI Min → Bars. |
+| Human | 1–2 min: depth at a glance, kick pressure wave, bass lift, quiet darker, lower volume → lower VIS, not gold soup. Details: `docs/compliance/VIS-SCENE-LEXI-V3-CINEMATIC-DEPTH.md`. |
 
 ## Verification paths
 
