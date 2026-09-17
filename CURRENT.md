@@ -217,7 +217,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | | |
 | --- | --- |
 | Base | LEXI V3 tip `0d0ee827b0d1d9cc199f7e5e0b66ca9c87f25ed8` on `cursor/vis-scene-lexi-v3-cinematic-depth-9f48` (PR **#29**). |
-| Tip | Draft PR **#30** on `cursor/vis-scene-lexi-2036-cinematic-ef57`. Coordinator MODE-B EXE from the branch tip after the stamp commit. |
+| Tip | Implementation `911b770fef8f0cd8e60e16a9dee17d7c5c5a4a0f` on `cursor/vis-scene-lexi-2036-cinematic-ef57` (draft PR **#30**). Coordinator MODE-B EXE from the branch tip after this stamp. |
 | Why | Human on V3: too retro / too close to old-school wireframe horizon — early Tron, not premium 2036. Too flat, empty, uniform, too much simple grid. |
 | What | Flagship `lexi` / **LEXI** becomes cinematic future energy space: less plain grid, FG traces · MG flowing terrain · hero luminous stream · BG haze / distant signal towers, volumetric atmosphere, controlled gold + cyan/magenta reflections. `lexi-minimal` / **LEXI Minimal Horizon** stays the calm V2 look. |
 | Audio | Same `applyVisResponse` packet. Additive helpers `lexiAmbientExpand`, `lexiTransientFlash`, `lexiRibbonWidth`. Kick = local pulse; bass = terrain lift; snare/high = highlight flash; pads = ribbon width / ambient. Preview === Export. |
