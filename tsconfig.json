@@ -18,7 +18,7 @@
     "noUncheckedSideEffectImports": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "docs/ai-director/contracts"],
   "exclude": [
     "tests/media/user-fixtures.test.ts",
     "tests/export/afe-parser.test.ts",
