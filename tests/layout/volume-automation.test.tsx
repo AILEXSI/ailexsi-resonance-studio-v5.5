@@ -62,6 +62,12 @@ describe("volume automation lane chrome", () => {
       onToggleWrite?: (id: TrackId) => void;
     } = {},
   ) {
+    if (root) {
+      act(() => {
+        root!.unmount();
+      });
+    }
+    host?.remove();
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
