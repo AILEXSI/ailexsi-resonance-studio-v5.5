@@ -61,7 +61,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | LEXI | FLOW family, **7** selectable scenes: `lexi` · `lexi-ref` · `lexi-2036` · `lexi-v3` · `lexi-v2` · `lexi-minimal` · `lexi-v1`. Hierarchical browser (ALL / LEXI / CLASSIC). VIS styles menu **apply** uses the same rematerialize path as cycle; title-bar **drag** + viewport clamp. |
 | UI Finalization | Inspector OPEN/CLOSED fold (existing h-split); Timeline Focus on the Preview/Arrange splitter; ARRANGE/CUTTER segmented look; Transport grouping via separators. No new shortcuts. |
 | Track headers | Progressive overflow only (no density modes). Identity + Mute always direct. Semantic divider floor **80px** (`headerUsableMinPx` = `LANE_LABEL_MIN_PX`). Compact glyphs M/S/W/VOL; overflow menu uses readable Resonance labels + live state. Popup: below if it fits, else flip above, else taller side + internal scroll. Portaled like the VIS overlay. |
-| Protected baselines | **VIS-RESPONSE-02** HUMAN-PROVEN 2026-09-17 (*perfect*). Long-form numbers already documented — do not invent new ones: VIS-SYNC-01 **~34:18** and **~64 min** VIDEO+VIS+AAC; AUDIO-01 **~29:11** 1080p30; ENC-01 1080p24/25/30 (`0ec7758`). Chrome **90/90/90** stays AUTOMATED-TESTED. |
+| Protected baselines | **VIS-RESPONSE-02** HUMAN-PROVEN 2026-09-17 (*perfect*). Long-form numbers already documented — do not invent new ones: VIS-SYNC / long-form VIDEO+VIS+AAC stack includes documented **~34:18**, **~64 min**, and HUMAN **~90 min (01:30:30)** (`Msster_Resonance.v190.mp4`, Windows Media Player, modified 2026-09-17 02:24, ~1.76 GB); AUDIO-01 **~29:11** 1080p30; ENC-01 1080p24/25/30 (`0ec7758`). Chrome **90/90/90** stays AUTOMATED-TESTED. |
 | Release note | `docs/V5.6-RELEASE.md` |
 
 ## ENC-01 — 1080p AVC encoder capability
@@ -185,7 +185,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Untouched | Analyser core; AUDIO-01; AFE; ENC-01; STRESS mux; volume. |
 | Test | Same vis-response file + 02 vs 01 assertions + lattice/wave geometry (20). |
 | Gates | `tsc --noEmit` clean. Focused VIS-RESPONSE + VIS-SYNC-01 + visualizer + vis-events/cues/edit + AUDIO-01 + export + aac-mux + ENC-01 **134/134**. |
-| Human | **PASSED** 2026-09-17 M.G.M. *perfect*. Short Impact check, MODE B EXE tip `cc3cd08` / SHA256 `4A080D0F1369091F6F96E7A0BB7F9E6DFF74DC2923EBF6EF75FF658EC142CEFB`. Prior 01 soft-PASS (~6 min Lattice 1080p30+AAC). Locked: gain 1.25 / gamma 0.68 / spread 18 / transient 0.38; `scene-impact.ts`; no AGC; Preview=Export. Stack rests on ENC-01, STRESS-01..04, AUDIO-01/01b, VIS-SYNC-01 (~34:18 and ~64 min VIDEO+VIS+AAC). Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
+| Human | **PASSED** 2026-09-17 M.G.M. *perfect*. Short Impact check, MODE B EXE tip `cc3cd08` / SHA256 `4A080D0F1369091F6F96E7A0BB7F9E6DFF74DC2923EBF6EF75FF658EC142CEFB`. Prior 01 soft-PASS (~6 min Lattice 1080p30+AAC). Locked: gain 1.25 / gamma 0.68 / spread 18 / transient 0.38; `scene-impact.ts`; no AGC; Preview=Export. Stack rests on ENC-01, STRESS-01..04, AUDIO-01/01b, VIS-SYNC-01 (~34:18, ~64 min, and HUMAN ~90 min / 01:30:30 VIDEO+VIS+AAC). Details: `docs/compliance/VIS-RESPONSE-02-KICK-MID.md`. |
 
 ## VIS-SCENE-LEXI — cinematic horizon flow
 
