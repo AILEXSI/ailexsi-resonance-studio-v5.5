@@ -8,7 +8,7 @@ User (M.G.M.): *besser vis und rest funktioniert kannst alles anpassen.*
 
 Clip: ~357.8 s 1920×1080@30 H.264+AAC, lattice-style scene (central orb + horizontal resonance waves). Audio present (RMS roughly −41…−9 dB, median ~−18 dB). Pipeline still works. Full permission to retune **presentation** only.
 
-Protected: ~34:18 and ~64 min VIDEO+VIS+AUDIO stability. Analyser / mux / encoder unchanged.
+Protected: VIS-SYNC / long-form VIDEO+VIS+AAC stack includes documented **~34:18**, **~64 min**, and HUMAN **~90 min (01:30:30)** (`Msster_Resonance.v190.mp4`). Analyser / mux / encoder unchanged.
 
 ## What 01 left on the table
 
@@ -65,13 +65,15 @@ VIS-SYNC-01 analyser (fft 2048, Blackman, dB `[-100,-30]`, smoothing 0.75). AUDI
 | Locked defaults | `gain` 1.25 · `gamma` 0.68 · `spectrumSpreadBins` 18 · `transientBoost` 0.38 |
 | Shared | `src/core/visualz/scene-impact.ts` (Resonance Wave + Void Lattice). No AGC. Preview = Export. |
 
-### Stack this rests on (already proven earlier — no new numbers)
+### Stack this rests on (already proven earlier — no invented timings)
 
 This presentation layer sits on the long-form VIDEO+VIS+AAC chain already accepted before 02:
 
 - **ENC-01** — 1920×1080 H.264 @ 24/25/30 (EXE tip `0ec7758`)
 - **STRESS-01..04** — clip-start PTS, call-stack dump, pre-request source, mux arg overflow
 - **AUDIO-01 / AUDIO-01b** — long-form AAC present and audible
-- **VIS-SYNC-01** — Preview/Export real-FFT parity on the ~34:18 and ~64 min VIDEO+VIS+AAC projects
+- **VIS-SYNC-01** — Preview/Export real-FFT parity; long-form VIDEO+VIS+AAC stack includes documented **~34:18**, **~64 min**, and HUMAN **~90 min (01:30:30)** (`Msster_Resonance.v190.mp4`)
+
+Additional HUMAN long-form evidence (omitted from earlier GitHub cites that stopped at ~64 min): operator M.G.M. file `Msster_Resonance.v190.mp4`, Windows Media Player duration **01:30:30**, Explorer modified **2026-09-17 02:24**, ~**1.76 GB**. Screenshot: `docs/longform-90min-acceptance-2026-09-17.png`. This is media-baseline evidence, not a new V5.6 feature stamp. EXE SHA for that export is unknown — do not invent. Not AUDIO-02 / 2 h streaming.
 
 Do not start AUDIO-02. Coordinator consolidates this stack to main.
