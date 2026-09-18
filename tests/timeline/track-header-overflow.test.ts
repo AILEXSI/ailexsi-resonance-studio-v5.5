@@ -192,7 +192,7 @@ describe("track header overflow policy", () => {
   });
 
   it("does not change lane height packing or version", () => {
-    expect(AILEXSI_PRODUCT_VERSION).toBe("5.6.0");
+    expect(AILEXSI_PRODUCT_VERSION).toBe("6.0.0");
     expect(laneHeaderPacksInline(DEFAULT_LANE_HEIGHT_PX)).toBe(false);
     expect(LANE_LABEL_MIN_PX).toBe(headerUsableMinPx());
     expect(HEADER_WIDTH_MIN_PX).toBe(LANE_LABEL_MIN_PX);

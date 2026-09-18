@@ -380,7 +380,7 @@ describe("track header overflow DOM", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(q("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(true);
-    expect(window.localStorage.getItem("resonance-studio-v5-5-header-overflow")).toBeNull();
+    expect(window.localStorage.getItem("resonance-studio-v6-0-header-overflow")).toBeNull();
   });
 
   it("RH-23 CUTTER hides audio headers; VIS/VIDEO overflow policy still applies", () => {
@@ -399,8 +399,8 @@ describe("track header overflow DOM", () => {
     expect(host!.querySelector("[data-testid=lane-overflow-V1]")).toBeNull();
   });
 
-  it("RH-18 product version stays 5.6.0", () => {
-    expect(AILEXSI_PRODUCT_VERSION).toBe("5.6.0");
+  it("RH-18 product version stays 6.0.0", () => {
+    expect(AILEXSI_PRODUCT_VERSION).toBe("6.0.0");
   });
 
   it("overflow menu items reuse live Solo/Write/VOL/Group state", () => {

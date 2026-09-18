@@ -3,13 +3,13 @@
 # parse parentheses as expressions.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$product = 'AILEXSI Resonance Studio V5.6'
+$product = 'AILEXSI Resonance Studio V6.0'
 $release = Join-Path $repo 'src-tauri\target\release'
 $dest = Join-Path $repo ($product + '.exe')
 
 $candidates = @(
   (Join-Path $release ($product + '.exe')),
-  (Join-Path $release 'ailexsi-resonance-studio-v5-5.exe')
+  (Join-Path $release 'ailexsi-resonance-studio-v6-0.exe')
 )
 
 $found = $null

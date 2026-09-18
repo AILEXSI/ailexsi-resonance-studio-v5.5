@@ -54,7 +54,7 @@ function Wait-V55Ready {
 }
 
 $root = Get-V55Root
-$exe = Join-Path $root 'AILEXSI Resonance Studio V5.6.exe'
+$exe = Join-Path $root 'AILEXSI Resonance Studio V6.0.exe'
 if (Test-Path -LiteralPath $exe) {
     Write-Host ('Starte EXE: ' + $exe)
     Start-Process -FilePath $exe
@@ -72,12 +72,12 @@ if ($OpenOnly) {
 
 Set-Location -LiteralPath $root
 try {
-    $Host.UI.RawUI.WindowTitle = 'AILEXSI Resonance Studio V5.6'
+    $Host.UI.RawUI.WindowTitle = 'AILEXSI Resonance Studio V6.0'
 } catch {
     # non-interactive host
 }
 
-Write-Host 'AILEXSI Resonance Studio V5.6'
+Write-Host 'AILEXSI Resonance Studio V6.0'
 Write-Host ('Ordner: ' + $root)
 Write-Host 'Keine lokale EXE - starte Vite Dev.'
 Write-Host ''

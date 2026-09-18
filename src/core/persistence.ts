@@ -37,7 +37,7 @@ export function createMemoryBlobStore(): BlobStore {
   };
 }
 
-const DB_NAME = "resonance-studio-v5-5";
+const DB_NAME = "resonance-studio-v6-0";
 const STORE = "media-blobs";
 const DB_VERSION = 1;
 

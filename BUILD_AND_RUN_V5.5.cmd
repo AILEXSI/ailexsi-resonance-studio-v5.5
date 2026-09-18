@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title AILEXSI Resonance Studio V5.6 - Build and Run
+title AILEXSI Resonance Studio V6.0 - Build and Run
 cd /d "%~dp0"
 
 if not exist "%~dp0package.json" (

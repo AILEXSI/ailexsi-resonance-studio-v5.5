@@ -5,8 +5,8 @@ rem Startdatei for Resonance Studio V6.0. Prefer INSTALL_BUILD_RUN_V6.0.cmd.
 cd /d "%~dp0"
 
 if not exist "%~dp0package.json" (
-  echo Fehler: package.json fehlt. Start-V5.cmd muss im V5.5-Repo-Wurzelordner liegen.
-  echo Nicht in ResonanceStudio V4 starten.
+  echo Fehler: package.json fehlt. Start-V6.cmd muss im V6.0-Repo-Wurzelordner liegen.
+  echo Nicht in ResonanceStudio V4 / V5.6-Archiv starten.
   pause
   exit /b 1
 )

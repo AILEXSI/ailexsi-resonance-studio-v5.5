@@ -82,7 +82,7 @@ function Invoke-NpmCmd {
 $root = Get-V55Root
 Set-Location -LiteralPath $root
 
-Write-Host 'AILEXSI Resonance Studio V5.6 - Windows build'
+Write-Host 'AILEXSI Resonance Studio V6.0 - Windows build'
 Write-Host ('Ordner: ' + $root)
 Write-Host ''
 
@@ -126,7 +126,7 @@ if ($code -ne 0) {
     exit 1
 }
 
-$exe = Join-Path $root 'AILEXSI Resonance Studio V5.6.exe'
+$exe = Join-Path $root 'AILEXSI Resonance Studio V6.0.exe'
 if (Test-Path -LiteralPath $exe) {
     Write-Host ('EXE: ' + $exe)
 } else {

@@ -1,10 +1,10 @@
 @echo off
 setlocal
-title AILEXSI Resonance Studio V6.0 - Install / Build / Run
+title AILEXSI Resonance Studio V6.0 - Build and Run
 cd /d "%~dp0"
 
 if not exist "%~dp0package.json" (
-  echo Fehler: package.json fehlt. INSTALL_BUILD_RUN_V5.5.cmd muss im V5.5-Repo-Wurzelordner liegen.
+  echo Fehler: package.json fehlt. BUILD_AND_RUN_V6.0.cmd muss im V6.0-Repo-Wurzelordner liegen.
   pause
   exit /b 1
 )
@@ -32,32 +32,16 @@ if not defined NPM_CMD (
   exit /b 1
 )
 
-where rustc >nul 2>&1
-if errorlevel 1 (
-  echo Hinweis: rustc fehlt. Tauri-EXE-Build wird fehlschlagen. Vite-Dev ist trotzdem moeglich.
-)
-
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-v5.5-windows.ps1"
 if errorlevel 1 (
-  echo Build fehlgeschlagen. Starte Dev-Fallback...
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-v5.5.ps1"
-  set "ERR=%ERRORLEVEL%"
-  if not "%ERR%"=="0" if not "%ERR%"=="10" pause
+  echo.
+  pause
   endlocal
-  exit /b %ERR%
+  exit /b 1
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-v5.5.ps1"
 set "ERR=%ERRORLEVEL%"
-if "%ERR%"=="10" (
-  echo Bereit: http://127.0.0.1:1421
-  pause
-  endlocal
-  exit /b 0
-)
-if not "%ERR%"=="0" (
-  echo.
-  pause
-)
+if not "%ERR%"=="0" if not "%ERR%"=="10" pause
 endlocal
 exit /b %ERR%

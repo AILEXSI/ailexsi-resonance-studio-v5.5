@@ -1,18 +1,18 @@
-# AILEXSI Resonance Studio V5.6
+# AILEXSI Resonance Studio V6.0
 
-Version **5.6.0**. Product chip **`V5.6.0`**. JSON `schemaVersion` **5**.
+Version **6.0.0**. Product chip **`V6.0.0`**. JSON `schemaVersion` **5**.
 
-First-party Frame Engine. Mediabunny-free. Source lineage: V5 AFE-03 `4e80162` working tree (no V5 git history, V5 repo not modified, PR #23/#24/#25 not merged).
+Active development line. Baseline = final HUMAN-PROVEN V5.6 (`v5.6.0-final`). First-party Frame Engine. Mediabunny-free. Full git history from https://github.com/AILEXSI/ailexsi-resonance-studio-v5.6 (V5.6 is a frozen archive — not deleted).
 
-One-look table: `CURRENT.md`. V5.6 release: `docs/V5.6-RELEASE.md`. Bootstrap: `docs/V5.5-BOOTSTRAP.md`. Human acceptance: `docs/V5.5-HUMAN-ACCEPTANCE.md`.
+One-look table: `CURRENT.md`. V6 baseline: `docs/V6.0-BASELINE.md`. V5.6 freeze: `docs/V5.6-FINAL-FREEZE.md`. V5.6 release: `docs/V5.6-RELEASE.md`. Human acceptance: `docs/V5.5-HUMAN-ACCEPTANCE.md`.
 
 ## What this is
 
 Local-first arrange / cutter / mixer / export. Export is H.264 MP4 via WebCodecs. **Frame Engine: AILEXSI** only. Preview may use HTMLVideo. Export does not fall back to HTMLVideo.
 
-Preserved from V5: D dynamic audio, E stem import, F track/chapter groups, G volume automation, H write volume, transport, VIS, mixer, save/export `.vN`, AFE-03 decode optimizations.
+Preserved from V5.6: D dynamic audio, E stem import, F track/chapter groups, G volume automation, H write volume, transport, VIS / LEXI FLOW, mixer, save/export `.vN`, AILEXSI Frame Engine, ENC-01 1080p.
 
-No new features in this bootstrap. **ENC-01** selects an H.264 level/profile the platform supports (720p keeps `avc1.42001f` when legal). **1080p H.264 @ 24/25/30 is HUMAN-PROVEN** on Windows WebView2 EXE tip `0ec7758`. AFE remains closed.
+**1080p H.264 @ 24/25/30 is HUMAN-PROVEN** on Windows WebView2 EXE tip `0ec7758`. Long-form VIDEO+VIS+AAC is HUMAN-PROVEN at **~34:18**, **~64 min**, and **~90 min (01:30:30)**. Do not invent 120/160 min HUMAN-PROVEN.
 
 ## Start
 
@@ -31,32 +31,34 @@ npx tauri dev
 Windows (operator machine):
 
 ```
-INSTALL_BUILD_RUN_V5.5.cmd
-BUILD_AND_RUN_V5.5.cmd
+INSTALL_BUILD_RUN_V6.0.cmd
+BUILD_AND_RUN_V6.0.cmd
 ```
 
-Standalone EXE (MODE B, Windows):
+(`INSTALL_BUILD_RUN_V5.5.cmd` / `BUILD_AND_RUN_V5.5.cmd` still call the same helpers.)
+
+Standalone EXE (MODE B, Windows host):
 
 ```
 npm run tauri:exe
 ```
 
-Copies `AILEXSI Resonance Studio V5.6.exe` to the repo root when the Windows toolchain is present.
+Copies `AILEXSI Resonance Studio V6.0.exe` to the repo root when the Windows toolchain is present. This Linux environment cannot produce that EXE — see `docs/V6.0-BASELINE.md` for the Windows recipe. Do not commit `*.exe` to git.
 
 ## Top bar
 
-`File | Import | Export | ARRANGE | CUTTER` plus permanent top-right **`V5.6.0`**.
+`File | Import | Export | ARRANGE | CUTTER` plus permanent top-right **`V6.0.0`**.
 
 Export dialog shows **`Frame Engine: AILEXSI`** from `getFrameSourceBackend()`.
 
 ## Storage
 
-Separate from V5: `resonance-studio-v5-5*` keys and Tauri identifier `com.ailexsi.resonance-studio-v5-5`.
+V6-specific, side-by-side with V5.6: `resonance-studio-v6-0*` keys and Tauri identifier `com.ailexsi.resonance-studio-v6-0`. Project JSON `schemaVersion` **5** still opens. V5.6 AppData (`com.ailexsi.resonance-studio-v5-5`) is not migrated and is not overwritten.
 
 ## Compliance
 
 Engineering SBOMs: `docs/compliance/`. No `LICENSE` / `THIRD_PARTY_NOTICES`. This product does **not** claim MPL FREE.
 
-Historical V5 evidence (`V5-EVIDENCE.md`, `docs/ACCEPTANCE.md`) is labelled historical.
+Historical V5 / V5.5 / V5.6 evidence remains labelled historical.
 
 App icon: **愛** — Tauri icons in `src-tauri/icons/`. Icons nicht anfassen.

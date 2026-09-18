@@ -169,9 +169,9 @@ describe("AFE-20 A–H SOFT freeze after recreate must not hide sample 81", () =
       decoderRecreateCount: 1,
       recoveryAttempts: 1,
     });
-    expect(text.startsWith("productVersion 5.6.0; gitSha ")).toBe(true);
+    expect(text.startsWith("productVersion 6.0.0; gitSha ")).toBe(true);
     const head = text.slice(0, 800);
-    expect(head).toContain("productVersion 5.6.0");
+    expect(head).toContain("productVersion 6.0.0");
     expect(head).toContain("frameEngine AILEXSI");
     expect(head).toContain("requested sample 81 PTS 3416667");
     expect(head).toContain("lastSubmittedSample 75");

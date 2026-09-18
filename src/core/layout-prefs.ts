@@ -1,13 +1,13 @@
 /** Session chrome (mixer/inspector fold + preview/arrange split). localStorage is enough. */
 
-export const MIXER_COLLAPSED_KEY = "resonance-studio-v5-5-mixer-collapsed";
-export const INSPECTOR_COLLAPSED_KEY = "resonance-studio-v5-5-inspector-collapsed";
-export const SPLIT_RATIO_KEY = "resonance-studio-v5-5-preview-split";
-export const H_SPLIT_RATIO_KEY = "resonance-studio-v5-5-preview-h-split";
-export const TIMELINE_FOCUS_KEY = "resonance-studio-v5-5-timeline-focus";
-export const NORMAL_SPLIT_RATIO_KEY = "resonance-studio-v5-5-normal-preview-split";
-export const LANE_LABEL_PX_KEY = "resonance-studio-v5-5-lane-label-px";
-export const LANE_HEIGHTS_KEY = "resonance-studio-v5-5-lane-heights";
+export const MIXER_COLLAPSED_KEY = "resonance-studio-v6-0-mixer-collapsed";
+export const INSPECTOR_COLLAPSED_KEY = "resonance-studio-v6-0-inspector-collapsed";
+export const SPLIT_RATIO_KEY = "resonance-studio-v6-0-preview-split";
+export const H_SPLIT_RATIO_KEY = "resonance-studio-v6-0-preview-h-split";
+export const TIMELINE_FOCUS_KEY = "resonance-studio-v6-0-timeline-focus";
+export const NORMAL_SPLIT_RATIO_KEY = "resonance-studio-v6-0-normal-preview-split";
+export const LANE_LABEL_PX_KEY = "resonance-studio-v6-0-lane-label-px";
+export const LANE_HEIGHTS_KEY = "resonance-studio-v6-0-lane-heights";
 
 export const DEFAULT_LANE_LABEL_PX = 96;
 /**
@@ -37,8 +37,8 @@ export const PREVIEW_H_MIN_PX = 200;
 export const INSPECTOR_MIN_PX = 180;
 export const H_SPLITTER_PX = 14;
 export const DEFAULT_H_SPLIT_RATIO = 0.74;
-export const GROUP_COLLAPSED_KEY = "resonance-studio-v5-5-group-collapsed";
-export const VOLUME_LANE_OPEN_KEY = "resonance-studio-v5-5-volume-lane-open";
+export const GROUP_COLLAPSED_KEY = "resonance-studio-v6-0-group-collapsed";
+export const VOLUME_LANE_OPEN_KEY = "resonance-studio-v6-0-volume-lane-open";
 /** Extra Volume sub-lane height. Clip lanes stay at their existing height. */
 export const VOLUME_LANE_HEIGHT_PX = 48;
 /** Chapter/group header row. Collapse UI only — not a clip lane. */
@@ -49,7 +49,7 @@ export function fixedLaneBoxStyle(px: number): { height: number; minHeight: numb
   const h = Number.isFinite(px) ? Math.max(1, Math.round(px)) : DEFAULT_LANE_HEIGHT_PX;
   return { height: h, minHeight: h, maxHeight: h };
 }
-export const MIXER_WIDTH_KEY = "resonance-studio-v5-5-mixer-width";
+export const MIXER_WIDTH_KEY = "resonance-studio-v6-0-mixer-width";
 export const MIXER_EXPANDED_PX = 228;
 export const MIXER_COLLAPSED_PX = 56;
 /** Expanded mixer: MST + ≥1 channel peek + chrome. Never 0. */

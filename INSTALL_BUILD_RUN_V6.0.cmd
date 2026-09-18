@@ -4,7 +4,7 @@ title AILEXSI Resonance Studio V6.0 - Install / Build / Run
 cd /d "%~dp0"
 
 if not exist "%~dp0package.json" (
-  echo Fehler: package.json fehlt. INSTALL_BUILD_RUN_V5.5.cmd muss im V5.5-Repo-Wurzelordner liegen.
+  echo Fehler: package.json fehlt. INSTALL_BUILD_RUN_V6.0.cmd muss im V6.0-Repo-Wurzelordner liegen.
   pause
   exit /b 1
 )

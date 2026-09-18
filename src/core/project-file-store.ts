@@ -17,7 +17,7 @@ export function createMemoryProjectFileStore(initial?: ProjectFileMemory): Proje
   };
 }
 
-const DB_NAME = "resonance-studio-v5-5-project-file";
+const DB_NAME = "resonance-studio-v6-0-project-file";
 const STORE = "kv";
 const KEY = "project-file";
 

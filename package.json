@@ -1,6 +1,6 @@
 {
-  "name": "@ailexsi/resonance-studio-v5.5",
-  "version": "5.6.0",
+  "name": "@ailexsi/resonance-studio-v6.0",
+  "version": "6.0.0",
   "private": true,
   "type": "module",
   "scripts": {

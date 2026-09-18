@@ -1,12 +1,12 @@
 /**
  * Build identity baked at Vite/Tauri frontend compile time.
  * Single source for stall dumps and export fail dialog text.
- * Product version stays 5.6.0 / schema 5. SHA comes from
+ * Product version stays 6.0.0 / schema 5. SHA comes from
  * `git rev-parse --short HEAD` via vite define (see vite.config.ts).
  */
 
 export const AILEXSI_FRAME_ENGINE = "AILEXSI";
-export const AILEXSI_PRODUCT_VERSION = "5.6.0";
+export const AILEXSI_PRODUCT_VERSION = "6.0.0";
 
 function definedToken(value: unknown, fallback: string): string {
   if (typeof value === "string" && value.length > 0 && value !== "undefined") return value;
