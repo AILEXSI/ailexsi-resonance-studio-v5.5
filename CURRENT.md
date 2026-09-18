@@ -2,7 +2,7 @@
 
 Ein Blick. Kein Wunschzettel.
 
-**V6.0** is the **active development line**. It began as an exact continuation of final HUMAN-PROVEN V5.6 (`v5.6.0-final` @ `69f4b307fc9b5142a35fe096a814a43e3a07c6b3`). This tree's first V6 commit is identity-only: productVersion **6.0.0**, JSON `schemaVersion` **5**, Frame Engine **AILEXSI**. No feature work.
+**V6.0** is the **active development line**. It began as an exact continuation of final HUMAN-PROVEN V5.6 (`v5.6.0-final` @ `69f4b307fc9b5142a35fe096a814a43e3a07c6b3`). This tree's first V6 commit is identity-only: productVersion **6.0.0**, JSON `schemaVersion` **5**, Frame Engine **AILEXSI**. No feature work. Baseline: `docs/V6.0-BASELINE.md`.
 
 **V5.6** is a **frozen archive** — https://github.com/AILEXSI/ailexsi-resonance-studio-v5.6 · `docs/V5.6-FINAL-FREEZE.md`. Do not rewrite the V5.5/V5.6 evidence numbers below.
 
