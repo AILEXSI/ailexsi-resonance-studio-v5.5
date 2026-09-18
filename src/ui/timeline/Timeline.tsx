@@ -62,6 +62,15 @@ import {
   type ArrangeRow,
 } from "../../core/track-groups";
 import { VolumeAutomationLane } from "./VolumeAutomationLane";
+import { TrackHeaderOverflowButton, TrackHeaderOverflowMenu } from "./TrackHeaderOverflow";
+import {
+  controlIsDirect,
+  controlIsOverflowed,
+  planTrackHeaderOverflow,
+  resolveHeaderWidth,
+  stabilizeHeaderWidth,
+  type HeaderControlId,
+} from "./track-header-overflow";
 
 export { RULER_PAD_PX };
 
@@ -226,6 +235,7 @@ function LaneGroupAssign({
     <select
       className="lane-group-assign"
       data-testid={`lane-group-assign-${trackId}`}
+      data-header-control="groupAssign"
       aria-label="Track group"
       title="Assign to chapter group"
       value={groupId ?? ""}
@@ -471,6 +481,9 @@ export function Timeline({
   const [viewWidth, setViewWidth] = useState(1000);
   const [visBrowserOpen, setVisBrowserOpen] = useState(false);
   const [visBrowserPos, setVisBrowserPos] = useState({ left: 108, top: 72 });
+  const [headerWidthPx, setHeaderWidthPx] = useState(laneLabelPx);
+  const [overflowOpenId, setOverflowOpenId] = useState<string | null>(null);
+  const [overflowPos, setOverflowPos] = useState({ left: 8, top: 8 });
   const visHeaderRef = useRef<HTMLDivElement>(null);
   const visBrowserRef = useRef<HTMLDivElement>(null);
   const visBrowserDragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -557,6 +570,42 @@ export function Timeline({
     setViewWidth(el.clientWidth || 1000);
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    const el = visHeaderRef.current;
+    const apply = (raw: number) => {
+      const resolved = resolveHeaderWidth(raw, laneLabelPx);
+      setHeaderWidthPx((prev) => stabilizeHeaderWidth(prev, resolved));
+    };
+    apply(el?.clientWidth ?? 0);
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => apply(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [laneLabelPx]);
+
+  useEffect(() => {
+    setOverflowOpenId(null);
+  }, [headerWidthPx]);
+
+  useEffect(() => {
+    if (!overflowOpenId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOverflowOpenId(null);
+    };
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if ((t as Element).closest?.("[data-header-overflow-root]")) return;
+      setOverflowOpenId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer, true);
+    };
+  }, [overflowOpenId]);
 
   useEffect(() => {
     onViewport?.(viewWidth);
@@ -680,6 +729,7 @@ export function Timeline({
     setMenu(null);
     setMarkerMenu(null);
     setVisMenu(null);
+    setOverflowOpenId(null);
     onPlayhead(snapPlayheadSeek(project, timeFromEvent(e.clientX, e.currentTarget)));
   };
 
@@ -688,6 +738,7 @@ export function Timeline({
     setMenu(null);
     setMarkerMenu(null);
     setVisMenu(null);
+    setOverflowOpenId(null);
     onLoopClick(snapIf(timeFromEvent(e.clientX, e.currentTarget)));
   };
 
@@ -1104,6 +1155,34 @@ export function Timeline({
     audio: DEFAULT_LANE_HEIGHT_PX,
   };
   const visHeaderInline = laneHeaderPacksInline(heights.vis);
+  const visHeaderPresent: HeaderControlId[] = ["identity", "mute", "scene"];
+  const visHeaderPlan = planTrackHeaderOverflow({
+    kind: "vis",
+    widthPx: headerWidthPx,
+    pack: visHeaderInline ? "inline" : "stack",
+    present: visHeaderPresent,
+  });
+  const headerPlanFor = (
+    kind: "vis" | "video" | "audio",
+    present: readonly HeaderControlId[],
+    pack: boolean,
+  ) =>
+    planTrackHeaderOverflow({
+      kind,
+      widthPx: headerWidthPx,
+      pack: pack ? "inline" : "stack",
+      present,
+    });
+  const toggleOverflow = (id: string, anchor?: HTMLElement) => {
+    setMenu(null);
+    setMarkerMenu(null);
+    setVisMenu(null);
+    if (anchor) {
+      const rect = anchor.getBoundingClientRect();
+      setOverflowPos({ left: Math.round(rect.left), top: Math.round(rect.bottom + 2) });
+    }
+    setOverflowOpenId((cur) => (cur === id ? null : id));
+  };
 
   const onLaneLabelSplitterDown = (e: ReactPointerEvent) => {
     if (e.button !== 0) return;
@@ -1223,6 +1302,7 @@ export function Timeline({
     e.stopPropagation();
     onSelect(clip.id);
     setMarkerMenu(null);
+    setOverflowOpenId(null);
     setMenu({
       x: e.clientX,
       y: e.clientY,
@@ -1414,35 +1494,18 @@ export function Timeline({
         className={`lane vis-lane${project.visualizer.muted || !project.visualizer.enabled ? " muted" : ""}${selectedVis || selectedVisEventId || (selectedVisEventIds && selectedVisEventIds.length > 0) ? " track-selected" : ""}${visHeaderInline ? " lane-header-compact" : ""}`}
         data-testid="lane-VIS"
         data-header-pack={visHeaderInline ? "inline" : "stack"}
+        data-header-overflow={visHeaderPlan.overflow.length > 0 ? "true" : "false"}
         style={fixedLaneBoxStyle(heights.vis)}
       >
-        <div
-          ref={visHeaderRef}
-          className={`lane-label${onSetVisualizerScene ? " vis-lane-label-menu" : ""}`}
-          data-testid="lane-label-VIS"
-          data-header-pack={visHeaderInline ? "inline" : "stack"}
-          aria-haspopup={onSetVisualizerScene ? "dialog" : undefined}
-          aria-expanded={onSetVisualizerScene ? visBrowserOpen : undefined}
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest("[data-testid=mute-VIS]")) return;
-            if ((e.target as HTMLElement).closest("[data-testid=lane-label-splitter]")) return;
-            onSelectVis?.();
-            if (
-              onSetVisualizerScene &&
-              !(e.target as HTMLElement).closest("[data-testid=visualizer-scene]")
-            ) {
-              toggleVisBrowser();
-            }
-          }}
-        >
-          {laneLabelSplitter}
-          <span data-testid="vis-lane-name">VIS</span>
-          <div className="vis-lane-btns">
+        {(() => {
+          const visPlan = visHeaderPlan;
+          const visMute = (
             <button
               type="button"
               className={project.visualizer.muted ? "active mute-btn" : "mute-btn"}
               title={project.visualizer.muted ? "Unmute VIS" : "Mute VIS"}
               data-testid="mute-VIS"
+              data-header-control="mute"
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleVisualizerMute();
@@ -1450,11 +1513,14 @@ export function Timeline({
             >
               M
             </button>
+          );
+          const visScene = (
             <button
               type="button"
               className={`scene-btn${visBrowserOpen ? " open" : ""}`}
               title={visHeaderSceneId}
               data-testid="visualizer-scene"
+              data-header-control="scene"
               aria-haspopup={onSetVisualizerScene ? "dialog" : undefined}
               aria-expanded={onSetVisualizerScene ? visBrowserOpen : undefined}
               onClick={(e) => {
@@ -1469,8 +1535,57 @@ export function Timeline({
             >
               {sceneShortName(visHeaderSceneId)}
             </button>
+          );
+          return (
+        <div
+          ref={visHeaderRef}
+          className={`lane-label${onSetVisualizerScene ? " vis-lane-label-menu" : ""}`}
+          data-testid="lane-label-VIS"
+          data-header-pack={visHeaderInline ? "inline" : "stack"}
+          data-header-overflow={visPlan.overflow.length > 0 ? "true" : "false"}
+          data-header-overflow-root=""
+          aria-haspopup={onSetVisualizerScene ? "dialog" : undefined}
+          aria-expanded={onSetVisualizerScene ? visBrowserOpen : undefined}
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("[data-testid=mute-VIS]")) return;
+            if ((e.target as HTMLElement).closest("[data-testid=lane-overflow-VIS]")) return;
+            if ((e.target as HTMLElement).closest("[data-testid=lane-label-splitter]")) return;
+            onSelectVis?.();
+            if (
+              onSetVisualizerScene &&
+              !(e.target as HTMLElement).closest("[data-testid=visualizer-scene]")
+            ) {
+              toggleVisBrowser();
+            }
+          }}
+        >
+          {laneLabelSplitter}
+          <span data-testid="vis-lane-name" data-header-control="identity">VIS</span>
+          <div className="vis-lane-btns" data-header-slot="direct">
+            {controlIsDirect(visPlan, "mute") ? visMute : null}
+            {controlIsDirect(visPlan, "scene") ? visScene : null}
+            {visPlan.overflow.length > 0 ? (
+              <TrackHeaderOverflowButton
+                trackId="VIS"
+                open={overflowOpenId === "VIS"}
+                onToggle={(el) => toggleOverflow("VIS", el)}
+              />
+            ) : null}
           </div>
+          {visPlan.overflow.length > 0 ? (
+            <TrackHeaderOverflowMenu
+              trackId="VIS"
+              open={overflowOpenId === "VIS"}
+              left={overflowPos.left}
+              top={overflowPos.top}
+            >
+              {controlIsOverflowed(visPlan, "mute") ? visMute : null}
+              {controlIsOverflowed(visPlan, "scene") ? visScene : null}
+            </TrackHeaderOverflowMenu>
+          ) : null}
         </div>
+          );
+        })()}
         <div
           className="lane-body vis-body"
           data-testid="lane-VIS-body"
@@ -1678,18 +1793,30 @@ export function Timeline({
         const showAudioAdd = buttons.showAdd;
         const showAudioRemove = buttons.showRemove;
         const showCreateGroup = buttons.showGroup;
+        const headerKind = kind === "audio" ? "audio" : "video";
+        const headerPresent: HeaderControlId[] = ["identity", "mute", "solo"];
+        if (kind === "audio" && onToggleVolumeWriteArm) headerPresent.push("write");
+        if (kind === "audio" && onToggleVolumeLane) headerPresent.push("volume");
+        if (kind === "audio" && onAssignTracksToGroup) headerPresent.push("groupAssign");
+        if (showCreateGroup) headerPresent.push("groupCreate");
+        if (showAudioAdd) headerPresent.push("addAudio");
+        if (showAudioRemove) headerPresent.push("removeAudio");
+        const headerPlan = headerPlanFor(headerKind, headerPresent, headerInline);
         const clipLane = (
           <div
             className={`lane ${kind}-lane${muted ? " muted" : ""}${soloed ? " soloed" : ""}${selectedTrackIds?.includes(id) ? " track-selected" : ""}${headerInline ? " lane-header-compact" : ""}`}
             key={id}
             data-testid={`lane-${id}`}
             data-header-pack={headerInline ? "inline" : "stack"}
+            data-header-overflow={headerPlan.overflow.length > 0 ? "true" : "false"}
             style={fixedLaneBoxStyle(heights[group])}
           >
             <div
               className="lane-label"
               data-testid={`lane-label-${id}`}
               data-header-pack={headerInline ? "inline" : "stack"}
+              data-header-overflow={headerPlan.overflow.length > 0 ? "true" : "false"}
+              data-header-overflow-root=""
               onClick={(e) => {
                 if ((e.target as HTMLElement).closest("button, select, input")) return;
                 onSelectTrack?.(id, { toggle: e.ctrlKey || e.metaKey });
@@ -1701,6 +1828,7 @@ export function Timeline({
                   type="button"
                   className={`track-front-btn${(project.frontVideoTrackId === "V1" ? "V1" : "V2") === id ? " on" : ""}`}
                   data-testid={`front-${id}`}
+                  data-header-control="identity"
                   title={`Show ${id} on overlap`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1710,123 +1838,187 @@ export function Timeline({
                   {id}
                 </button>
               ) : (
-                <span>{label}</span>
+                <span data-header-control="identity">{label}</span>
               )}
-              {kind === "audio" && onAssignTracksToGroup ? (
-                <LaneGroupAssign
-                  trackId={id}
-                  groupId={track?.groupId}
-                  groups={listedGroups}
-                  onAssign={onAssignTracksToGroup}
-                  onCreate={(trackIds) => onCreateTrackGroup?.(trackIds)}
-                />
-              ) : null}
-              <div className="lane-ms">
-              <button
-                type="button"
-                className={muted ? "active mute-btn" : "mute-btn"}
-                title={muted ? `Unmute ${label}` : `Mute ${label}`}
-                data-testid={`mute-${id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleMute(id);
-                }}
-              >
-                M
-              </button>
-              <button
-                type="button"
-                className={soloed ? "active solo-btn" : "solo-btn"}
-                title={soloed ? `Unsolo ${label}` : `Solo ${label}`}
-                data-testid={`solo-${id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleSolo?.(id);
-                }}
-              >
-                S
-              </button>
-              {kind === "audio" && onToggleVolumeWriteArm ? (
-                <button
-                  type="button"
-                  className={volumeWriteArmedIds?.includes(id) ? "active write-arm-btn" : "write-arm-btn"}
-                  title={volumeWriteArmedIds?.includes(id) ? "Disarm volume write" : "Arm volume write"}
-                  aria-label={volumeWriteArmedIds?.includes(id) ? "Disarm volume write" : "Arm volume write"}
-                  data-testid={`write-arm-${id}`}
-                  aria-pressed={volumeWriteArmedIds?.includes(id) ? true : false}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleVolumeWriteArm(id);
-                    if (e.currentTarget instanceof HTMLElement) e.currentTarget.blur();
-                  }}
-                >
-                  W
-                </button>
-              ) : null}
-              {kind === "audio" && onToggleVolumeLane ? (
-                <button
-                  type="button"
-                  className={openVolumeLaneIds?.includes(id) ? "active volume-lane-btn" : "volume-lane-btn"}
-                  title={openVolumeLaneIds?.includes(id) ? "Hide volume automation" : "Show volume automation"}
-                  aria-label={openVolumeLaneIds?.includes(id) ? "Hide volume automation" : "Show volume automation"}
-                  data-testid={`volume-lane-toggle-${id}`}
-                  aria-pressed={openVolumeLaneIds?.includes(id) ? true : false}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleVolumeLane(id);
-                  }}
-                >
-                  VOL
-                </button>
-              ) : null}
-              </div>
-              {showAudioAdd || showAudioRemove || showCreateGroup ? (
-                <div className="lane-audio-count" data-testid={`lane-audio-count-${id}`}>
-                  {showCreateGroup ? (
+              {(() => {
+                const groupAssign =
+                  kind === "audio" && onAssignTracksToGroup ? (
+                    <LaneGroupAssign
+                      trackId={id}
+                      groupId={track?.groupId}
+                      groups={listedGroups}
+                      onAssign={onAssignTracksToGroup}
+                      onCreate={(trackIds) => onCreateTrackGroup?.(trackIds)}
+                    />
+                  ) : null;
+                const muteBtn = (
+                  <button
+                    type="button"
+                    className={muted ? "active mute-btn" : "mute-btn"}
+                    title={muted ? `Unmute ${label}` : `Mute ${label}`}
+                    data-testid={`mute-${id}`}
+                    data-header-control="mute"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleMute(id);
+                    }}
+                  >
+                    M
+                  </button>
+                );
+                const soloBtn = (
+                  <button
+                    type="button"
+                    className={soloed ? "active solo-btn" : "solo-btn"}
+                    title={soloed ? `Unsolo ${label}` : `Solo ${label}`}
+                    data-testid={`solo-${id}`}
+                    data-header-control="solo"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleSolo?.(id);
+                    }}
+                  >
+                    S
+                  </button>
+                );
+                const writeBtn =
+                  kind === "audio" && onToggleVolumeWriteArm ? (
                     <button
                       type="button"
-                      className="lane-audio-count-btn lane-group-create-btn"
-                      data-testid="create-track-group"
-                      title="Group selected audio tracks"
+                      className={volumeWriteArmedIds?.includes(id) ? "active write-arm-btn" : "write-arm-btn"}
+                      title={volumeWriteArmedIds?.includes(id) ? "Disarm volume write" : "Arm volume write"}
+                      aria-label={volumeWriteArmedIds?.includes(id) ? "Disarm volume write" : "Arm volume write"}
+                      data-testid={`write-arm-${id}`}
+                      data-header-control="write"
+                      aria-pressed={volumeWriteArmedIds?.includes(id) ? true : false}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onCreateTrackGroup?.();
+                        onToggleVolumeWriteArm(id);
+                        if (e.currentTarget instanceof HTMLElement) e.currentTarget.blur();
                       }}
                     >
-                      Grp
+                      W
                     </button>
-                  ) : null}
-                  {showAudioAdd ? (
+                  ) : null;
+                const volumeBtn =
+                  kind === "audio" && onToggleVolumeLane ? (
                     <button
                       type="button"
-                      className="lane-audio-count-btn"
-                      data-testid="add-audio-track"
-                      title="Add audio track"
-                      disabled={canAddAudioTrack === false}
+                      className={openVolumeLaneIds?.includes(id) ? "active volume-lane-btn" : "volume-lane-btn"}
+                      title={openVolumeLaneIds?.includes(id) ? "Hide volume automation" : "Show volume automation"}
+                      aria-label={openVolumeLaneIds?.includes(id) ? "Hide volume automation" : "Show volume automation"}
+                      data-testid={`volume-lane-toggle-${id}`}
+                      data-header-control="volume"
+                      aria-pressed={openVolumeLaneIds?.includes(id) ? true : false}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onAddAudioTrack?.();
+                        onToggleVolumeLane(id);
                       }}
                     >
-                      +
+                      VOL
                     </button>
-                  ) : null}
-                  {showAudioRemove ? (
-                    <button
-                      type="button"
-                      className="lane-audio-count-btn"
-                      data-testid="remove-audio-track"
-                      title="Remove audio track"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveAudioTrack?.();
-                      }}
-                    >
-                      −
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
+                  ) : null;
+                const groupCreateBtn = showCreateGroup ? (
+                  <button
+                    type="button"
+                    className="lane-audio-count-btn lane-group-create-btn"
+                    data-testid="create-track-group"
+                    data-header-control="groupCreate"
+                    title="Group selected audio tracks"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCreateTrackGroup?.();
+                    }}
+                  >
+                    Grp
+                  </button>
+                ) : null;
+                const addAudioBtn = showAudioAdd ? (
+                  <button
+                    type="button"
+                    className="lane-audio-count-btn"
+                    data-testid="add-audio-track"
+                    data-header-control="addAudio"
+                    title="Add audio track"
+                    disabled={canAddAudioTrack === false}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddAudioTrack?.();
+                    }}
+                  >
+                    +
+                  </button>
+                ) : null;
+                const removeAudioBtn = showAudioRemove ? (
+                  <button
+                    type="button"
+                    className="lane-audio-count-btn"
+                    data-testid="remove-audio-track"
+                    data-header-control="removeAudio"
+                    title="Remove audio track"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveAudioTrack?.();
+                    }}
+                  >
+                    −
+                  </button>
+                ) : null;
+                const showDirectChrome =
+                  (showCreateGroup && controlIsDirect(headerPlan, "groupCreate")) ||
+                  (showAudioAdd && controlIsDirect(headerPlan, "addAudio")) ||
+                  (showAudioRemove && controlIsDirect(headerPlan, "removeAudio"));
+                const showOverflowChrome =
+                  (showCreateGroup && controlIsOverflowed(headerPlan, "groupCreate")) ||
+                  (showAudioAdd && controlIsOverflowed(headerPlan, "addAudio")) ||
+                  (showAudioRemove && controlIsOverflowed(headerPlan, "removeAudio"));
+                return (
+                  <>
+                    {controlIsDirect(headerPlan, "groupAssign") ? groupAssign : null}
+                    <div className="lane-ms" data-header-slot="direct">
+                      {controlIsDirect(headerPlan, "mute") ? muteBtn : null}
+                      {controlIsDirect(headerPlan, "solo") ? soloBtn : null}
+                      {controlIsDirect(headerPlan, "write") ? writeBtn : null}
+                      {controlIsDirect(headerPlan, "volume") ? volumeBtn : null}
+                      {headerPlan.overflow.length > 0 ? (
+                        <TrackHeaderOverflowButton
+                          trackId={id}
+                          open={overflowOpenId === id}
+                          onToggle={(el) => toggleOverflow(id, el)}
+                        />
+                      ) : null}
+                    </div>
+                    {showDirectChrome ? (
+                      <div className="lane-audio-count" data-testid={`lane-audio-count-${id}`}>
+                        {controlIsDirect(headerPlan, "groupCreate") ? groupCreateBtn : null}
+                        {controlIsDirect(headerPlan, "addAudio") ? addAudioBtn : null}
+                        {controlIsDirect(headerPlan, "removeAudio") ? removeAudioBtn : null}
+                      </div>
+                    ) : null}
+                    {headerPlan.overflow.length > 0 ? (
+                      <TrackHeaderOverflowMenu
+                        trackId={id}
+                        open={overflowOpenId === id}
+                        left={overflowPos.left}
+                        top={overflowPos.top}
+                      >
+                        {controlIsOverflowed(headerPlan, "mute") ? muteBtn : null}
+                        {controlIsOverflowed(headerPlan, "solo") ? soloBtn : null}
+                        {controlIsOverflowed(headerPlan, "write") ? writeBtn : null}
+                        {controlIsOverflowed(headerPlan, "volume") ? volumeBtn : null}
+                        {controlIsOverflowed(headerPlan, "groupAssign") ? groupAssign : null}
+                        {showOverflowChrome ? (
+                          <div className="lane-audio-count" data-testid={`lane-audio-count-${id}`}>
+                            {controlIsOverflowed(headerPlan, "groupCreate") ? groupCreateBtn : null}
+                            {controlIsOverflowed(headerPlan, "addAudio") ? addAudioBtn : null}
+                            {controlIsOverflowed(headerPlan, "removeAudio") ? removeAudioBtn : null}
+                          </div>
+                        ) : null}
+                      </TrackHeaderOverflowMenu>
+                    ) : null}
+                  </>
+                );
+              })()}
             </div>
             <div
               className="lane-body"

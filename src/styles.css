@@ -1136,7 +1136,52 @@ body.media-asset-dragging .project-overlay-drawer {
   line-height: 16px;
   min-width: 16px;
 }
-.vis-lane-btns { display: flex; gap: 3px; }
+.vis-lane-btns {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
+}
+.lane-overflow-btn {
+  width: 14px;
+  min-width: 14px;
+  height: 16px;
+  padding: 0;
+  line-height: 14px;
+  font-size: 10px;
+  flex-shrink: 0;
+  color: var(--muted);
+  background: rgba(16, 20, 27, 0.45);
+  border: 1px solid rgba(238, 242, 247, 0.22);
+}
+.lane-overflow-btn.open {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--text);
+}
+.lane-overflow-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 140px;
+  width: max-content;
+}
+.lane-overflow-menu[hidden] {
+  display: none;
+}
+.lane-label > span[data-header-control="identity"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.lane-ms .mute-btn,
+.lane-ms .solo-btn,
+.lane-ms .write-arm-btn,
+.lane-ms .volume-lane-btn,
+.vis-lane-btns .mute-btn,
+.vis-lane-btns .scene-btn {
+  flex-shrink: 0;
+}
 .scene-btn {
   padding: 0 4px;
   font-size: 9px;
@@ -1309,11 +1354,12 @@ body.media-asset-dragging .project-overlay-drawer {
 }
 .lane-ms {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
   gap: 3px;
   max-width: 100%;
+  min-width: 0;
 }
 .lane-ms .mute-btn,
 .lane-ms .solo-btn {
@@ -1376,9 +1422,8 @@ body.media-asset-dragging .project-overlay-drawer {
 .lane.lane-header-compact .vis-lane-btns {
   flex: 0 0 auto;
 }
-/* Compact row keeps M/S/W/VOL; chapter assign stays on the default stacked header. */
-.lane.lane-header-compact .lane-group-assign {
-  display: none;
+.lane.lane-header-compact .lane-overflow-btn {
+  flex-shrink: 0;
 }
 .lane.lane-header-compact .mute-btn,
 .lane.lane-header-compact .solo-btn,
@@ -1421,8 +1466,8 @@ body.media-asset-dragging .project-overlay-drawer {
   .lane-label:has(.vis-lane-btns) .vis-lane-btns {
     flex: 0 0 auto;
   }
-  .lane-label:has(.lane-ms) .lane-group-assign {
-    display: none;
+  .lane-label:has(.lane-ms) .lane-overflow-btn {
+    flex-shrink: 0;
   }
   .lane-label:has(.lane-ms) .mute-btn,
   .lane-label:has(.lane-ms) .solo-btn,
