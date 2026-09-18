@@ -4,15 +4,18 @@
  * Identity is never overflowed. Width is measured (or laneLabelPx fallback); not persisted.
  */
 
-export const HEADER_WIDTH_WIDE_PX = 160;
+import { LANE_LABEL_MAX_PX, LANE_LABEL_MIN_PX } from "../../core/layout-prefs";
+
+export const HEADER_WIDTH_WIDE_PX = LANE_LABEL_MAX_PX;
 export const HEADER_WIDTH_MEDIUM_PX = 96;
 export const HEADER_WIDTH_NARROW_PX = 84;
-export const HEADER_WIDTH_MIN_PX = 72;
+/** Divider floor — identity + Mute + overflow. Not Solo/W/VOL/Group. */
+export const HEADER_WIDTH_MIN_PX = LANE_LABEL_MIN_PX;
 
 /** Extra chrome inset so the direct row breathes before secondaries pile on. */
 export const HEADER_PAD_PX = 8;
 export const HEADER_CONTROL_GAP_PX = 4;
-export const HEADER_OVERFLOW_BTN_PX = 14;
+export const HEADER_OVERFLOW_BTN_PX = 16;
 export const HEADER_HYSTERESIS_PX = 6;
 
 export type HeaderTrackKind = "vis" | "video" | "audio";
@@ -90,6 +93,55 @@ export function stabilizeHeaderWidth(
   if (!Number.isFinite(prevPx) || prevPx <= 0) return nextPx;
   if (Math.abs(nextPx - prevPx) < bandPx) return prevPx;
   return nextPx;
+}
+
+/** Tightest usable row: `A1 [M] [▾]`. Divider must not go below this. */
+export function headerUsableMinPx(): number {
+  return (
+    HEADER_PAD_PX +
+    HEADER_CONTROL_MIN_PX.identity +
+    HEADER_CONTROL_GAP_PX +
+    HEADER_CONTROL_MIN_PX.mute +
+    HEADER_CONTROL_GAP_PX +
+    HEADER_OVERFLOW_BTN_PX
+  );
+}
+
+export function headerOverflowLabel(
+  id: HeaderControlId,
+  state: {
+    muted?: boolean;
+    soloed?: boolean;
+    writeArmed?: boolean;
+    volumeLaneOpen?: boolean;
+    sceneName?: string;
+    groupName?: string;
+  } = {},
+): string {
+  switch (id) {
+    case "mute":
+      return state.muted ? "Unmute" : "Mute";
+    case "solo":
+      return state.soloed ? "Unsolo" : "Solo";
+    case "write":
+      return state.writeArmed ? "Disarm write automation" : "Write automation";
+    case "volume":
+      return state.volumeLaneOpen ? "Hide volume automation" : "Volume automation";
+    case "scene":
+      return state.sceneName ? `Scene · ${state.sceneName}` : "Scene";
+    case "groupAssign":
+      return state.groupName ? `Chapter group · ${state.groupName}` : "Chapter group";
+    case "groupCreate":
+      return "Group selected audio tracks";
+    case "addAudio":
+      return "Add audio track";
+    case "removeAudio":
+      return "Remove audio track";
+    case "identity":
+      return "Track";
+    default:
+      return id;
+  }
 }
 
 export function rowMinWidthPx(ids: readonly HeaderControlId[]): number {

@@ -141,7 +141,7 @@ describe("layout prefs", () => {
     expect(loadHSplitRatio(memoryStorage())).toBe(DEFAULT_H_SPLIT_RATIO);
   });
 
-  it("lane label width persists and clamps 72–160", () => {
+  it("lane label width persists and clamps semantic min–160", () => {
     expect(clampLaneLabelPx(96)).toBe(DEFAULT_LANE_LABEL_PX);
     expect(clampLaneLabelPx(10)).toBe(LANE_LABEL_MIN_PX);
     expect(clampLaneLabelPx(400)).toBe(LANE_LABEL_MAX_PX);

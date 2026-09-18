@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   HEADER_CONTROL_MIN_PX,
   HEADER_HYSTERESIS_PX,
+  HEADER_OVERFLOW_BTN_PX,
   HEADER_PRIORITY,
   HEADER_WIDTH_MEDIUM_PX,
   HEADER_WIDTH_MIN_PX,
@@ -10,6 +11,8 @@ import {
   controlIsDirect,
   controlIsOverflowed,
   headerControlsExclusive,
+  headerOverflowLabel,
+  headerUsableMinPx,
   planTrackHeaderOverflow,
   resolveHeaderWidth,
   stabilizeHeaderWidth,
@@ -22,6 +25,7 @@ import {
   DEFAULT_LANE_HEIGHT_PX,
   LANE_LABEL_MAX_PX,
   LANE_LABEL_MIN_PX,
+  clampLaneLabelPx,
   laneHeaderPacksInline,
 } from "../../src/core/layout-prefs";
 
@@ -172,7 +176,7 @@ describe("track header overflow policy", () => {
 
   it("measured width wins; zero/NaN falls back to laneLabelPx", () => {
     expect(resolveHeaderWidth(140, 96)).toBe(140);
-    expect(resolveHeaderWidth(0, 72)).toBe(72);
+    expect(resolveHeaderWidth(0, HEADER_WIDTH_MIN_PX)).toBe(HEADER_WIDTH_MIN_PX);
     expect(resolveHeaderWidth(Number.NaN, 96)).toBe(96);
   });
 
@@ -188,8 +192,40 @@ describe("track header overflow policy", () => {
   it("does not change lane height packing or version", () => {
     expect(AILEXSI_PRODUCT_VERSION).toBe("5.6.0");
     expect(laneHeaderPacksInline(DEFAULT_LANE_HEIGHT_PX)).toBe(false);
-    expect(LANE_LABEL_MIN_PX).toBe(72);
+    expect(LANE_LABEL_MIN_PX).toBe(headerUsableMinPx());
+    expect(HEADER_WIDTH_MIN_PX).toBe(LANE_LABEL_MIN_PX);
     expect(LANE_LABEL_MAX_PX).toBe(160);
+    expect(HEADER_OVERFLOW_BTN_PX).toBeGreaterThanOrEqual(14);
+  });
+
+  it("semantic min is identity + Mute + overflow only; divider cannot go below", () => {
+    expect(headerUsableMinPx()).toBe(LANE_LABEL_MIN_PX);
+    expect(headerUsableMinPx()).toBeGreaterThan(72);
+    expect(clampLaneLabelPx(72)).toBe(LANE_LABEL_MIN_PX);
+    expect(clampLaneLabelPx(LANE_LABEL_MIN_PX - 1)).toBe(LANE_LABEL_MIN_PX);
+    expect(clampLaneLabelPx(LANE_LABEL_MIN_PX)).toBe(LANE_LABEL_MIN_PX);
+    const minInline = plan("audio", HEADER_WIDTH_MIN_PX, AUDIO, "inline");
+    expect(minInline.visible).toEqual(["identity", "mute"]);
+    expect(minInline.overflow).toContain("solo");
+    expect(minInline.overflow).toContain("write");
+    expect(headerControlsExclusive(AUDIO, minInline)).toBe(true);
+  });
+
+  it("overflow menu labels are readable and reflect state", () => {
+    expect(headerOverflowLabel("solo")).toBe("Solo");
+    expect(headerOverflowLabel("solo", { soloed: true })).toBe("Unsolo");
+    expect(headerOverflowLabel("write")).toBe("Write automation");
+    expect(headerOverflowLabel("write", { writeArmed: true })).toBe("Disarm write automation");
+    expect(headerOverflowLabel("volume")).toBe("Volume automation");
+    expect(headerOverflowLabel("volume", { volumeLaneOpen: true })).toBe("Hide volume automation");
+    expect(headerOverflowLabel("mute")).toBe("Mute");
+    expect(headerOverflowLabel("mute", { muted: true })).toBe("Unmute");
+    expect(headerOverflowLabel("groupAssign")).toBe("Chapter group");
+    expect(headerOverflowLabel("groupAssign", { groupName: "Chapter IV" })).toBe(
+      "Chapter group · Chapter IV",
+    );
+    expect(headerOverflowLabel("groupCreate")).toBe("Group selected audio tracks");
+    expect(headerOverflowLabel("scene", { sceneName: "Lattice" })).toBe("Scene · Lattice");
   });
 
 });
@@ -206,7 +242,7 @@ describe("width matrix VIS / VIDEO / AUDIO × WIDE / MEDIUM / NARROW / MIN", () 
     { kind: "vis", present: VIS, pack: "stack", width: "WIDE", direct: VIS, overflow: [] },
     { kind: "vis", present: VIS, pack: "stack", width: "MEDIUM", direct: VIS, overflow: [] },
     { kind: "vis", present: VIS, pack: "stack", width: "NARROW", direct: VIS, overflow: [] },
-    { kind: "vis", present: VIS, pack: "stack", width: "MIN", direct: ["identity", "mute"], overflow: ["scene"] },
+    { kind: "vis", present: VIS, pack: "stack", width: "MIN", direct: VIS, overflow: [] },
     { kind: "vis", present: VIS, pack: "inline", width: "WIDE", direct: VIS, overflow: [] },
     { kind: "vis", present: VIS, pack: "inline", width: "MEDIUM", direct: ["identity", "mute"], overflow: ["scene"] },
     { kind: "vis", present: VIS, pack: "inline", width: "NARROW", direct: ["identity", "mute"], overflow: ["scene"] },

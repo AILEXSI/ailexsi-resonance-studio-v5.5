@@ -10,7 +10,11 @@ export const LANE_LABEL_PX_KEY = "resonance-studio-v5-5-lane-label-px";
 export const LANE_HEIGHTS_KEY = "resonance-studio-v5-5-lane-heights";
 
 export const DEFAULT_LANE_LABEL_PX = 96;
-export const LANE_LABEL_MIN_PX = 72;
+/**
+ * Semantic header floor: identity + Mute + overflow chevron (pad/gaps/hits).
+ * Must stay equal to `headerUsableMinPx()` — not a Solo/W/VOL/Group budget.
+ */
+export const LANE_LABEL_MIN_PX = 80;
 export const LANE_LABEL_MAX_PX = 160;
 export const DEFAULT_LANE_HEIGHT_PX = 52;
 export const LANE_HEIGHT_MIN_PX = 36;

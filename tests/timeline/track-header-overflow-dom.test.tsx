@@ -2,11 +2,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { Timeline } from "../../src/ui/timeline/Timeline";
+import { createTrackGroup } from "../../src/core/track-groups";
 import { asset, clip, projectWith } from "../helpers";
-import type { TrackId } from "../../src/core/models";
+import type { Project, TrackId } from "../../src/core/models";
 import {
   DEFAULT_LANE_HEIGHT_PX,
   LANE_HEIGHT_MIN_PX,
+  LANE_LABEL_MIN_PX,
   type LaneHeights,
 } from "../../src/core/layout-prefs";
 import {
@@ -36,7 +38,9 @@ describe("track header overflow DOM", () => {
 
   function mount(
     extras: {
+      project?: Project;
       laneLabelPx?: number;
+      onLaneLabelPx?: (px: number) => void;
       laneHeights?: LaneHeights;
       onToggleMute?: (id: TrackId) => void;
       onToggleSolo?: (id: TrackId) => void;
@@ -54,10 +58,12 @@ describe("track header overflow DOM", () => {
       visibleTrackIds?: TrackId[];
     } = {},
   ) {
-    const project = projectWith(
-      [clip({ id: "v1", assetId: "va", trackId: "V1", startMs: 0, durationMs: 2000 })],
-      [asset({ id: "va", kind: "video", durationMs: 4000 })],
-    );
+    const project =
+      extras.project ??
+      projectWith(
+        [clip({ id: "v1", assetId: "va", trackId: "V1", startMs: 0, durationMs: 2000 })],
+        [asset({ id: "va", kind: "video", durationMs: 4000 })],
+      );
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -90,6 +96,7 @@ describe("track header overflow DOM", () => {
           onLoopMoveLive={noopMs}
           onLoopCommit={noop}
           laneLabelPx={extras.laneLabelPx ?? HEADER_WIDTH_MEDIUM_PX}
+          onLaneLabelPx={extras.onLaneLabelPx}
           laneHeights={extras.laneHeights}
           visibleTrackIds={extras.visibleTrackIds}
           onToggleVolumeLane={extras.onToggleVolumeLane}
@@ -191,7 +198,14 @@ describe("track header overflow DOM", () => {
       volumeWriteArmedIds: ["A1"],
     });
     expect(slotOf("volume", "lane-A1")).toBe("overflow");
+    expect(slotOf("write", "lane-A1")).toBe("overflow");
     expect(host!.querySelector("[data-testid=write-arm-A1]")!.className).toMatch(/active/);
+    expect(host!.querySelector("[data-testid=write-arm-A1]")!.textContent).toBe(
+      "Disarm write automation",
+    );
+    expect(host!.querySelector("[data-testid=volume-lane-toggle-A1]")!.textContent).toBe(
+      "Volume automation",
+    );
     act(() => {
       (host!.querySelector("[data-testid=mute-A1]") as HTMLButtonElement).click();
       (host!.querySelector("[data-testid=lane-overflow-A1]") as HTMLButtonElement).click();
@@ -313,7 +327,7 @@ describe("track header overflow DOM", () => {
     );
     expect(slotOf("mute", "lane-VIS")).toBe("direct");
     expect(slotOf("scene", "lane-VIS")).toBe("overflow");
-    expect(host!.querySelector("[data-testid=visualizer-scene]")!.textContent).toBe("Wave");
+    expect(host!.querySelector("[data-testid=visualizer-scene]")!.textContent).toBe("Scene · Wave");
     act(() => {
       (host!.querySelector("[data-testid=mute-VIS]") as HTMLButtonElement).click();
       (host!.querySelector("[data-testid=lane-overflow-VIS]") as HTMLButtonElement).click();
@@ -380,5 +394,75 @@ describe("track header overflow DOM", () => {
 
   it("RH-18 product version stays 5.6.0", () => {
     expect(AILEXSI_PRODUCT_VERSION).toBe("5.6.0");
+  });
+
+  it("overflow menu items reuse live Solo/Write/VOL/Group state", () => {
+    const base = projectWith(
+      [clip({ id: "v1", assetId: "va", trackId: "V1", startMs: 0, durationMs: 2000 })],
+      [asset({ id: "va", kind: "video", durationMs: 4000 })],
+    );
+    const grouped = createTrackGroup(base, { name: "Chapter IV", trackIds: ["A1"] });
+    const project = {
+      ...grouped.project,
+      tracks: grouped.project.tracks.map((track) =>
+        track.id === "A1" ? { ...track, solo: true } : track,
+      ),
+    };
+    mount({
+      project,
+      laneLabelPx: HEADER_WIDTH_MEDIUM_PX,
+      laneHeights: {
+        vis: DEFAULT_LANE_HEIGHT_PX,
+        video: DEFAULT_LANE_HEIGHT_PX,
+        audio: LANE_HEIGHT_MIN_PX,
+      },
+      onToggleVolumeLane: () => undefined,
+      onToggleVolumeWriteArm: () => undefined,
+      onAssignTracksToGroup: () => undefined,
+      volumeWriteArmedIds: ["A1"],
+      openVolumeLaneIds: ["A1"],
+    });
+    expect(slotOf("solo", "lane-A1")).toBe("overflow");
+    expect(slotOf("write", "lane-A1")).toBe("overflow");
+    expect(slotOf("volume", "lane-A1")).toBe("overflow");
+    expect(slotOf("groupAssign", "lane-A1")).toBe("overflow");
+    const solo = host!.querySelector("[data-testid=solo-A1]") as HTMLButtonElement;
+    const write = host!.querySelector("[data-testid=write-arm-A1]") as HTMLButtonElement;
+    const volume = host!.querySelector("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement;
+    const assign = host!.querySelector("[data-testid=lane-group-assign-A1]") as HTMLSelectElement;
+    expect(solo.textContent).toBe("Unsolo");
+    expect(solo.className).toMatch(/active/);
+    expect(solo.getAttribute("aria-pressed")).toBe("true");
+    expect(write.textContent).toBe("Disarm write automation");
+    expect(write.className).toMatch(/active/);
+    expect(write.getAttribute("aria-pressed")).toBe("true");
+    expect(volume.textContent).toBe("Hide volume automation");
+    expect(volume.className).toMatch(/active/);
+    expect(volume.getAttribute("aria-pressed")).toBe("true");
+    expect(host!.querySelector(".lane-overflow-field")!.textContent).toContain(
+      "Chapter group · Chapter IV",
+    );
+    expect(assign.value).toBe(grouped.group!.id);
+  });
+
+  it("divider cannot compress below identity + Mute + overflow", () => {
+    const widths: number[] = [];
+    mount({
+      laneLabelPx: HEADER_WIDTH_MEDIUM_PX,
+      onLaneLabelPx: (px) => widths.push(px),
+    });
+    const handle = host!.querySelector("[data-testid=lane-label-splitter]")!;
+    const Ctor = typeof PointerEvent === "undefined" ? MouseEvent : PointerEvent;
+    act(() => {
+      handle.dispatchEvent(new Ctor("pointerdown", { bubbles: true, button: 0, clientX: 96 }));
+    });
+    act(() => {
+      window.dispatchEvent(new Ctor("pointermove", { bubbles: true, clientX: 20 }));
+    });
+    act(() => {
+      window.dispatchEvent(new Ctor("pointerup", { bubbles: true, clientX: 20 }));
+    });
+    expect(widths.at(-1)).toBe(LANE_LABEL_MIN_PX);
+    expect(LANE_LABEL_MIN_PX).toBe(HEADER_WIDTH_MIN_PX);
   });
 });

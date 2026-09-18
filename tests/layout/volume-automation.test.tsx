@@ -106,7 +106,7 @@ describe("volume automation lane chrome", () => {
     expect(host!.querySelector('[data-testid="volume-lane-A1"]')).toBeNull();
     const toggle = host!.querySelector('[data-testid="volume-lane-toggle-A1"]') as HTMLButtonElement;
     expect(toggle).toBeTruthy();
-    expect(toggle.textContent).toBe("VOL");
+    expect(toggle.textContent).toMatch(/VOL|Volume automation/);
     expect(toggle.getAttribute("aria-label")).toBe("Show volume automation");
     expect(host!.querySelector('[data-testid="volume-lane-toggle-V1"]')).toBeNull();
     act(() => {
@@ -153,12 +153,14 @@ describe("volume automation lane chrome", () => {
     });
     const laneW = host!.querySelector('[data-testid="write-arm-A1"]') as HTMLButtonElement;
     const mixW = host!.querySelector('[data-testid="mix-write-A1"]') as HTMLButtonElement;
-    expect(laneW?.textContent).toBe("W");
+    expect(laneW?.textContent).toMatch(/W|Write automation/);
     expect(mixW?.textContent).toBe("W");
     expect(host!.querySelector('[data-testid="write-arm-V1"]')).toBeNull();
     expect(host!.querySelector('[data-testid="mix-write-master"]')).toBeNull();
     expect(host!.querySelector('[data-testid="mute-A1"]')).toBeTruthy();
-    expect(host!.querySelector('[data-testid="volume-lane-toggle-A1"]')?.textContent).toBe("VOL");
+    expect(host!.querySelector('[data-testid="volume-lane-toggle-A1"]')?.textContent).toMatch(
+      /VOL|Volume automation/,
+    );
     act(() => {
       laneW.click();
       mixW.click();

@@ -31,6 +31,7 @@ import {
   DEFAULT_LANE_HEIGHT_PX,
   DEFAULT_LANE_LABEL_PX,
   GROUP_LANE_HEIGHT_PX,
+  LANE_LABEL_MIN_PX,
   VOLUME_LANE_HEIGHT_PX,
   clampLaneHeightPx,
   clampLaneLabelPx,
@@ -66,6 +67,7 @@ import { TrackHeaderOverflowButton, TrackHeaderOverflowMenu } from "./TrackHeade
 import {
   controlIsDirect,
   controlIsOverflowed,
+  headerOverflowLabel,
   planTrackHeaderOverflow,
   resolveHeaderWidth,
   stabilizeHeaderWidth,
@@ -1382,6 +1384,7 @@ export function Timeline({
       style={
         {
           "--lane-label-px": `${laneLabelPx}px`,
+          "--lane-label-min": `${LANE_LABEL_MIN_PX}px`,
           "--lane-height-vis": `${heights.vis}px`,
           "--lane-height-video": `${heights.video}px`,
           "--lane-height-audio": `${heights.audio}px`,
@@ -1499,22 +1502,25 @@ export function Timeline({
       >
         {(() => {
           const visPlan = visHeaderPlan;
-          const visMute = (
+          const visMute = (inOverflow: boolean) => (
             <button
               type="button"
               className={project.visualizer.muted ? "active mute-btn" : "mute-btn"}
               title={project.visualizer.muted ? "Unmute VIS" : "Mute VIS"}
               data-testid="mute-VIS"
               data-header-control="mute"
+              aria-pressed={project.visualizer.muted}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleVisualizerMute();
               }}
             >
-              M
+              {inOverflow
+                ? headerOverflowLabel("mute", { muted: project.visualizer.muted })
+                : "M"}
             </button>
           );
-          const visScene = (
+          const visScene = (inOverflow: boolean) => (
             <button
               type="button"
               className={`scene-btn${visBrowserOpen ? " open" : ""}`}
@@ -1533,7 +1539,9 @@ export function Timeline({
                 onCycleVisualizerScene();
               }}
             >
-              {sceneShortName(visHeaderSceneId)}
+              {inOverflow
+                ? headerOverflowLabel("scene", { sceneName: sceneShortName(visHeaderSceneId) })
+                : sceneShortName(visHeaderSceneId)}
             </button>
           );
           return (
@@ -1562,8 +1570,8 @@ export function Timeline({
           {laneLabelSplitter}
           <span data-testid="vis-lane-name" data-header-control="identity">VIS</span>
           <div className="vis-lane-btns" data-header-slot="direct">
-            {controlIsDirect(visPlan, "mute") ? visMute : null}
-            {controlIsDirect(visPlan, "scene") ? visScene : null}
+            {controlIsDirect(visPlan, "mute") ? visMute(false) : null}
+            {controlIsDirect(visPlan, "scene") ? visScene(false) : null}
             {visPlan.overflow.length > 0 ? (
               <TrackHeaderOverflowButton
                 trackId="VIS"
@@ -1579,8 +1587,8 @@ export function Timeline({
               left={overflowPos.left}
               top={overflowPos.top}
             >
-              {controlIsOverflowed(visPlan, "mute") ? visMute : null}
-              {controlIsOverflowed(visPlan, "scene") ? visScene : null}
+              {controlIsOverflowed(visPlan, "mute") ? visMute(true) : null}
+              {controlIsOverflowed(visPlan, "scene") ? visScene(true) : null}
             </TrackHeaderOverflowMenu>
           ) : null}
         </div>
@@ -1851,119 +1859,127 @@ export function Timeline({
                       onCreate={(trackIds) => onCreateTrackGroup?.(trackIds)}
                     />
                   ) : null;
-                const muteBtn = (
+                const writeArmed = volumeWriteArmedIds?.includes(id) === true;
+                const volumeOpen = openVolumeLaneIds?.includes(id) === true;
+                const groupName = listedGroups.find((group) => group.id === track?.groupId)?.name;
+                const muteBtn = (inOverflow: boolean) => (
                   <button
                     type="button"
                     className={muted ? "active mute-btn" : "mute-btn"}
                     title={muted ? `Unmute ${label}` : `Mute ${label}`}
                     data-testid={`mute-${id}`}
                     data-header-control="mute"
+                    aria-pressed={muted}
                     onClick={(e) => {
                       e.stopPropagation();
                       onToggleMute(id);
                     }}
                   >
-                    M
+                    {inOverflow ? headerOverflowLabel("mute", { muted }) : "M"}
                   </button>
                 );
-                const soloBtn = (
+                const soloBtn = (inOverflow: boolean) => (
                   <button
                     type="button"
                     className={soloed ? "active solo-btn" : "solo-btn"}
                     title={soloed ? `Unsolo ${label}` : `Solo ${label}`}
                     data-testid={`solo-${id}`}
                     data-header-control="solo"
+                    aria-pressed={soloed}
                     onClick={(e) => {
                       e.stopPropagation();
                       onToggleSolo?.(id);
                     }}
                   >
-                    S
+                    {inOverflow ? headerOverflowLabel("solo", { soloed }) : "S"}
                   </button>
                 );
-                const writeBtn =
+                const writeBtn = (inOverflow: boolean) =>
                   kind === "audio" && onToggleVolumeWriteArm ? (
                     <button
                       type="button"
-                      className={volumeWriteArmedIds?.includes(id) ? "active write-arm-btn" : "write-arm-btn"}
-                      title={volumeWriteArmedIds?.includes(id) ? "Disarm volume write" : "Arm volume write"}
-                      aria-label={volumeWriteArmedIds?.includes(id) ? "Disarm volume write" : "Arm volume write"}
+                      className={writeArmed ? "active write-arm-btn" : "write-arm-btn"}
+                      title={writeArmed ? "Disarm volume write" : "Arm volume write"}
+                      aria-label={writeArmed ? "Disarm volume write" : "Arm volume write"}
                       data-testid={`write-arm-${id}`}
                       data-header-control="write"
-                      aria-pressed={volumeWriteArmedIds?.includes(id) ? true : false}
+                      aria-pressed={writeArmed}
                       onClick={(e) => {
                         e.stopPropagation();
                         onToggleVolumeWriteArm(id);
                         if (e.currentTarget instanceof HTMLElement) e.currentTarget.blur();
                       }}
                     >
-                      W
+                      {inOverflow ? headerOverflowLabel("write", { writeArmed }) : "W"}
                     </button>
                   ) : null;
-                const volumeBtn =
+                const volumeBtn = (inOverflow: boolean) =>
                   kind === "audio" && onToggleVolumeLane ? (
                     <button
                       type="button"
-                      className={openVolumeLaneIds?.includes(id) ? "active volume-lane-btn" : "volume-lane-btn"}
-                      title={openVolumeLaneIds?.includes(id) ? "Hide volume automation" : "Show volume automation"}
-                      aria-label={openVolumeLaneIds?.includes(id) ? "Hide volume automation" : "Show volume automation"}
+                      className={volumeOpen ? "active volume-lane-btn" : "volume-lane-btn"}
+                      title={volumeOpen ? "Hide volume automation" : "Show volume automation"}
+                      aria-label={volumeOpen ? "Hide volume automation" : "Show volume automation"}
                       data-testid={`volume-lane-toggle-${id}`}
                       data-header-control="volume"
-                      aria-pressed={openVolumeLaneIds?.includes(id) ? true : false}
+                      aria-pressed={volumeOpen}
                       onClick={(e) => {
                         e.stopPropagation();
                         onToggleVolumeLane(id);
                       }}
                     >
-                      VOL
+                      {inOverflow ? headerOverflowLabel("volume", { volumeLaneOpen: volumeOpen }) : "VOL"}
                     </button>
                   ) : null;
-                const groupCreateBtn = showCreateGroup ? (
-                  <button
-                    type="button"
-                    className="lane-audio-count-btn lane-group-create-btn"
-                    data-testid="create-track-group"
-                    data-header-control="groupCreate"
-                    title="Group selected audio tracks"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCreateTrackGroup?.();
-                    }}
-                  >
-                    Grp
-                  </button>
-                ) : null;
-                const addAudioBtn = showAudioAdd ? (
-                  <button
-                    type="button"
-                    className="lane-audio-count-btn"
-                    data-testid="add-audio-track"
-                    data-header-control="addAudio"
-                    title="Add audio track"
-                    disabled={canAddAudioTrack === false}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAddAudioTrack?.();
-                    }}
-                  >
-                    +
-                  </button>
-                ) : null;
-                const removeAudioBtn = showAudioRemove ? (
-                  <button
-                    type="button"
-                    className="lane-audio-count-btn"
-                    data-testid="remove-audio-track"
-                    data-header-control="removeAudio"
-                    title="Remove audio track"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveAudioTrack?.();
-                    }}
-                  >
-                    −
-                  </button>
-                ) : null;
+                const groupCreateBtn = (inOverflow: boolean) =>
+                  showCreateGroup ? (
+                    <button
+                      type="button"
+                      className="lane-audio-count-btn lane-group-create-btn"
+                      data-testid="create-track-group"
+                      data-header-control="groupCreate"
+                      title="Group selected audio tracks"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCreateTrackGroup?.();
+                      }}
+                    >
+                      {inOverflow ? headerOverflowLabel("groupCreate") : "Grp"}
+                    </button>
+                  ) : null;
+                const addAudioBtn = (inOverflow: boolean) =>
+                  showAudioAdd ? (
+                    <button
+                      type="button"
+                      className="lane-audio-count-btn"
+                      data-testid="add-audio-track"
+                      data-header-control="addAudio"
+                      title="Add audio track"
+                      disabled={canAddAudioTrack === false}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddAudioTrack?.();
+                      }}
+                    >
+                      {inOverflow ? headerOverflowLabel("addAudio") : "+"}
+                    </button>
+                  ) : null;
+                const removeAudioBtn = (inOverflow: boolean) =>
+                  showAudioRemove ? (
+                    <button
+                      type="button"
+                      className="lane-audio-count-btn"
+                      data-testid="remove-audio-track"
+                      data-header-control="removeAudio"
+                      title="Remove audio track"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveAudioTrack?.();
+                      }}
+                    >
+                      {inOverflow ? headerOverflowLabel("removeAudio") : "−"}
+                    </button>
+                  ) : null;
                 const showDirectChrome =
                   (showCreateGroup && controlIsDirect(headerPlan, "groupCreate")) ||
                   (showAudioAdd && controlIsDirect(headerPlan, "addAudio")) ||
@@ -1976,10 +1992,10 @@ export function Timeline({
                   <>
                     {controlIsDirect(headerPlan, "groupAssign") ? groupAssign : null}
                     <div className="lane-ms" data-header-slot="direct">
-                      {controlIsDirect(headerPlan, "mute") ? muteBtn : null}
-                      {controlIsDirect(headerPlan, "solo") ? soloBtn : null}
-                      {controlIsDirect(headerPlan, "write") ? writeBtn : null}
-                      {controlIsDirect(headerPlan, "volume") ? volumeBtn : null}
+                      {controlIsDirect(headerPlan, "mute") ? muteBtn(false) : null}
+                      {controlIsDirect(headerPlan, "solo") ? soloBtn(false) : null}
+                      {controlIsDirect(headerPlan, "write") ? writeBtn(false) : null}
+                      {controlIsDirect(headerPlan, "volume") ? volumeBtn(false) : null}
                       {headerPlan.overflow.length > 0 ? (
                         <TrackHeaderOverflowButton
                           trackId={id}
@@ -1990,9 +2006,9 @@ export function Timeline({
                     </div>
                     {showDirectChrome ? (
                       <div className="lane-audio-count" data-testid={`lane-audio-count-${id}`}>
-                        {controlIsDirect(headerPlan, "groupCreate") ? groupCreateBtn : null}
-                        {controlIsDirect(headerPlan, "addAudio") ? addAudioBtn : null}
-                        {controlIsDirect(headerPlan, "removeAudio") ? removeAudioBtn : null}
+                        {controlIsDirect(headerPlan, "groupCreate") ? groupCreateBtn(false) : null}
+                        {controlIsDirect(headerPlan, "addAudio") ? addAudioBtn(false) : null}
+                        {controlIsDirect(headerPlan, "removeAudio") ? removeAudioBtn(false) : null}
                       </div>
                     ) : null}
                     {headerPlan.overflow.length > 0 ? (
@@ -2002,16 +2018,21 @@ export function Timeline({
                         left={overflowPos.left}
                         top={overflowPos.top}
                       >
-                        {controlIsOverflowed(headerPlan, "mute") ? muteBtn : null}
-                        {controlIsOverflowed(headerPlan, "solo") ? soloBtn : null}
-                        {controlIsOverflowed(headerPlan, "write") ? writeBtn : null}
-                        {controlIsOverflowed(headerPlan, "volume") ? volumeBtn : null}
-                        {controlIsOverflowed(headerPlan, "groupAssign") ? groupAssign : null}
+                        {controlIsOverflowed(headerPlan, "mute") ? muteBtn(true) : null}
+                        {controlIsOverflowed(headerPlan, "solo") ? soloBtn(true) : null}
+                        {controlIsOverflowed(headerPlan, "write") ? writeBtn(true) : null}
+                        {controlIsOverflowed(headerPlan, "volume") ? volumeBtn(true) : null}
+                        {controlIsOverflowed(headerPlan, "groupAssign") ? (
+                          <label className="lane-overflow-field">
+                            <span>{headerOverflowLabel("groupAssign", { groupName })}</span>
+                            {groupAssign}
+                          </label>
+                        ) : null}
                         {showOverflowChrome ? (
                           <div className="lane-audio-count" data-testid={`lane-audio-count-${id}`}>
-                            {controlIsOverflowed(headerPlan, "groupCreate") ? groupCreateBtn : null}
-                            {controlIsOverflowed(headerPlan, "addAudio") ? addAudioBtn : null}
-                            {controlIsOverflowed(headerPlan, "removeAudio") ? removeAudioBtn : null}
+                            {controlIsOverflowed(headerPlan, "groupCreate") ? groupCreateBtn(true) : null}
+                            {controlIsOverflowed(headerPlan, "addAudio") ? addAudioBtn(true) : null}
+                            {controlIsOverflowed(headerPlan, "removeAudio") ? removeAudioBtn(true) : null}
                           </div>
                         ) : null}
                       </TrackHeaderOverflowMenu>
