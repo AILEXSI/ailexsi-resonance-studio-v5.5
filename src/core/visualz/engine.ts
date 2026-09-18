@@ -156,7 +156,8 @@ export function createVisualEngine(options: VisualEngineOptions): VisualEngine {
       const prev = sceneRegistry.get(currentSceneId);
       prev?.onExit?.();
       currentSceneId = sceneId;
-      params = mergeSceneParams(next.defaultParams, params);
+      // Reset to the next scene's defaults so a prior scene cannot leak params.
+      params = mergeSceneParams(next.defaultParams);
       next.onEnter?.(
         {
           width: canvas.width,

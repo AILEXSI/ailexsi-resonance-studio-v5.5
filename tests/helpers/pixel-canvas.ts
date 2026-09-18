@@ -159,6 +159,12 @@ export function createPixelCanvas(width: number, height: number) {
       lineWidth = v;
     },
     font: "",
+    lineCap: "butt",
+    lineJoin: "miter",
+    lineDashOffset: 0,
+    setLineDash(_segments?: number[]) {
+      /* software canvas keeps solid strokes; real canvas uses dashes */
+    },
     fillRect(x: number, y: number, w: number, h: number) {
       fillRectPx(x, y, w, h, parseColor(fillStyle));
     },

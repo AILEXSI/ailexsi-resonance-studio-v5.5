@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applyCycleVisualizerScene, createSession, type Session } from "../../src/app/session";
+import {
+  applyCycleVisualizerScene,
+  applyPickVisualizerScene,
+  applySelectVis,
+  applySetVisualizer,
+  createSession,
+  type Session,
+} from "../../src/app/session";
 import { DEFAULT_VISUALIZER_SCENE_ID, VISUALIZER_SCENE_IDS } from "../../src/core/models";
 import { createMemoryBlobStore } from "../../src/core/persistence";
 import { createEmptyProject } from "../../src/core/project";
@@ -68,7 +75,27 @@ describe("VIS cues", () => {
     expect(events.some((e) => e.startMs === 3000 && e.sceneId === "tunnel-spiral")).toBe(true);
   });
 
-  it("nextSceneId walks the 16-id cycle including 3D scenes and sceneAt follows them", () => {
+  it("menu pick uses the cycle rematerialize path so the VIS track scene actually changes", () => {
+    const project = createEmptyProject("Pick");
+    project.playheadMs = 2000;
+    const cycled = applyCycleVisualizerScene(sessionOf(project));
+    expect(sceneAt(cycled.project, 2000)).toBe("tunnel-spiral");
+    const deselected = applySelectVis(cycled);
+    expect(deselected.selectedVisEventId).toBeNull();
+    const picked = applyPickVisualizerScene(deselected, "lexi");
+    expect(picked.project.visualizer.sceneId).toBe("lexi");
+    expect(sceneAt(picked.project, 2000)).toBe("lexi");
+    expect(visualizerEventsOf(picked.project).some((e) => e.startMs === 2000 && e.sceneId === "lexi")).toBe(
+      true,
+    );
+    const again = applySetVisualizer(picked, { sceneId: "lexi-v3" });
+    expect(sceneAt(again.project, 2000)).toBe("lexi-v3");
+    expect(
+      visualizerEventsOf(again.project).some((e) => e.startMs === 2000 && e.sceneId === "lexi-v3"),
+    ).toBe(true);
+  });
+
+  it("nextSceneId walks the catalog cycle including 3D scenes and sceneAt follows them", () => {
     expect(VISUALIZER_SCENE_IDS).toContain("particle-field");
     expect(VISUALIZER_SCENE_IDS).toContain("resonance-wave");
     expect(VISUALIZER_SCENE_IDS).toContain("tunnel-spiral");
@@ -79,11 +106,15 @@ describe("VIS cues", () => {
     expect(nextSceneId("void-lattice")).toBe("nebula-helix");
     expect(nextSceneId("nebula-helix")).toBe("accretion-disk");
     expect(nextSceneId("accretion-disk")).toBe("crystal-storm");
-    expect(nextSceneId("crystal-storm")).toBe("spectrum-bars");
+    expect(nextSceneId("crystal-storm")).toBe("lexi");
+    expect(nextSceneId("lexi")).toBe("lexi-ref");
+    expect(nextSceneId("lexi-v1")).toBe("spectrum-bars");
     expect(sceneShortName("void-lattice")).toBe("Lattice");
     expect(sceneShortName("nebula-helix")).toBe("Helix");
     expect(sceneShortName("accretion-disk")).toBe("Disk");
     expect(sceneShortName("crystal-storm")).toBe("Crystal");
+    expect(sceneShortName("lexi")).toBe("LEXI");
+    expect(sceneShortName("lexi-minimal")).toBe("LEXI Min");
     const project = createEmptyProject("3D");
     project.visualizer = {
       ...project.visualizer,

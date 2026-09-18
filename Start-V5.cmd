@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title AILEXSI Resonance Studio V5.5
+title AILEXSI Resonance Studio V5.6
 rem Startdatei for Resonance Studio V5.5. Prefer INSTALL_BUILD_RUN_V5.5.cmd.
 cd /d "%~dp0"
 

@@ -1,4 +1,5 @@
 import type { Transition } from "./transition";
+import type { VisualizerSceneId } from "./visualz/scene-catalog";
 
 export type MediaKind = "video" | "audio" | "image";
 /** Stable track identity. Legacy A1/A2 keep those ids; new audio tracks use `a_*`. */
@@ -13,30 +14,15 @@ export const MAX_AUDIO_TRACKS = 64;
 export const MIN_AUDIO_TRACKS = 2;
 
 /**
- * Visualz Canvas-2D builtin scene ids (ported from @ailexsi/visualz 0.1.0-blueprint).
- * VIS is an overlay lane, not a TrackId.
+ * Visualz Canvas-2D builtin scene ids. Cycle order and names come from
+ * SCENE_CATALOG — do not maintain a second id list.
+ * Unused ids (do not implement): silk-ribbons, orbit-rings, mist-mirror, prismatic-cut, ash-drift, pulse-lattice.
  */
-/** Cycle order. Unused ids (do not implement): silk-ribbons, orbit-rings, mist-mirror, prismatic-cut, ash-drift, pulse-lattice. */
-export const VISUALIZER_SCENE_IDS = [
-  "spectrum-bars",
-  "pulse-orb",
-  "aurora-veil",
-  "star-bloom",
-  "liquid-gold",
-  "kaleido-hex",
-  "sun-core",
-  "ember-rain",
-  "particle-field",
-  "resonance-wave",
-  "tunnel-spiral",
-  "lita-bloom",
-  "void-lattice",
-  "nebula-helix",
-  "accretion-disk",
-  "crystal-storm",
-] as const;
-
-export type VisualizerSceneId = (typeof VISUALIZER_SCENE_IDS)[number];
+export {
+  VISUALIZER_SCENE_IDS,
+  isVisualizerSceneId,
+} from "./visualz/scene-catalog";
+export type { VisualizerSceneId } from "./visualz/scene-catalog";
 
 /** Visualz signature scene. New projects and missing-visualizer loads use this. */
 export const DEFAULT_VISUALIZER_SCENE_ID: VisualizerSceneId = "resonance-wave";
@@ -83,10 +69,6 @@ export type FrontVideoTrackId = "V1" | "V2";
 
 export function isFrontVideoTrackId(value: unknown): value is FrontVideoTrackId {
   return value === "V1" || value === "V2";
-}
-
-export function isVisualizerSceneId(value: unknown): value is VisualizerSceneId {
-  return typeof value === "string" && (VISUALIZER_SCENE_IDS as readonly string[]).includes(value);
 }
 
 export function isVideoTrackId(value: unknown): value is VideoTrackId {

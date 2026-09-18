@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import type { EditorCommand } from "../../app/commands";
 import { firstClipIdWithLivingMate } from "../../core/link";
 import {
-  VISUALIZER_SCENE_IDS,
   clipById,
   clipIsLocked,
   formatTimecode,
@@ -14,6 +13,8 @@ import {
   type TrackId,
   type VisualizerSceneId,
 } from "../../core/models";
+import { SCENE_CATALOG } from "../../core/visualz/scene-catalog";
+import { VisSceneBrowser } from "./VisSceneBrowser";
 import { canShowRelink } from "../../core/relink";
 import { snapPlayheadSeek } from "../../core/timeline";
 import {
@@ -171,17 +172,27 @@ export function Inspector({
       ) : selectedVis ? (
         <dl data-testid="inspector-vis">
           <Field label="VIS scene">
-            <select
-              data-testid="inspector-vis-scene"
-              value={visScene}
-              onChange={(e) => onVisualizer?.({ sceneId: e.target.value as VisualizerSceneId })}
-            >
-              {VISUALIZER_SCENE_IDS.map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-            </select>
+            <div className="inspector-vis-scene-wrap">
+              <VisSceneBrowser
+                value={visScene}
+                onSelect={(sceneId) => onVisualizer?.({ sceneId })}
+                variant="inspector"
+                testIdPrefix="vis-browser"
+              />
+              <select
+                data-testid="inspector-vis-scene"
+                className="vis-scene-native-select"
+                aria-label="VIS scene"
+                value={visScene}
+                onChange={(e) => onVisualizer?.({ sceneId: e.target.value as VisualizerSceneId })}
+              >
+                {SCENE_CATALOG.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
           </Field>
           <MsField
             label="VIS from (ms)"

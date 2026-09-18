@@ -1,4 +1,5 @@
 import type { ProductionScreen } from "../../app/screens";
+import { AILEXSI_PRODUCT_VERSION } from "../../core/build-info";
 import { ScreenNav } from "../screens/ScreenNav";
 
 interface Props {
@@ -73,7 +74,7 @@ export function Toolbar({
             *
           </span>
         ) : null}
-        <span className="version" data-testid="app-version">V5.5.0</span>
+        <span className="version" data-testid="app-version">V{AILEXSI_PRODUCT_VERSION}</span>
       </div>
     </header>
   );

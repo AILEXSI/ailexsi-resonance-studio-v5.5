@@ -4,12 +4,17 @@ import {
   DEFAULT_H_SPLIT_RATIO,
   DEFAULT_SPLIT_RATIO,
   H_SPLIT_RATIO_KEY,
+  INSPECTOR_COLLAPSED_KEY,
+  INSPECTOR_COLLAPSED_PX,
   INSPECTOR_MIN_PX,
   MIXER_COLLAPSED_KEY,
   MIXER_EXPANDED_PX,
   MIXER_MAX_PX,
   MIXER_MIN_PX,
   MIXER_WIDTH_KEY,
+  NORMAL_SPLIT_RATIO_KEY,
+  TIMELINE_FOCUS_KEY,
+  TIMELINE_FOCUS_PREVIEW_PX,
   TIMELINE_MIN_PX,
   PREVIEW_H_MIN_PX,
   PREVIEW_MIN_PX,
@@ -18,6 +23,8 @@ import {
   applyHSplitPointer,
   applyMixerWidthPointer,
   applySplitPointer,
+  applyTimelineFocusToggle,
+  timelineFocusSplitRatio,
   DEFAULT_LANE_HEIGHT_PX,
   DEFAULT_LANE_LABEL_PX,
   LANE_HEIGHT_MAX_PX,
@@ -40,12 +47,20 @@ import {
   VOLUME_LANE_OPEN_KEY,
   loadCollapsedGroupIds,
   loadOpenVolumeLaneIds,
+  loadInspectorCollapsed,
+  loadInspectorOpen,
   loadMixerCollapsed,
   loadMixerWidth,
+  loadNormalSplitRatio,
   loadSplitRatio,
+  loadTimelineFocus,
   saveCollapsedGroupIds,
   saveOpenVolumeLaneIds,
   saveHSplitRatio,
+  saveInspectorCollapsed,
+  saveInspectorOpen,
+  saveNormalSplitRatio,
+  saveTimelineFocus,
   toggleCollapsedGroupId,
   toggleOpenVolumeLaneId,
   saveLaneHeights,
@@ -126,7 +141,7 @@ describe("layout prefs", () => {
     expect(loadHSplitRatio(memoryStorage())).toBe(DEFAULT_H_SPLIT_RATIO);
   });
 
-  it("lane label width persists and clamps 72–160", () => {
+  it("lane label width persists and clamps semantic min–160", () => {
     expect(clampLaneLabelPx(96)).toBe(DEFAULT_LANE_LABEL_PX);
     expect(clampLaneLabelPx(10)).toBe(LANE_LABEL_MIN_PX);
     expect(clampLaneLabelPx(400)).toBe(LANE_LABEL_MAX_PX);
@@ -221,6 +236,56 @@ describe("layout prefs", () => {
     expect(loadOpenVolumeLaneIds(store)).toEqual(["A1", "a_x"]);
     expect(toggleOpenVolumeLaneId(["A1"], "A1")).toEqual([]);
     expect(toggleOpenVolumeLaneId(["A1"], "A2")).toEqual(["A1", "A2"]);
+  });
+
+  it("round-trips inspector open/closed as workspace prefs (default open)", () => {
+    const store = memoryStorage();
+    expect(INSPECTOR_COLLAPSED_PX).toBeGreaterThan(0);
+    expect(INSPECTOR_COLLAPSED_PX).toBeLessThan(INSPECTOR_MIN_PX);
+    expect(loadInspectorCollapsed(store)).toBe(false);
+    expect(loadInspectorOpen(store)).toBe(true);
+    saveInspectorCollapsed(store, true);
+    expect(store.map.get(INSPECTOR_COLLAPSED_KEY)).toBe("1");
+    expect(loadInspectorCollapsed(store)).toBe(true);
+    expect(loadInspectorOpen(store)).toBe(false);
+    saveInspectorOpen(store, true);
+    expect(loadInspectorCollapsed(store)).toBe(false);
+    expect(loadInspectorOpen(store)).toBe(true);
+  });
+
+  it("Timeline Focus stores the exact prior divider and restores it", () => {
+    const available = PREVIEW_MIN_PX + ARRANGE_MIN_PX + 400;
+    const enter = applyTimelineFocusToggle({
+      currentlyFocused: false,
+      currentRatio: 0.61,
+      storedNormalRatio: DEFAULT_SPLIT_RATIO,
+      availablePx: available,
+    });
+    expect(enter.focused).toBe(true);
+    expect(enter.normalRatio).toBe(0.61);
+    expect(enter.liveRatio).toBeCloseTo(timelineFocusSplitRatio(available), 5);
+    expect(enter.liveRatio * available).toBeCloseTo(TIMELINE_FOCUS_PREVIEW_PX, 5);
+    expect(enter.liveRatio).not.toBeCloseTo(0.61, 5);
+
+    const leave = applyTimelineFocusToggle({
+      currentlyFocused: true,
+      currentRatio: enter.liveRatio,
+      storedNormalRatio: enter.normalRatio,
+      availablePx: available,
+    });
+    expect(leave.focused).toBe(false);
+    expect(leave.liveRatio).toBe(0.61);
+    expect(leave.normalRatio).toBe(0.61);
+
+    const store = memoryStorage();
+    expect(loadTimelineFocus(store)).toBe(false);
+    saveTimelineFocus(store, true);
+    expect(store.map.get(TIMELINE_FOCUS_KEY)).toBe("1");
+    expect(loadTimelineFocus(store)).toBe(true);
+    saveNormalSplitRatio(store, 0.61);
+    expect(store.map.get(NORMAL_SPLIT_RATIO_KEY)).toBe("0.61");
+    expect(loadNormalSplitRatio(store)).toBeCloseTo(0.61, 5);
+    expect(loadNormalSplitRatio(memoryStorage())).toBe(DEFAULT_SPLIT_RATIO);
   });
 
   it("packs V/A/VIS headers inline below the stacked name + chrome threshold", () => {

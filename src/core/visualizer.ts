@@ -12,6 +12,7 @@ import {
 import { contextFromProject, resolvePictureSource } from "./transition";
 import { getRegisteredScene } from "./visualz";
 import type { AudioFeatures } from "./visualz";
+import { sceneShortNameFromCatalog } from "./visualz/scene-catalog";
 import {
   createOfflineFeatureExtractor,
   isSilentEnergy,
@@ -59,25 +60,6 @@ export interface VisualizerFeatures extends AudioFeatures {
   energy: number;
   high: number;
 }
-
-const SCENE_SHORT: Record<VisualizerSceneId, string> = {
-  "spectrum-bars": "Bars",
-  "pulse-orb": "Orb",
-  "aurora-veil": "Aurora",
-  "star-bloom": "Stars",
-  "liquid-gold": "Gold",
-  "kaleido-hex": "Kaleido",
-  "sun-core": "Sun",
-  "ember-rain": "Ember",
-  "particle-field": "Field",
-  "resonance-wave": "Wave",
-  "tunnel-spiral": "Tunnel",
-  "lita-bloom": "Bloom",
-  "void-lattice": "Lattice",
-  "nebula-helix": "Helix",
-  "accretion-disk": "Disk",
-  "crystal-storm": "Crystal",
-};
 
 /** 120 BPM grid (or `bpm`) from 0 inclusive to duration exclusive. */
 export function beatGrid(durationMs: number, bpm = DEFAULT_VISUALIZER_BPM): number[] {
@@ -285,7 +267,7 @@ export function nextSceneId(current: VisualizerSceneId): VisualizerSceneId {
 }
 
 export function sceneShortName(sceneId: VisualizerSceneId): string {
-  return SCENE_SHORT[sceneId] ?? sceneId;
+  return sceneShortNameFromCatalog(sceneId);
 }
 
 /** durationMs <= 0 means the overlay covers the whole timeline (legacy). */
@@ -412,6 +394,45 @@ export function visualizerSceneAt(
   timeMs: number,
 ): VisualizerSceneId | undefined {
   return sceneAt(vis, timeMs);
+}
+
+/**
+ * Set the VIS scene at t using the same cue rematerialize path as cycle,
+ * but with an explicit scene id (menu pick). Always rematerializes events
+ * so the lane / renderer cannot keep showing a stale covering event.
+ */
+export function setVisualizerSceneAt(
+  project: Project,
+  timeMs: number,
+  sceneId: VisualizerSceneId,
+): { project: Project; event?: VisualizerEvent } {
+  const t = Math.max(0, roundVisMs(timeMs));
+  const stamp = new Date().toISOString();
+  let nextCues = cuesOf(project);
+  if (t > 0 && !nextCues.some((c) => c.startMs === 0)) {
+    nextCues = [{ startMs: 0, sceneId: project.visualizer.sceneId }, ...nextCues];
+  }
+  nextCues = upsertCueList(nextCues, t, sceneId);
+  const events = rematerializeEventsFromCues(
+    { ...project, visualizer: { ...project.visualizer, cues: nextCues } },
+    nextCues,
+  );
+  const nextProject: Project = {
+    ...project,
+    visualizer: {
+      ...project.visualizer,
+      sceneId,
+      cues: nextCues,
+      events,
+    },
+    updatedAt: stamp,
+  };
+  return {
+    project: nextProject,
+    event:
+      events.find((e) => e.startMs === t) ??
+      events.find((e) => t >= e.startMs && t < e.startMs + e.durationMs),
+  };
 }
 
 export function insertCueAtPlayhead(
