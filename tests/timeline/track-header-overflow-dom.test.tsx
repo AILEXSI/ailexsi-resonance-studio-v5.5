@@ -283,7 +283,9 @@ describe("track header overflow DOM", () => {
     expect(host!.querySelector("[data-testid=lane-A1]")!.getAttribute("data-header-pack")).toBe(
       "inline",
     );
-    expect(host!.querySelector("[data-testid=lane-A1]")!.style.height).toBe(`${LANE_HEIGHT_MIN_PX}px`);
+    expect((host!.querySelector("[data-testid=lane-A1]") as HTMLElement).style.height).toBe(
+      `${LANE_HEIGHT_MIN_PX}px`,
+    );
     expect(slotOf("groupAssign", "lane-A1")).toBe("overflow");
     expect(host!.querySelectorAll("[data-testid=lane-group-assign-A1]")).toHaveLength(1);
   });

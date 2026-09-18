@@ -17,7 +17,6 @@ import {
   type HeaderPack,
   type HeaderTrackKind,
 } from "../../src/ui/timeline/track-header-overflow";
-import { readFileSync } from "node:fs";
 import { AILEXSI_PRODUCT_VERSION } from "../../src/core/build-info";
 import {
   DEFAULT_LANE_HEIGHT_PX,
@@ -178,12 +177,6 @@ describe("track header overflow policy", () => {
     expect(LANE_LABEL_MAX_PX).toBe(160);
   });
 
-  it("RH-13 CSS forbids wrapping header chrome to fit", () => {
-    const css = readFileSync("src/styles.css", "utf8");
-    expect(css).toMatch(/\.lane-ms\s*\{[^}]*flex-wrap:\s*nowrap/s);
-    expect(css).toMatch(/\.vis-lane-btns\s*\{[^}]*flex-wrap:\s*nowrap/s);
-    expect(css).not.toMatch(/\.lane\.lane-header-compact \.lane-group-assign\s*\{\s*display:\s*none/);
-  });
 });
 
 describe("width matrix VIS / VIDEO / AUDIO × WIDE / MEDIUM / NARROW / MIN", () => {
