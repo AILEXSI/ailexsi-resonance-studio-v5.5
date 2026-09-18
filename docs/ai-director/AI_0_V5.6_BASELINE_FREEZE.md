@@ -40,11 +40,16 @@ This freeze is the implementation baseline for AI Director + MCP.
 
 **DECISION:** All later AI work treats `35b6503cfced27e9a5908a97154dca6693fdc424` as the proven core. If architecture spec v0.2 names V5.5, substitute V5.6. Do not silently rebuild media/export/AFE.
 
-## Test / build status at freeze
+## Test / build status (Phase 18, this branch)
 
-Recorded after docs were written (Phase 18). See `AI_0_RECON_REPORT.md` §18.
+| Gate | Result |
+| --- | --- |
+| `npx tsc --noEmit` | clean |
+| Focused editor/history/layout | 186 / 186 passed |
+| Full `vitest run` | 1389 passed / 6 failed / 1395 (same pre-existing AFE-15 dump-ban ×2 + STRESS-03 missing clip ×4 as `CURRENT.md`) |
+| `npx vite build` | OK |
 
-Expected pre-existing suite behavior from `CURRENT.md` (historical, not this run): AFE-15 A/N dump-ban failures may exist on some branches. This AI-0 run records whatever the frozen SHA actually produces.
+See `AI_0_RECON_REPORT.md` §18.
 
 ## Identity leftovers (not a version downgrade)
 

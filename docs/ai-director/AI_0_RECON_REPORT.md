@@ -386,7 +386,34 @@ See sibling files. ADRs only where inspection forced a choice (revision, preview
 
 ## 18. Tests / non-regression
 
-Recorded in the PR after Phase 18 commands. Production `src/**` (except none) and media modules were **not** edited. `tsconfig.json` include-list is the only build-config touch.
+Production `src/**` and `src-tauri/**` were **not** edited. `tsconfig.json` only adds `docs/ai-director/contracts` to `include`. Vite bundle does not import the contracts (166 modules, same app graph).
+
+| Gate | Result |
+| --- | --- |
+| `npx tsc --noEmit` | **clean** (includes AI-0 contracts) |
+| Focused: commands, timeline, project-dirty, volume-write, volume-automation, layout-prefs, identity, models | **8 files / 186 tests passed** |
+| `npx vitest run` (full) | **1389 passed / 6 failed / 1395** in 163 files |
+| `npx vite build` | **OK** (1.37s) |
+
+The 6 full-suite failures are **pre-existing on V5.6 `main`**, documented in `CURRENT.md`, not introduced by AI-0:
+
+1. `tests/export/afe-15-exact-pts-tail-ownership.test.ts` — 2 tests: dump-ban regex `/VIS|BLACK|null/` trips on ledger fields `visFrames null` / `blackFrames null` (AFE-15 A/N dump-ban).
+2. `tests/export/stress-03-physical-source.test.ts` — 4 tests: operator clip absent (`STRESS03_CLIP` unset in this VM).
+
+No media-behavior change. No AFE / export / mux / ENC edits.
+
+## 21. READY for AI-1?
+
+**READY**
+
+Evidence (not a score):
+
+- Canonical owner, `EditorCommand` dispatch, snapshot undo, stable clip/track/project ids, and a human PREVIEW≠COMMIT drag path are identified with file:symbol citations.
+- AI-1 is a feature-gated Director **shell** (no model, no tools). Attach contract uses existing Inspector collapse / overlay — V5.6 has no dock framework to invent.
+- Typecheck + focused editor/history tests are green. Full-suite failures are the same pre-existing AFE-15 / STRESS-03 cases as `CURRENT.md`.
+- AI-0 did not implement providers, MCP, mutation tools, or Director UI.
+
+Not a claim that AI-5/6/7 are unblocked: revision, event subscribe, secrets, compound `withHistory` API, and preview transaction object remain **MISSING** (gap matrix).
 
 ---
 
@@ -396,6 +423,6 @@ Documentation + contracts + `tsconfig.json` include. Exact list in the PR.
 
 ---
 
-## 20. READY for AI-1?
+## 20. Draft PR
 
-See the closing verdict in the pull request description. The evidence-only answer is computed from this map plus green typecheck/tests/build.
+https://github.com/AILEXSI/ailexsi-resonance-studio-v5.6/pull/36 (draft). Do not merge. STOP after AI-0.
