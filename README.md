@@ -4,7 +4,7 @@ Version **5.6.0**. Product chip **`V5.6.0`**. JSON `schemaVersion` **5**.
 
 First-party Frame Engine. Mediabunny-free. Source lineage: V5 AFE-03 `4e80162` working tree (no V5 git history, V5 repo not modified, PR #23/#24/#25 not merged).
 
-One-look table: `CURRENT.md`. Bootstrap: `docs/V5.5-BOOTSTRAP.md`. Human acceptance: `docs/V5.5-HUMAN-ACCEPTANCE.md`.
+One-look table: `CURRENT.md`. V5.6 release: `docs/V5.6-RELEASE.md`. Bootstrap: `docs/V5.5-BOOTSTRAP.md`. Human acceptance: `docs/V5.5-HUMAN-ACCEPTANCE.md`.
 
 ## What this is
 

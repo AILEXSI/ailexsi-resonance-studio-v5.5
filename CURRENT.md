@@ -2,7 +2,7 @@
 
 Ein Blick. Kein Wunschzettel.
 
-**V5.6** = V5.5 media baseline + Inspector workspace fold/resize + Timeline Focus + ARRANGE/CUTTER segmented clarity + Transport grouping. PRE-AI. Not V6.
+**V5.6** = V5.5 media baseline + LEXI FLOW library (7 scenes + browser) + VIS menu apply/drag + UI Finalization (Inspector fold/resize, Timeline Focus, ARRANGE/CUTTER segment, Transport groups) + progressive track-header overflow (semantic min 80px, readable overflow menu, popup flip/contain). **HUMAN-PROVEN** 2026-09-18. PRE-AI. Not V6. Mixer / AILEXSI Frame Engine / `schemaVersion` **5** unchanged. Release: `docs/V5.6-RELEASE.md`.
 
 **V5.5 bootstrap** from V5 AFE-03 `4e80162`. Mediabunny removed. Export = AILEXSI Frame Engine only. **AILEXSI Frame Engine export on Windows WebView2 is HUMAN-PROVEN** (operator EXE, PR **#17** tip `a01576b` merged to main). **AFE-04** B-frame / varying CTTS is in that proven EXE lineage. V5 repo not modified. V5 PR #23/#24/#25 not merged. **ENC-01** 1920×1080 H.264 @ 24/25/30 is **IMPLEMENTED / AUTOMATED-TESTED / HUMAN-PROVEN** on Windows WebView2 MODE B EXE tip `0ec7758` (PR **#18**). AFE remains closed — this stamp is encoder capability only.
 
@@ -11,7 +11,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 
 | Feld | Stand |
 | --- | --- |
-| Datum | 2026-09-17 |
+| Datum | 2026-09-18 |
 | Ordner | `C:\\Users\\marti\\ResonanceStudio-V5` |
 | Version | **5.6.0** (package `@ailexsi/resonance-studio-v5.5` / tauri `AILEXSI Resonance Studio V5.6` / Cargo `ailexsi-resonance-studio-v5-5` / toolbar chip **`V5.6.0`**). JSON `schemaVersion` **5**. |
 | main | This V5.5 repo. Source working tree: V5 `4e80162`. Not a merge of V5 PR #23/#24/#25. |
@@ -25,7 +25,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Transport | Play / Pause / Stop / … + **Split** + **Undo** + **Redo** + **Snap** + **Help** |
 | Follow playhead | **HUMAN-PROVEN** (earlier Chrome + local exe @ `0df5da1` on main). Follow ON: Nadel pinnt bei ~65% der sichtbaren Lane, danach scrollt **ein** `scrollMs` (Ruler, VIS, V1/V2, audio collection). Seek paget nur, wenn die Nadel den View verlässt. Follow OFF: kein Auto-Scroll, kein Force-Scroll. This EXE pass: existing playback / timeline remained functional. |
 | Loop | **HUMAN-PROVEN** (earlier). Loop OFF spielt über OUT weiter (OUT = Marker, kein Stop). Loop ON wrappt OUT→IN. |
-| Compact headers | Kurze Lanes (`< 46px`): VIS `VIS [M] [Scene]`, V/A `V1 [M] [S]` in einer Zeile. Default ~52px bleibt gestapelt. |
+| Compact headers | Kurze Lanes (`< 46px`): VIS `VIS [M] [Scene]`, V/A `V1 [M] [S]` in einer Zeile. Default ~52px bleibt gestapelt. Narrow width uses **progressive overflow** (identity + Mute stay direct; ▾ holds the rest). Semantic header min **80px**. |
 | File overlay | New / Speichern / Speichern unter / Öffnen / Zuletzt — **kein** Ordner wählen, **kein** Revert, **keine** MEDIA-Durchsuchen-Zeile. Import bleibt der Toolbar-Button. Media-Bin (Suche/Filter/Place) kann im Overlay sitzen, lädt aber keine Dateien. |
 | Speichern / Speichern unter | **HUMAN-PROVEN** in EXE. **Speichern:** Tauri schreibt gemerkten `lastPath` ohne Picker; ohne Pfad öffnet den nativen Save-Dialog. **Speichern unter:** immer Picker, `defaultPath` versioniert (`Stem.vN.resonance.json`, nie Windows `(2)`). Panel zeigt Dateiname + Elternordner (oder `Pfad gemerkt`) sobald `lastPath` da ist. Chrome: `showSaveFilePicker` / FSA. Firefox: kein FSA → Download. |
 | Project `.vN` | **HUMAN-PROVEN.** Suggested name `Untitled_Resonance.v1.resonance.json` (leer → `.v1`; unversioniert belegt v1 → `.v2`). Shared helpers with Export (`filename-version.ts`). |
@@ -44,8 +44,25 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Persistenz | `last-project.json` in V5.5 AppData (`com.ailexsi.resonance-studio-v5-5`). Keys `resonance-studio-v5-5*`. JSON `schemaVersion` **5**. App/Tauri/Cargo **5.6.0**. Separate from V5. |
 | Dev/test fixtures | `tests/fixtures/user-video.mp4` + `user-audio.mp3` only. Owner-provided development/test fixture supplied specifically for internal Grok VM testing during remote development. Not intended for product distribution. **NOT DISTRIBUTED / TEST-ONLY** — removed from `public/fixtures/` so Vite/`dist`/Tauri cannot copy them. `export-check.html` is repo-root / Vite-dev only (not under `public/`). This note is provenance of presence, **not** a copyright-ownership or commercial-clearance claim. |
 | Deps / SBOM | Mediabunny **removed**. CycloneDX SBOMs + inventory: `docs/compliance/`. MODE A AFE-25 (tip `a01576b`, still on main after PR #17): **1209 passed / 2 failed / 1211 total in 144 files** (`tsc --noEmit` clean). The 2 failures are the pre-existing AFE-15 A/N dump-ban (`visFrames`/`blackFrames`/`null` trip `/VIS|BLACK|null/`) — still present on main; not a merge regression. AFE-25 file: **4/4**. AFE-24 file: **4/4**. AFE-23 file: **7/7**. AFE-22 file: **7/7**. AFE-21 file: **8/8**. AFE-20 Shape A file: **13/13**. AFE-20 Shape B tail file: **7/7**. AFE-19 file: **7/7**. AFE-18 file: **10/10**. AFE-17 file: **12/12**. MODE A Chrome VIDEO→VIS→VIDEO fixture still **90/90/90** — **AUTOMATED-TESTED**, not HUMAN-PROVEN. Chrome B-frame pixels **1188/1188 EXACT** remain AFE-04/05 MODE A evidence. Windows WebView2 AILEXSI export (VIS-mix / multi-clip + AFE-25 prefer-software) is **HUMAN-PROVEN** at `a01576b` merged. **No LICENSE. No THIRD_PARTY_NOTICES. Does not claim MPL FREE. Licensing is not HUMAN-PROVEN.** |
+| V5.6 UI / VIS / headers | **HUMAN-PROVEN** 2026-09-18 (operator: overflow *perfect sauber gelöst*). LEXI FLOW 7 + browser; VIS styles apply/drag; Inspector fold; Timeline Focus; ARRANGE/CUTTER segment; Transport groups; header overflow + 80px min + readable menu + viewport flip. Mixer/engine/schema 5 unchanged. Consolidate tip → main (`docs/V5.6-RELEASE.md`). |
 | Nächster Slice | Production Pass **I** (44-Track Acceptance) — **PLANNED / NOT IMPLEMENTED**. D + E + F + G + **H** stay HUMAN-PROVEN. Future UI zettel is **not** I. STOP — no I+. |
 | Production Pass | **D HUMAN-PROVEN** (incl. mixer resize/scroll). **E HUMAN-PROVEN** (Stem Import). **F HUMAN-PROVEN** (Track/Chapter Groups collapse UI — create / assign / collapse / rename). **G HUMAN-PROVEN** (Volume Automation — VOL lane). **H HUMAN-PROVEN** (Write Volume **W** — Vite + Root-Exe `24f4337`). **I–N + zettel PLANNED / NOT IMPLEMENTED**. Four Chapters + bis 11 Suno-Stems × 4. Kein Cubase-Klon. VIS-Ausbau-Intent = K–N. Version 5.0.0. AUTO unangetastet. |
+
+## V5.6 — HUMAN-PROVEN 2026-09-18
+
+**IMPLEMENTED / AUTOMATED-TESTED / HUMAN-PROVEN.** Ready to consolidate into `main`. Coordinator merges this branch tip, closes superseded drafts **#27–#34**, builds final `AILEXSI Resonance Studio V5.6.exe`. Agent does **not** merge.
+
+| | |
+| --- | --- |
+| Result | **PASSED** — operator on track overflow + popup containment: *perfect sauber gelöst*. V5.6 workspace / VIS / header surface accepted. |
+| Feature tip | `cursor/ui-responsive-track-headers-6a5d` (PR **#34**, stacked on UI Finalization PR **#33** + LEXI family PR **#32**). Docs stamp is this commit; code tip before stamp was `0c9f54c`. |
+| Chip | **5.6.0** · schema **5** · PRE-AI · **not V6** |
+| Untouched | Mixer.tsx product semantics; AILEXSI Frame Engine; `schemaVersion` **5**; AppData `com.ailexsi.resonance-studio-v5-5` / `resonance-studio-v5-5*` keys |
+| LEXI | FLOW family, **7** selectable scenes: `lexi` · `lexi-ref` · `lexi-2036` · `lexi-v3` · `lexi-v2` · `lexi-minimal` · `lexi-v1`. Hierarchical browser (ALL / LEXI / CLASSIC). VIS styles menu **apply** uses the same rematerialize path as cycle; title-bar **drag** + viewport clamp. |
+| UI Finalization | Inspector OPEN/CLOSED fold (existing h-split); Timeline Focus on the Preview/Arrange splitter; ARRANGE/CUTTER segmented look; Transport grouping via separators. No new shortcuts. |
+| Track headers | Progressive overflow only (no density modes). Identity + Mute always direct. Semantic divider floor **80px** (`headerUsableMinPx` = `LANE_LABEL_MIN_PX`). Compact glyphs M/S/W/VOL; overflow menu uses readable Resonance labels + live state. Popup: below if it fits, else flip above, else taller side + internal scroll. Portaled like the VIS overlay. |
+| Protected baselines | **VIS-RESPONSE-02** HUMAN-PROVEN 2026-09-17 (*perfect*). Long-form numbers already documented — do not invent new ones: VIS-SYNC-01 **~34:18** and **~64 min** VIDEO+VIS+AAC; AUDIO-01 **~29:11** 1080p30; ENC-01 1080p24/25/30 (`0ec7758`). Chrome **90/90/90** stays AUTOMATED-TESTED. |
+| Release note | `docs/V5.6-RELEASE.md` |
 
 ## ENC-01 — 1080p AVC encoder capability
 
@@ -230,7 +247,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 
 ## VIS-SCENE-LEXI family — consolidation + scene browser
 
-**IMPLEMENTED / AUTOMATED-TESTED**. **DRAFT** — **HUMAN-PROVEN = PENDING**. Do not merge. VIS + LEXI library + UI only. ENC / STRESS / AUDIO / AFE / mux untouched.
+**IMPLEMENTED / AUTOMATED-TESTED / HUMAN-PROVEN** as part of V5.6 2026-09-18. VIS + LEXI library + UI only. ENC / STRESS / AUDIO / AFE / mux untouched. Ready to consolidate into main (coordinator merges the V5.6 tip).
 
 | | |
 | --- | --- |
@@ -240,7 +257,7 @@ Evidence: **IMPLEMENTED** | **AUTOMATED-TESTED** | **HUMAN-PROVEN** | **PLANNED*
 | Retained ids | `lexi` · `lexi-ref` · `lexi-2036` · `lexi-v3` · `lexi-v2` · `lexi-minimal` · `lexi-v1` |
 | Registry | `SCENE_CATALOG` is the single metadata source. No hardcoded second dropdown. |
 | Select | Inspector / VIS-lane browser: LEXI → family → scene. Cycle remains a fallback. |
-| Human | PENDING. Checklist: `docs/compliance/VIS-SCENE-LEXI-FAMILY.md`. EXE pending coordinator MODE B. |
+| Human | **PASSED** with V5.6 2026-09-18. Checklist: `docs/compliance/VIS-SCENE-LEXI-FAMILY.md`. Final EXE is the coordinator V5.6 merge build. |
 | Test | Family 8 + browser 2 + vis-scene-lexi 15 + visualizer 30. Broader VIS/inspector/timeline/export/AUDIO/identity **175/175**. ENC-01 + AAC + STRESS-02/03-stage **26/26**. `tsc --noEmit` clean. `vite build` clean. |
 | Untouched | AFE; AVC/ENC; AAC; mix; MP4 mux; STRESS; 2h buffer. |
 

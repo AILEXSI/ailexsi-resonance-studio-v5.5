@@ -1,8 +1,8 @@
 # LEXI family — premium VIS library + scene browser
 
-**Status:** **IMPLEMENTED / AUTOMATED-TESTED** · **HUMAN-PROVEN = PENDING**. Do not merge until the operator accepts on a MODE-B EXE.
+**Status:** **IMPLEMENTED / AUTOMATED-TESTED / HUMAN-PROVEN** as part of V5.6 2026-09-18. Ready to consolidate into main (coordinator merges the V5.6 tip).
 
-**Product goal:** LEXI is a coherent premium visual system inside Resonance Studio V5.5 — a scalable library and a real scene browser — not “one more VIS scene.”
+**Product goal:** LEXI is a coherent premium visual system inside Resonance Studio V5.6 — a scalable library and a real scene browser — not “one more VIS scene.”
 
 VIS + LEXI library + UI only. ENC / STRESS / AUDIO / AFE / mux / 2h buffer architecture are untouched.
 
@@ -71,20 +71,20 @@ Unchanged shared VIS analysis (`applyVisResponse`). Bass → terrain lift/pressu
 
 ## HUMAN acceptance (operator)
 
-**HUMAN-PROVEN = PENDING.**
+**HUMAN-PROVEN** 2026-09-18 with V5.6 (operator accepted the stacked workspace / VIS / header surface). See `docs/V5.6-RELEASE.md`.
 
 UI: open selector → LEXI → all five families → pick scenes directly. No forced cycling.
 
 Visual: each LEXI scene renders in Preview; short export; immediate deterministic scene change.
 
-Flagship FLOW (`lexi`): **FAIL** if it still reads as thin gold wireframe on black. **PASS** if depth, atmosphere, layered terrain, luminous particles, volumetric feeling, controlled glow, musical response, premium identity.
+Flagship FLOW (`lexi`): accepted as the V5.6 library flagship (depth / atmosphere / layered terrain / controlled glow / musical response). Intermediate V1–V3 / 2036 / ref-level remain selectable FLOW entries.
 
 ## Coordinator EXE
 
-Do **not** merge. Freeze this branch tip. Coordinator builds one `AILEXSI Resonance Studio V5.5.exe` (MODE B). Agent does not produce the Windows EXE.
+Consolidate the V5.6 tip (`cursor/ui-responsive-track-headers-6a5d` / PR **#34**) into `main`. Coordinator builds `AILEXSI Resonance Studio V5.6.exe`. Agent does not merge and does not produce the Windows EXE.
 
-Identity: `productVersion` **5.5.0** · `frameEngine` **AILEXSI** · branch `cursor/vis-lexi-family-consolidation-0a86` · `gitSha` = this tip after stamp.
+Identity: `productVersion` **5.6.0** · `frameEngine` **AILEXSI** · schema **5**.
 
-HUMAN UX follow-up: VIS styles title bar is freely draggable (pointer capture, viewport clamp, session persist). Short arranger / bottom-clip opens the panel further up. Menu pick uses `applyPickVisualizerScene` (same rematerialize path as cycle) so LEXI applies without Next in cycle. Mute **M** excluded. Inspector secondary.
+HUMAN UX follow-up (kept): VIS styles title bar is freely draggable (pointer capture, viewport clamp, session persist). Short arranger / bottom-clip opens the panel further up. Menu pick uses `applyPickVisualizerScene` (same rematerialize path as cycle) so LEXI applies without Next in cycle. Mute **M** excluded. Inspector secondary.
 
 Automated gates this pass: LEXI family 8 + browser 3 + vis-lane-browser 5 + vis-browser-layout 3 + vis-scene-lexi 15 + visualizer 30 + vis-cues 5 + lane-chrome 7; inspector / timeline / visualizer **314/314**. `tsc --noEmit` clean. ENC / AAC / STRESS / AFE not re-run (untouched).
