@@ -34,6 +34,7 @@ describe("track header overflow DOM", () => {
     host?.remove();
     host = undefined;
     root = undefined;
+    document.querySelectorAll("[data-header-slot=overflow]").forEach((node) => node.remove());
   });
 
   function mount(
@@ -114,9 +115,25 @@ describe("track header overflow DOM", () => {
     });
   }
 
+  function q(sel: string): Element | null {
+    return host?.querySelector(sel) ?? document.querySelector(sel);
+  }
+
+  function qAll(sel: string): Element[] {
+    const local = host ? [...host.querySelectorAll(sel)] : [];
+    if (local.length > 0) return local;
+    return [...document.querySelectorAll(sel)];
+  }
+
   function slotOf(control: string, laneTestId: string) {
     const lane = host!.querySelector(`[data-testid="${laneTestId}"]`)!;
-    const nodes = [...lane.querySelectorAll(`[data-header-control="${control}"]`)];
+    const trackId = laneTestId.replace(/^lane-/, "");
+    const menu = document.querySelector(`[data-testid="lane-overflow-menu-${trackId}"]`);
+    const inLane = [...lane.querySelectorAll(`[data-header-control="${control}"]`)].filter(
+      (node) => !node.closest("[data-header-slot=overflow]"),
+    );
+    const inMenu = menu ? [...menu.querySelectorAll(`[data-header-control="${control}"]`)] : [];
+    const nodes = [...inLane, ...inMenu];
     expect(nodes.length, `${control} on ${laneTestId}`).toBe(1);
     const node = nodes[0]!;
     if (node.closest("[data-header-slot=overflow]")) return "overflow";
@@ -168,19 +185,17 @@ describe("track header overflow DOM", () => {
     expect(slotOf("groupAssign", "lane-A1")).toBe("overflow");
     expect(slotOf("groupCreate", "lane-A2")).toBe("overflow");
     expect(slotOf("addAudio", "lane-A2")).toBe("overflow");
-    expect(host!.querySelectorAll("[data-testid=create-track-group]")).toHaveLength(1);
-    expect(host!.querySelectorAll("[data-testid=add-audio-track]")).toHaveLength(1);
-    expect(host!.querySelectorAll("[data-testid=lane-group-assign-A1]")).toHaveLength(1);
+    expect(qAll("[data-testid=create-track-group]")).toHaveLength(1);
+    expect(qAll("[data-testid=add-audio-track]")).toHaveLength(1);
+    expect(qAll("[data-testid=lane-group-assign-A1]")).toHaveLength(1);
 
     act(() => {
       (host!.querySelector("[data-testid=lane-overflow-A2]") as HTMLButtonElement).click();
     });
-    expect(host!.querySelector("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(
-      false,
-    );
+    expect(q("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(false);
     act(() => {
-      (host!.querySelector("[data-testid=add-audio-track]") as HTMLButtonElement).click();
-      (host!.querySelector("[data-testid=create-track-group]") as HTMLButtonElement).click();
+      (q("[data-testid=add-audio-track]") as HTMLButtonElement).click();
+      (q("[data-testid=create-track-group]") as HTMLButtonElement).click();
     });
     expect(added).toEqual(["add"]);
     expect(created).toEqual([[]]);
@@ -199,23 +214,19 @@ describe("track header overflow DOM", () => {
     });
     expect(slotOf("volume", "lane-A1")).toBe("overflow");
     expect(slotOf("write", "lane-A1")).toBe("overflow");
-    expect(host!.querySelector("[data-testid=write-arm-A1]")!.className).toMatch(/active/);
-    expect(host!.querySelector("[data-testid=write-arm-A1]")!.textContent).toBe(
-      "Disarm write automation",
-    );
-    expect(host!.querySelector("[data-testid=volume-lane-toggle-A1]")!.textContent).toBe(
-      "Volume automation",
-    );
+    expect(q("[data-testid=write-arm-A1]")!.className).toMatch(/active/);
+    expect(q("[data-testid=write-arm-A1]")!.textContent).toBe("Disarm write automation");
+    expect(q("[data-testid=volume-lane-toggle-A1]")!.textContent).toBe("Volume automation");
     act(() => {
       (host!.querySelector("[data-testid=mute-A1]") as HTMLButtonElement).click();
       (host!.querySelector("[data-testid=lane-overflow-A1]") as HTMLButtonElement).click();
     });
     act(() => {
-      (host!.querySelector("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement).click();
+      (q("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement).click();
     });
     expect(muted).toEqual(["A1"]);
     expect(armed).toEqual([]);
-    const vol = host!.querySelector("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement;
+    const vol = q("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement;
     expect(vol.getAttribute("aria-label")).toBe("Show volume automation");
   });
 
@@ -302,7 +313,7 @@ describe("track header overflow DOM", () => {
       `${LANE_HEIGHT_MIN_PX}px`,
     );
     expect(slotOf("groupAssign", "lane-A1")).toBe("overflow");
-    expect(host!.querySelectorAll("[data-testid=lane-group-assign-A1]")).toHaveLength(1);
+    expect(qAll("[data-testid=lane-group-assign-A1]")).toHaveLength(1);
   });
 
   it("RH-19 VIS scene can overflow at min inline width; mute stays direct", () => {
@@ -327,13 +338,13 @@ describe("track header overflow DOM", () => {
     );
     expect(slotOf("mute", "lane-VIS")).toBe("direct");
     expect(slotOf("scene", "lane-VIS")).toBe("overflow");
-    expect(host!.querySelector("[data-testid=visualizer-scene]")!.textContent).toBe("Scene · Wave");
+    expect(q("[data-testid=visualizer-scene]")!.textContent).toBe("Scene · Wave");
     act(() => {
       (host!.querySelector("[data-testid=mute-VIS]") as HTMLButtonElement).click();
       (host!.querySelector("[data-testid=lane-overflow-VIS]") as HTMLButtonElement).click();
     });
     act(() => {
-      (host!.querySelector("[data-testid=visualizer-scene]") as HTMLButtonElement).click();
+      (q("[data-testid=visualizer-scene]") as HTMLButtonElement).click();
     });
     expect(muteVis).toBe(1);
     expect(cycle).toBe(1);
@@ -346,9 +357,9 @@ describe("track header overflow DOM", () => {
       onToggleVolumeWriteArm: () => undefined,
       onAssignTracksToGroup: () => undefined,
     });
-    expect(host!.querySelector("[data-testid=write-arm-V1]")).toBeNull();
-    expect(host!.querySelector("[data-testid=volume-lane-toggle-V1]")).toBeNull();
-    expect(host!.querySelector("[data-testid=lane-group-assign-V1]")).toBeNull();
+    expect(q("[data-testid=write-arm-V1]")).toBeNull();
+    expect(q("[data-testid=volume-lane-toggle-V1]")).toBeNull();
+    expect(q("[data-testid=lane-group-assign-V1]")).toBeNull();
     expect(host!.querySelector("[data-testid=lane-overflow-V1]")).toBeNull();
     expect(slotOf("mute", "lane-V1")).toBe("direct");
     expect(slotOf("solo", "lane-V1")).toBe("direct");
@@ -364,15 +375,11 @@ describe("track header overflow DOM", () => {
     act(() => {
       (host!.querySelector("[data-testid=lane-overflow-A2]") as HTMLButtonElement).click();
     });
-    expect(host!.querySelector("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(
-      false,
-    );
+    expect(q("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(false);
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
-    expect(host!.querySelector("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(
-      true,
-    );
+    expect(q("[data-testid=lane-overflow-menu-A2]")!.hasAttribute("hidden")).toBe(true);
     expect(window.localStorage.getItem("resonance-studio-v5-5-header-overflow")).toBeNull();
   });
 
@@ -426,10 +433,10 @@ describe("track header overflow DOM", () => {
     expect(slotOf("write", "lane-A1")).toBe("overflow");
     expect(slotOf("volume", "lane-A1")).toBe("overflow");
     expect(slotOf("groupAssign", "lane-A1")).toBe("overflow");
-    const solo = host!.querySelector("[data-testid=solo-A1]") as HTMLButtonElement;
-    const write = host!.querySelector("[data-testid=write-arm-A1]") as HTMLButtonElement;
-    const volume = host!.querySelector("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement;
-    const assign = host!.querySelector("[data-testid=lane-group-assign-A1]") as HTMLSelectElement;
+    const solo = q("[data-testid=solo-A1]") as HTMLButtonElement;
+    const write = q("[data-testid=write-arm-A1]") as HTMLButtonElement;
+    const volume = q("[data-testid=volume-lane-toggle-A1]") as HTMLButtonElement;
+    const assign = q("[data-testid=lane-group-assign-A1]") as HTMLSelectElement;
     expect(solo.textContent).toBe("Unsolo");
     expect(solo.className).toMatch(/active/);
     expect(solo.getAttribute("aria-pressed")).toBe("true");
@@ -439,10 +446,55 @@ describe("track header overflow DOM", () => {
     expect(volume.textContent).toBe("Hide volume automation");
     expect(volume.className).toMatch(/active/);
     expect(volume.getAttribute("aria-pressed")).toBe("true");
-    expect(host!.querySelector(".lane-overflow-field")!.textContent).toContain(
-      "Chapter group · Chapter IV",
-    );
+    expect(q(".lane-overflow-field")!.textContent).toContain("Chapter group · Chapter IV");
     expect(assign.value).toBe(grouped.group!.id);
+  });
+
+  it("POP-02 overflow menu flips above a near-bottom trigger and stays in the viewport", () => {
+    mount({
+      laneLabelPx: HEADER_WIDTH_MEDIUM_PX,
+      onToggleVolumeLane: () => undefined,
+      onToggleVolumeWriteArm: () => undefined,
+      onAssignTracksToGroup: () => undefined,
+      onCreateTrackGroup: () => undefined,
+      onAddAudioTrack: () => undefined,
+    });
+    const btn = host!.querySelector("[data-testid=lane-overflow-A2]") as HTMLButtonElement;
+    btn.getBoundingClientRect = () =>
+      ({
+        x: 12,
+        y: 640,
+        left: 12,
+        right: 28,
+        top: 640,
+        bottom: 656,
+        width: 16,
+        height: 16,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const innerHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    const innerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 720 });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    try {
+      act(() => {
+        btn.click();
+      });
+      const menu = q("[data-testid=lane-overflow-menu-A2]") as HTMLElement;
+      expect(menu.hasAttribute("hidden")).toBe(false);
+      expect(menu.getAttribute("data-overflow-placement")).toBe("above");
+      const top = Number.parseFloat(menu.style.top);
+      expect(top).toBeLessThan(640);
+      expect(top).toBeGreaterThanOrEqual(8);
+      expect(q("[data-testid=write-arm-A2]")).toBeTruthy();
+      expect(q("[data-testid=volume-lane-toggle-A2]")).toBeTruthy();
+      expect(q("[data-testid=add-audio-track]")).toBeTruthy();
+    } finally {
+      if (innerHeight) Object.defineProperty(window, "innerHeight", innerHeight);
+      else delete (window as { innerHeight?: number }).innerHeight;
+      if (innerWidth) Object.defineProperty(window, "innerWidth", innerWidth);
+      else delete (window as { innerWidth?: number }).innerWidth;
+    }
   });
 
   it("divider cannot compress below identity + Mute + overflow", () => {

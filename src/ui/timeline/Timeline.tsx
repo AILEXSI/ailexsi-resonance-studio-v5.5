@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   clipEndMs,
@@ -65,13 +65,17 @@ import {
 import { VolumeAutomationLane } from "./VolumeAutomationLane";
 import { TrackHeaderOverflowButton, TrackHeaderOverflowMenu } from "./TrackHeaderOverflow";
 import {
+  OVERFLOW_MENU_FALLBACK_HEIGHT_PX,
+  OVERFLOW_MENU_FALLBACK_WIDTH_PX,
   controlIsDirect,
   controlIsOverflowed,
   headerOverflowLabel,
+  placeOverflowMenu,
   planTrackHeaderOverflow,
   resolveHeaderWidth,
   stabilizeHeaderWidth,
   type HeaderControlId,
+  type OverflowMenuBox,
 } from "./track-header-overflow";
 
 export { RULER_PAD_PX };
@@ -485,7 +489,14 @@ export function Timeline({
   const [visBrowserPos, setVisBrowserPos] = useState({ left: 108, top: 72 });
   const [headerWidthPx, setHeaderWidthPx] = useState(laneLabelPx);
   const [overflowOpenId, setOverflowOpenId] = useState<string | null>(null);
-  const [overflowPos, setOverflowPos] = useState({ left: 8, top: 8 });
+  const [overflowPos, setOverflowPos] = useState<OverflowMenuBox>({
+    left: 8,
+    top: 8,
+    maxHeight: 0,
+    placement: "below",
+    constrained: false,
+  });
+  const overflowAnchorRef = useRef<HTMLElement | null>(null);
   const visHeaderRef = useRef<HTMLDivElement>(null);
   const visBrowserRef = useRef<HTMLDivElement>(null);
   const visBrowserDragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -599,6 +610,7 @@ export function Timeline({
       const t = e.target as Node | null;
       if (!t) return;
       if ((t as Element).closest?.("[data-header-overflow-root]")) return;
+      if ((t as Element).closest?.("[data-header-slot=overflow]")) return;
       setOverflowOpenId(null);
     };
     window.addEventListener("keydown", onKey);
@@ -1175,16 +1187,59 @@ export function Timeline({
       pack: pack ? "inline" : "stack",
       present,
     });
+  const placeOpenOverflow = (id: string | null = overflowOpenId) => {
+    const anchor = overflowAnchorRef.current;
+    if (!id || !anchor) return;
+    const trigger = anchor.getBoundingClientRect();
+    const menuEl = document.querySelector(`[data-testid="lane-overflow-menu-${id}"]`) as HTMLElement | null;
+    const menuRect = menuEl && !menuEl.hidden ? menuEl.getBoundingClientRect() : null;
+    const naturalHeight = menuEl && !menuEl.hidden ? menuEl.scrollHeight : 0;
+    setOverflowPos(
+      placeOverflowMenu({
+        trigger,
+        menu: {
+          width: menuRect && menuRect.width > 0 ? menuRect.width : OVERFLOW_MENU_FALLBACK_WIDTH_PX,
+          height: naturalHeight > 0 ? naturalHeight : OVERFLOW_MENU_FALLBACK_HEIGHT_PX,
+        },
+        viewport: {
+          width: window.innerWidth || 1024,
+          height: window.innerHeight || 768,
+        },
+      }),
+    );
+  };
+
   const toggleOverflow = (id: string, anchor?: HTMLElement) => {
     setMenu(null);
     setMarkerMenu(null);
     setVisMenu(null);
-    if (anchor) {
-      const rect = anchor.getBoundingClientRect();
-      setOverflowPos({ left: Math.round(rect.left), top: Math.round(rect.bottom + 2) });
-    }
-    setOverflowOpenId((cur) => (cur === id ? null : id));
+    setOverflowOpenId((cur) => {
+      if (cur === id) {
+        overflowAnchorRef.current = null;
+        return null;
+      }
+      overflowAnchorRef.current = anchor ?? overflowAnchorRef.current;
+      return id;
+    });
   };
+
+  useLayoutEffect(() => {
+    if (!overflowOpenId) return;
+    placeOpenOverflow(overflowOpenId);
+    const frame = requestAnimationFrame(() => placeOpenOverflow(overflowOpenId));
+    return () => cancelAnimationFrame(frame);
+  }, [overflowOpenId]);
+
+  useEffect(() => {
+    if (!overflowOpenId) return;
+    const onReposition = () => placeOpenOverflow(overflowOpenId);
+    window.addEventListener("resize", onReposition);
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [overflowOpenId]);
 
   const onLaneLabelSplitterDown = (e: ReactPointerEvent) => {
     if (e.button !== 0) return;
@@ -1586,6 +1641,9 @@ export function Timeline({
               open={overflowOpenId === "VIS"}
               left={overflowPos.left}
               top={overflowPos.top}
+              maxHeight={overflowPos.maxHeight}
+              placement={overflowPos.placement}
+              constrained={overflowPos.constrained}
             >
               {controlIsOverflowed(visPlan, "mute") ? visMute(true) : null}
               {controlIsOverflowed(visPlan, "scene") ? visScene(true) : null}
@@ -2017,6 +2075,9 @@ export function Timeline({
                         open={overflowOpenId === id}
                         left={overflowPos.left}
                         top={overflowPos.top}
+                        maxHeight={overflowPos.maxHeight}
+                        placement={overflowPos.placement}
+                        constrained={overflowPos.constrained}
                       >
                         {controlIsOverflowed(headerPlan, "mute") ? muteBtn(true) : null}
                         {controlIsOverflowed(headerPlan, "solo") ? soloBtn(true) : null}

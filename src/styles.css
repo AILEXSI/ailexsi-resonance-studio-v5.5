@@ -1166,6 +1166,9 @@ body.media-asset-dragging .project-overlay-drawer {
   z-index: 30;
   min-width: 176px;
   width: max-content;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .lane-overflow-menu[hidden] {
   display: none;

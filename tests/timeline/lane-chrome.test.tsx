@@ -223,7 +223,8 @@ describe("lane header chrome", () => {
     expect(host!.querySelector("[data-testid=lane-V1]")!.getAttribute("data-header-pack")).toBe("stack");
     expect(host!.querySelector("[data-testid=lane-A1]")!.getAttribute("data-header-pack")).toBe("stack");
     expect(host!.querySelector("[data-testid=mute-VIS]")!.closest("[data-header-slot=overflow]")).toBeNull();
-    const scene = host!.querySelector("[data-testid=visualizer-scene]") as HTMLButtonElement;
+    const scene = (host!.querySelector("[data-testid=visualizer-scene]") ??
+      document.querySelector("[data-testid=visualizer-scene]")) as HTMLButtonElement;
     expect(scene.textContent).toMatch(/^(Wave|Scene · Wave)$/);
 
     act(() => {

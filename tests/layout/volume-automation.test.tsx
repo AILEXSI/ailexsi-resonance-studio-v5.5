@@ -47,6 +47,10 @@ describe("volume automation lane chrome", () => {
   let host: HTMLDivElement | undefined;
   let root: Root | undefined;
 
+  function q(sel: string): Element | null {
+    return host?.querySelector(sel) ?? document.querySelector(sel);
+  }
+
   function mount(
     project: ReturnType<typeof createEmptyProject>,
     opts: {
@@ -104,13 +108,13 @@ describe("volume automation lane chrome", () => {
     const toggled: string[] = [];
     mount(createEmptyProject(), { onToggle: (id) => toggled.push(id) });
     expect(host!.querySelector('[data-testid="volume-lane-A1"]')).toBeNull();
-    const toggle = host!.querySelector('[data-testid="volume-lane-toggle-A1"]') as HTMLButtonElement;
+    const toggle = q('[data-testid="volume-lane-toggle-A1"]') as HTMLButtonElement;
     expect(toggle).toBeTruthy();
     expect(toggle.textContent).toMatch(/VOL|Volume automation/);
     expect(toggle.getAttribute("aria-label")).toBe("Show volume automation");
     expect(host!.querySelector('[data-testid="volume-lane-toggle-V1"]')).toBeNull();
     act(() => {
-      (host!.querySelector('[data-testid="volume-lane-toggle-A1"]') as HTMLButtonElement).click();
+      (q('[data-testid="volume-lane-toggle-A1"]') as HTMLButtonElement).click();
     });
     expect(toggled).toEqual(["A1"]);
 
@@ -151,14 +155,14 @@ describe("volume automation lane chrome", () => {
       writeArmed: [],
       onToggleWrite: (id) => armed.push(id),
     });
-    const laneW = host!.querySelector('[data-testid="write-arm-A1"]') as HTMLButtonElement;
+    const laneW = q('[data-testid="write-arm-A1"]') as HTMLButtonElement;
     const mixW = host!.querySelector('[data-testid="mix-write-A1"]') as HTMLButtonElement;
     expect(laneW?.textContent).toMatch(/W|Write automation/);
     expect(mixW?.textContent).toBe("W");
     expect(host!.querySelector('[data-testid="write-arm-V1"]')).toBeNull();
     expect(host!.querySelector('[data-testid="mix-write-master"]')).toBeNull();
     expect(host!.querySelector('[data-testid="mute-A1"]')).toBeTruthy();
-    expect(host!.querySelector('[data-testid="volume-lane-toggle-A1"]')?.textContent).toMatch(
+    expect(q('[data-testid="volume-lane-toggle-A1"]')?.textContent).toMatch(
       /VOL|Volume automation/,
     );
     act(() => {
@@ -168,7 +172,7 @@ describe("volume automation lane chrome", () => {
     expect(armed).toEqual(["A1", "A1"]);
 
     mount(createEmptyProject(), { writeArmed: ["A1"], onToggleWrite: () => undefined });
-    expect(host!.querySelector('[data-testid="write-arm-A1"]')?.className).toMatch(/active/);
+    expect(q('[data-testid="write-arm-A1"]')?.className).toMatch(/active/);
     expect(host!.querySelector('[data-testid="mix-A1"]')?.getAttribute("data-write-armed")).toBe("true");
     expect(host!.querySelector('[data-testid="mix-db-A1"]')?.textContent).toMatch(/0\.0 dB/);
   });

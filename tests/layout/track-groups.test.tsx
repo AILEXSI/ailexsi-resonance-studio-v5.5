@@ -120,8 +120,14 @@ describe("track group collapse chrome", () => {
     expect(host!.querySelector('[data-testid="lane-A1"]')).toBeTruthy();
     expect(host!.querySelector('[data-testid="mix-A1"]')).toBeTruthy();
     expect(host!.querySelector('[data-testid="lane-A2"]')).toBeTruthy();
-    expect(host!.querySelector('[data-testid="create-track-group"]')).toBeTruthy();
-    expect(host!.querySelector('[data-testid="add-audio-track"]')).toBeTruthy();
+    expect(
+      host!.querySelector('[data-testid="create-track-group"]') ??
+        document.querySelector('[data-testid="create-track-group"]'),
+    ).toBeTruthy();
+    expect(
+      host!.querySelector('[data-testid="add-audio-track"]') ??
+        document.querySelector('[data-testid="add-audio-track"]'),
+    ).toBeTruthy();
 
     act(() => {
       (host!.querySelector(`[data-testid="lane-group-collapse-${gid}"]`) as HTMLButtonElement).click();
@@ -166,7 +172,12 @@ describe("track group collapse chrome", () => {
     expect(host!.querySelector('[data-testid="mix-A2"]')).toBeNull();
     expect(host!.querySelector(`[data-testid="lane-group-${gid}"]`)).toBeTruthy();
     expect(host!.querySelector(`[data-testid="mix-group-${gid}"]`)).toBeTruthy();
-    expect(host!.querySelector('[data-testid="lane-A2"]') ? true : host!.querySelector('[data-testid="add-audio-track"]')).toBeTruthy();
+    expect(
+      host!.querySelector('[data-testid="lane-A2"]')
+        ? true
+        : host!.querySelector('[data-testid="add-audio-track"]') ??
+            document.querySelector('[data-testid="add-audio-track"]'),
+    ).toBeTruthy();
     const extraLane = extra.tracks.find((t) => t.kind === "audio" && t.id !== "A1" && t.id !== "A2")!;
     expect(host!.querySelector(`[data-testid="lane-${extraLane.id}"]`)).toBeTruthy();
   });

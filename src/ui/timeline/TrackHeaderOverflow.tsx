@@ -1,4 +1,6 @@
 import { type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import type { OverflowMenuPlacement } from "./track-header-overflow";
 
 export function TrackHeaderOverflowButton({
   trackId,
@@ -34,26 +36,40 @@ export function TrackHeaderOverflowMenu({
   open,
   left,
   top,
+  maxHeight,
+  placement,
+  constrained,
   children,
 }: {
   trackId: string;
   open: boolean;
   left: number;
   top: number;
+  maxHeight?: number;
+  placement?: OverflowMenuPlacement;
+  constrained?: boolean;
   children: ReactNode;
 }) {
-  return (
+  const node = (
     <div
       className="clip-menu lane-overflow-menu"
       data-testid={`lane-overflow-menu-${trackId}`}
       data-header-slot="overflow"
+      data-overflow-placement={placement ?? "below"}
+      data-overflow-constrained={constrained ? "true" : "false"}
       hidden={!open}
       role="menu"
-      style={{ left, top }}
+      style={{
+        left,
+        top,
+        maxHeight: maxHeight && maxHeight > 0 ? maxHeight : undefined,
+      }}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       {children}
     </div>
   );
+  if (typeof document === "undefined") return node;
+  return createPortal(node, document.body);
 }

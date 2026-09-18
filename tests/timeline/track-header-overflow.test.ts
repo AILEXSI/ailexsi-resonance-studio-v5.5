@@ -13,6 +13,8 @@ import {
   headerControlsExclusive,
   headerOverflowLabel,
   headerUsableMinPx,
+  OVERFLOW_MENU_MARGIN_PX,
+  placeOverflowMenu,
   planTrackHeaderOverflow,
   resolveHeaderWidth,
   stabilizeHeaderWidth,
@@ -226,6 +228,59 @@ describe("track header overflow policy", () => {
     );
     expect(headerOverflowLabel("groupCreate")).toBe("Group selected audio tracks");
     expect(headerOverflowLabel("scene", { sceneName: "Lattice" })).toBe("Scene · Lattice");
+  });
+
+  it("POP-01 opens below the trigger when the menu fits", () => {
+    const box = placeOverflowMenu({
+      trigger: { left: 12, right: 28, top: 80, bottom: 96 },
+      menu: { width: 176, height: 160 },
+      viewport: { width: 1280, height: 720 },
+    });
+    expect(box.placement).toBe("below");
+    expect(box.constrained).toBe(false);
+    expect(box.top).toBe(96 + 2);
+    expect(box.left).toBe(12);
+    expect(box.top + 160).toBeLessThanOrEqual(720 - OVERFLOW_MENU_MARGIN_PX);
+  });
+
+  it("POP-02 flips above when there is not enough room below", () => {
+    const trigger = { left: 12, right: 28, top: 640, bottom: 656 };
+    const box = placeOverflowMenu({
+      trigger,
+      menu: { width: 176, height: 180 },
+      viewport: { width: 1280, height: 720 },
+    });
+    expect(box.placement).toBe("above");
+    expect(box.constrained).toBe(false);
+    expect(box.top).toBe(640 - 2 - 180);
+    expect(box.top).toBeGreaterThanOrEqual(OVERFLOW_MENU_MARGIN_PX);
+    expect(box.top + 180).toBeLessThanOrEqual(trigger.top);
+  });
+
+  it("POP-03/04 constrains maxHeight and picks the taller side when neither side fits", () => {
+    const box = placeOverflowMenu({
+      trigger: { left: 12, right: 28, top: 200, bottom: 216 },
+      menu: { width: 176, height: 500 },
+      viewport: { width: 400, height: 360 },
+    });
+    expect(box.constrained).toBe(true);
+    expect(box.maxHeight).toBeLessThan(500);
+    expect(box.maxHeight).toBeGreaterThan(0);
+    expect(box.top).toBeGreaterThanOrEqual(OVERFLOW_MENU_MARGIN_PX);
+    expect(box.top + box.maxHeight).toBeLessThanOrEqual(360 - OVERFLOW_MENU_MARGIN_PX);
+  });
+
+  it("POP-05/06 shifts horizontally to stay in the viewport without leaving the trigger", () => {
+    const trigger = { left: 1180, right: 1196, top: 80, bottom: 96 };
+    const box = placeOverflowMenu({
+      trigger,
+      menu: { width: 176, height: 120 },
+      viewport: { width: 1280, height: 720 },
+    });
+    expect(box.left + 176).toBeLessThanOrEqual(1280 - OVERFLOW_MENU_MARGIN_PX);
+    expect(box.left).toBeGreaterThanOrEqual(OVERFLOW_MENU_MARGIN_PX);
+    expect(box.left).toBeLessThanOrEqual(trigger.left);
+    expect(trigger.right - box.left).toBeGreaterThan(0);
   });
 
 });

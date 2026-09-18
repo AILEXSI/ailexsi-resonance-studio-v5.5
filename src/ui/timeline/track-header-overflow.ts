@@ -5,6 +5,7 @@
  */
 
 import { LANE_LABEL_MAX_PX, LANE_LABEL_MIN_PX } from "../../core/layout-prefs";
+import { VIS_BROWSER_MARGIN, clampVisBrowserPos } from "../inspector/vis-browser-layout";
 
 export const HEADER_WIDTH_WIDE_PX = LANE_LABEL_MAX_PX;
 export const HEADER_WIDTH_MEDIUM_PX = 96;
@@ -253,4 +254,74 @@ export function controlIsDirect(plan: TrackHeaderOverflowPlan, id: HeaderControl
 
 export function controlIsOverflowed(plan: TrackHeaderOverflowPlan, id: HeaderControlId): boolean {
   return plan.overflow.includes(id);
+}
+
+/** Same viewport inset as the VIS overlay — do not invent a second margin. */
+export const OVERFLOW_MENU_MARGIN_PX = VIS_BROWSER_MARGIN;
+export const OVERFLOW_MENU_GAP_PX = 2;
+export const OVERFLOW_MENU_FALLBACK_WIDTH_PX = 176;
+export const OVERFLOW_MENU_FALLBACK_HEIGHT_PX = 220;
+export const OVERFLOW_MENU_MIN_HEIGHT_PX = 48;
+
+export type OverflowMenuPlacement = "below" | "above";
+
+export interface OverflowMenuBox {
+  left: number;
+  top: number;
+  maxHeight: number;
+  placement: OverflowMenuPlacement;
+  constrained: boolean;
+}
+
+/** Dropdown collision: below if it fits, else flip above, else taller side + scroll. */
+export function placeOverflowMenu(input: {
+  trigger: { left: number; right: number; top: number; bottom: number; width?: number };
+  menu: { width: number; height: number };
+  viewport: { width: number; height: number };
+  margin?: number;
+  gap?: number;
+}): OverflowMenuBox {
+  const margin = input.margin ?? OVERFLOW_MENU_MARGIN_PX;
+  const gap = input.gap ?? OVERFLOW_MENU_GAP_PX;
+  const menuWidth = Number.isFinite(input.menu.width) && input.menu.width > 0
+    ? input.menu.width
+    : OVERFLOW_MENU_FALLBACK_WIDTH_PX;
+  const menuHeight = Number.isFinite(input.menu.height) && input.menu.height > 0
+    ? input.menu.height
+    : OVERFLOW_MENU_FALLBACK_HEIGHT_PX;
+  const spaceBelow = input.viewport.height - margin - input.trigger.bottom;
+  const spaceAbove = input.trigger.top - margin;
+  const belowRoom = spaceBelow - gap;
+  const aboveRoom = spaceAbove - gap;
+  const belowFit = menuHeight <= belowRoom;
+  const aboveFit = menuHeight <= aboveRoom;
+  let placement: OverflowMenuPlacement;
+  let constrained = false;
+  let maxHeight = menuHeight;
+  if (belowFit) {
+    placement = "below";
+  } else if (aboveFit) {
+    placement = "above";
+  } else {
+    placement = belowRoom >= aboveRoom ? "below" : "above";
+    const room = Math.max(placement === "below" ? belowRoom : aboveRoom, OVERFLOW_MENU_MIN_HEIGHT_PX);
+    maxHeight = Math.min(menuHeight, room);
+    constrained = maxHeight < menuHeight;
+  }
+  const rawTop =
+    placement === "below" ? input.trigger.bottom + gap : input.trigger.top - gap - maxHeight;
+  const rawLeft = input.trigger.left;
+  const clamped = clampVisBrowserPos(
+    { left: rawLeft, top: rawTop },
+    { width: menuWidth, height: maxHeight },
+    input.viewport,
+    margin,
+  );
+  return {
+    left: clamped.left,
+    top: clamped.top,
+    maxHeight,
+    placement,
+    constrained,
+  };
 }
