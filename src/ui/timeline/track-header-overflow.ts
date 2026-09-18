@@ -9,9 +9,10 @@ export const HEADER_WIDTH_MEDIUM_PX = 96;
 export const HEADER_WIDTH_NARROW_PX = 84;
 export const HEADER_WIDTH_MIN_PX = 72;
 
-export const HEADER_PAD_PX = 4;
-export const HEADER_CONTROL_GAP_PX = 2;
-export const HEADER_OVERFLOW_BTN_PX = 12;
+/** Extra chrome inset so the direct row breathes before secondaries pile on. */
+export const HEADER_PAD_PX = 8;
+export const HEADER_CONTROL_GAP_PX = 4;
+export const HEADER_OVERFLOW_BTN_PX = 14;
 export const HEADER_HYSTERESIS_PX = 6;
 
 export type HeaderTrackKind = "vis" | "video" | "audio";
@@ -31,17 +32,20 @@ export type HeaderControlId =
 
 /** Min-width metadata so buttons are not crushed. Identity stays readable. */
 export const HEADER_CONTROL_MIN_PX: Record<HeaderControlId, number> = {
-  identity: 22,
-  mute: 16,
-  solo: 16,
-  write: 16,
-  volume: 20,
-  groupAssign: 32,
-  groupCreate: 18,
-  addAudio: 12,
-  removeAudio: 12,
-  scene: 36,
+  identity: 28,
+  mute: 20,
+  solo: 20,
+  write: 26,
+  volume: 28,
+  groupAssign: 40,
+  groupCreate: 22,
+  addAudio: 16,
+  removeAudio: 16,
+  scene: 48,
 };
+
+/** Identity + Mute stay on the header; secondaries overflow first. */
+const PINNED_DIRECT: readonly HeaderControlId[] = ["identity", "mute"];
 
 /** Highest → lowest keep priority. Identity is pinned visible. */
 export const HEADER_PRIORITY: Record<HeaderTrackKind, readonly HeaderControlId[]> = {
@@ -154,12 +158,20 @@ export function planTrackHeaderOverflow(input: {
     };
   }
 
-  const reserved = fitChrome(chrome, chromeBudget(widthPx, input.pack, true));
+  const pinned = chrome.filter((id) => PINNED_DIRECT.includes(id));
+  const rest = chrome.filter((id) => !PINNED_DIRECT.includes(id));
+  const reservedBudget = chromeBudget(widthPx, input.pack, true);
+  const pinnedWidth = rowMinWidthPx(pinned);
+  const restBudget =
+    pinned.length === 0
+      ? reservedBudget
+      : Math.max(0, reservedBudget - pinnedWidth - (rest.length > 0 ? HEADER_CONTROL_GAP_PX : 0));
+  const reserved = fitChrome(rest, restBudget);
   return {
     kind: input.kind,
     pack: input.pack,
     widthPx,
-    visible: ["identity", ...reserved.visible],
+    visible: ["identity", ...pinned, ...reserved.visible],
     overflow: reserved.overflow,
   };
 }

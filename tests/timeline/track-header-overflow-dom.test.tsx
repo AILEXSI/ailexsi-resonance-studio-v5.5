@@ -116,7 +116,7 @@ describe("track header overflow DOM", () => {
     return "direct";
   }
 
-  it("RH-13/14/15 default stacked audio keeps M/S/W/VOL direct and does not raise lane height", () => {
+  it("RH-13/14/15 default stacked audio keeps M/S direct; W/VOL overflow without raising lane height", () => {
     mount({
       laneLabelPx: HEADER_WIDTH_MEDIUM_PX,
       onToggleVolumeLane: () => undefined,
@@ -129,9 +129,9 @@ describe("track header overflow DOM", () => {
     expect(slotOf("identity", "lane-A1")).toBe("direct");
     expect(slotOf("mute", "lane-A1")).toBe("direct");
     expect(slotOf("solo", "lane-A1")).toBe("direct");
-    expect(slotOf("write", "lane-A1")).toBe("direct");
-    expect(slotOf("volume", "lane-A1")).toBe("direct");
-    expect(host!.querySelector("[data-testid=lane-overflow-A1]")).toBeNull();
+    expect(slotOf("write", "lane-A1")).toBe("overflow");
+    expect(slotOf("volume", "lane-A1")).toBe("overflow");
+    expect(host!.querySelector("[data-testid=lane-overflow-A1]")).toBeTruthy();
     expect(host!.querySelector("[data-testid=lane-overflow-V1]")).toBeNull();
     expect(host!.querySelector("[data-testid=lane-overflow-VIS]")).toBeNull();
     expect(host!.querySelector("[data-testid=lane-A1] .lane-ms")).toBeTruthy();
@@ -156,8 +156,8 @@ describe("track header overflow DOM", () => {
     expect(host!.querySelector("[data-testid=lane-overflow-A2]")).toBeTruthy();
     expect(host!.querySelector("[data-testid=lane-overflow-A1]")).toBeTruthy();
     expect(slotOf("mute", "lane-A2")).toBe("direct");
-    expect(slotOf("write", "lane-A2")).toBe("direct");
-    expect(slotOf("volume", "lane-A2")).toBe("direct");
+    expect(slotOf("write", "lane-A2")).toBe("overflow");
+    expect(slotOf("volume", "lane-A2")).toBe("overflow");
     expect(slotOf("groupAssign", "lane-A1")).toBe("overflow");
     expect(slotOf("groupCreate", "lane-A2")).toBe("overflow");
     expect(slotOf("addAudio", "lane-A2")).toBe("overflow");
@@ -261,10 +261,11 @@ describe("track header overflow DOM", () => {
         />,
       );
     });
-    expect(host!.querySelector("[data-testid=lane-overflow-A2]")).toBeNull();
+    expect(host!.querySelector("[data-testid=lane-overflow-A2]")).toBeTruthy();
+    expect(slotOf("write", "lane-A2")).toBe("direct");
     expect(slotOf("volume", "lane-A2")).toBe("direct");
-    expect(slotOf("groupAssign", "lane-A2")).toBe("direct");
-    expect(slotOf("addAudio", "lane-A2")).toBe("direct");
+    expect(slotOf("groupAssign", "lane-A2")).toBe("overflow");
+    expect(slotOf("addAudio", "lane-A2")).toBe("overflow");
   });
 
   it("RH-16/24 compact height packs inline and still overflows group instead of dropping it", () => {

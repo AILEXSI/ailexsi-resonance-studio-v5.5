@@ -89,14 +89,17 @@ describe("track header overflow policy", () => {
     const min = plan("audio", WIDTHS.MIN, AUDIO);
     const mid = plan("audio", WIDTHS.MEDIUM, AUDIO);
     const wide = plan("audio", WIDTHS.WIDE, AUDIO);
-    expect(wide.overflow).toEqual([]);
+    expect(wide.overflow.length).toBeLessThan(mid.overflow.length);
     expect(mid.overflow.length).toBeGreaterThan(0);
     expect(min.overflow.length).toBeGreaterThanOrEqual(mid.overflow.length);
+    expect(controlIsOverflowed(mid, "write")).toBe(true);
+    expect(controlIsOverflowed(mid, "volume")).toBe(true);
     expect(controlIsOverflowed(mid, "groupCreate")).toBe(true);
     expect(controlIsDirect(mid, "mute")).toBe(true);
     expect(controlIsDirect(mid, "solo")).toBe(true);
+    expect(controlIsDirect(wide, "write")).toBe(true);
     expect(controlIsDirect(wide, "volume")).toBe(true);
-    expect(controlIsDirect(wide, "groupAssign")).toBe(true);
+    expect(controlIsOverflowed(wide, "groupAssign")).toBe(true);
   });
 
   it("VIS keeps mute direct; scene is the overflow candidate", () => {
@@ -111,15 +114,24 @@ describe("track header overflow policy", () => {
     expect(headerControlsExclusive(VIS, inlineMin)).toBe(true);
   });
 
-  it("VIDEO has no invented secondaries and no overflow at legal widths", () => {
+  it("VIDEO has no invented secondaries; Mute stays direct at every legal width", () => {
     expect(HEADER_PRIORITY.video).toEqual(["identity", "mute", "solo"]);
     for (const width of Object.values(WIDTHS)) {
       for (const pack of ["stack", "inline"] as const) {
         const p = plan("video", width, VIDEO, pack);
-        expect(p.visible).toEqual(["identity", "mute", "solo"]);
-        expect(p.overflow).toEqual([]);
+        expect(p.visible).toContain("identity");
+        expect(p.visible).toContain("mute");
+        expect(p.overflow).not.toContain("mute");
+        expect(headerControlsExclusive(VIDEO, p)).toBe(true);
+        if (pack === "stack" || width !== WIDTHS.MIN) {
+          expect(p.visible).toEqual(["identity", "mute", "solo"]);
+          expect(p.overflow).toEqual([]);
+        }
       }
     }
+    const inlineMin = plan("video", WIDTHS.MIN, VIDEO, "inline");
+    expect(controlIsDirect(inlineMin, "mute")).toBe(true);
+    expect(controlIsOverflowed(inlineMin, "solo")).toBe(true);
   });
 
   it("AUDIO priority: write/VOL before group/chrome", () => {
@@ -134,14 +146,15 @@ describe("track header overflow policy", () => {
     const mid = plan("audio", WIDTHS.MEDIUM, AUDIO);
     expect(controlIsDirect(mid, "mute")).toBe(true);
     expect(controlIsDirect(mid, "solo")).toBe(true);
-    expect(controlIsDirect(mid, "write")).toBe(true);
-    expect(controlIsDirect(mid, "volume")).toBe(true);
-    expect(controlIsOverflowed(mid, "groupAssign") || controlIsOverflowed(mid, "groupCreate")).toBe(true);
+    expect(controlIsOverflowed(mid, "write")).toBe(true);
+    expect(controlIsOverflowed(mid, "volume")).toBe(true);
+    expect(controlIsOverflowed(mid, "groupAssign")).toBe(true);
 
     const narrow = plan("audio", WIDTHS.NARROW, AUDIO);
     expect(controlIsDirect(narrow, "mute")).toBe(true);
     expect(controlIsDirect(narrow, "solo")).toBe(true);
-    expect(controlIsOverflowed(narrow, "volume") || controlIsDirect(narrow, "write")).toBe(true);
+    expect(controlIsOverflowed(narrow, "write")).toBe(true);
+    expect(controlIsOverflowed(narrow, "volume")).toBe(true);
   });
 
   it("does not invent controls that are not present", () => {
@@ -164,10 +177,12 @@ describe("track header overflow policy", () => {
   });
 
   it("min-width metadata stays usable (no crush)", () => {
-    expect(HEADER_CONTROL_MIN_PX.mute).toBeGreaterThanOrEqual(14);
-    expect(HEADER_CONTROL_MIN_PX.solo).toBeGreaterThanOrEqual(14);
-    expect(HEADER_CONTROL_MIN_PX.volume).toBeGreaterThanOrEqual(18);
-    expect(HEADER_CONTROL_MIN_PX.identity).toBeGreaterThanOrEqual(18);
+    expect(HEADER_CONTROL_MIN_PX.mute).toBeGreaterThanOrEqual(18);
+    expect(HEADER_CONTROL_MIN_PX.solo).toBeGreaterThanOrEqual(18);
+    expect(HEADER_CONTROL_MIN_PX.volume).toBeGreaterThanOrEqual(24);
+    expect(HEADER_CONTROL_MIN_PX.write).toBeGreaterThanOrEqual(22);
+    expect(HEADER_CONTROL_MIN_PX.identity).toBeGreaterThanOrEqual(24);
+    expect(HEADER_CONTROL_MIN_PX.scene).toBeGreaterThanOrEqual(40);
   });
 
   it("does not change lane height packing or version", () => {
@@ -191,21 +206,20 @@ describe("width matrix VIS / VIDEO / AUDIO × WIDE / MEDIUM / NARROW / MIN", () 
     { kind: "vis", present: VIS, pack: "stack", width: "WIDE", direct: VIS, overflow: [] },
     { kind: "vis", present: VIS, pack: "stack", width: "MEDIUM", direct: VIS, overflow: [] },
     { kind: "vis", present: VIS, pack: "stack", width: "NARROW", direct: VIS, overflow: [] },
-    { kind: "vis", present: VIS, pack: "stack", width: "MIN", direct: VIS, overflow: [] },
+    { kind: "vis", present: VIS, pack: "stack", width: "MIN", direct: ["identity", "mute"], overflow: ["scene"] },
     { kind: "vis", present: VIS, pack: "inline", width: "WIDE", direct: VIS, overflow: [] },
-    { kind: "vis", present: VIS, pack: "inline", width: "MEDIUM", direct: VIS, overflow: [] },
-    { kind: "vis", present: VIS, pack: "inline", width: "NARROW", direct: VIS, overflow: [] },
+    { kind: "vis", present: VIS, pack: "inline", width: "MEDIUM", direct: ["identity", "mute"], overflow: ["scene"] },
+    { kind: "vis", present: VIS, pack: "inline", width: "NARROW", direct: ["identity", "mute"], overflow: ["scene"] },
     { kind: "vis", present: VIS, pack: "inline", width: "MIN", direct: ["identity", "mute"], overflow: ["scene"] },
     { kind: "video", present: VIDEO, pack: "stack", width: "WIDE", direct: VIDEO, overflow: [] },
     { kind: "video", present: VIDEO, pack: "stack", width: "MEDIUM", direct: VIDEO, overflow: [] },
     { kind: "video", present: VIDEO, pack: "stack", width: "NARROW", direct: VIDEO, overflow: [] },
     { kind: "video", present: VIDEO, pack: "stack", width: "MIN", direct: VIDEO, overflow: [] },
-    { kind: "audio", present: AUDIO, pack: "stack", width: "WIDE", direct: AUDIO, overflow: [] },
     {
       kind: "audio",
       present: AUDIO,
       pack: "stack",
-      width: "MEDIUM",
+      width: "WIDE",
       direct: ["identity", "mute", "solo", "write", "volume"],
       overflow: ["groupAssign", "groupCreate", "addAudio", "removeAudio"],
     },
@@ -213,17 +227,25 @@ describe("width matrix VIS / VIDEO / AUDIO × WIDE / MEDIUM / NARROW / MIN", () 
       kind: "audio",
       present: AUDIO,
       pack: "stack",
+      width: "MEDIUM",
+      direct: ["identity", "mute", "solo"],
+      overflow: ["write", "volume", "groupAssign", "groupCreate", "addAudio", "removeAudio"],
+    },
+    {
+      kind: "audio",
+      present: AUDIO,
+      pack: "stack",
       width: "NARROW",
-      direct: ["identity", "mute", "solo", "write"],
-      overflow: ["volume", "groupAssign", "groupCreate", "addAudio", "removeAudio"],
+      direct: ["identity", "mute", "solo"],
+      overflow: ["write", "volume", "groupAssign", "groupCreate", "addAudio", "removeAudio"],
     },
     {
       kind: "audio",
       present: AUDIO,
       pack: "stack",
       width: "MIN",
-      direct: ["identity", "mute", "solo", "write"],
-      overflow: ["volume", "groupAssign", "groupCreate", "addAudio", "removeAudio"],
+      direct: ["identity", "mute", "solo"],
+      overflow: ["write", "volume", "groupAssign", "groupCreate", "addAudio", "removeAudio"],
     },
   ];
 

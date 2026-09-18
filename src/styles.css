@@ -1077,7 +1077,8 @@ body.media-asset-dragging .project-overlay-drawer {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
+  padding: 3px 5px;
   min-height: 0;
   overflow: hidden;
   background: var(--panel-2);
@@ -1140,11 +1141,11 @@ body.media-asset-dragging .project-overlay-drawer {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
 }
 .lane-overflow-btn {
-  width: 14px;
-  min-width: 14px;
+  width: 16px;
+  min-width: 16px;
   height: 16px;
   padding: 0;
   line-height: 14px;
@@ -1328,8 +1329,8 @@ body.media-asset-dragging .project-overlay-drawer {
   grid-template-rows: auto auto;
   justify-items: center;
   align-items: center;
-  gap: 2px 3px;
-  padding: 2px 3px;
+  gap: 3px 5px;
+  padding: 3px 6px;
 }
 .lane.audio-lane:not(.lane-header-compact) .lane-label > span {
   grid-column: 1;
@@ -1357,18 +1358,22 @@ body.media-asset-dragging .project-overlay-drawer {
   flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 5px;
   max-width: 100%;
   min-width: 0;
 }
 .lane-ms .mute-btn,
 .lane-ms .solo-btn {
-  padding: 0 4px;
+  padding: 0 5px;
   font-size: 11px;
 }
+.lane-ms .write-arm-btn {
+  min-width: 22px;
+  padding: 0 5px;
+}
 .lane-ms .volume-lane-btn {
-  min-width: 20px;
-  padding: 0 2px;
+  min-width: 26px;
+  padding: 0 4px;
 }
 .lane-audio-count {
   display: flex;
@@ -1404,8 +1409,8 @@ body.media-asset-dragging .project-overlay-drawer {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding-inline: 4px;
+  gap: 7px;
+  padding-inline: 6px;
   min-width: 0;
   min-height: 0;
 }
@@ -1447,8 +1452,8 @@ body.media-asset-dragging .project-overlay-drawer {
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding-inline: 4px;
+    gap: 7px;
+    padding-inline: 6px;
     min-width: 0;
     min-height: 0;
   }
